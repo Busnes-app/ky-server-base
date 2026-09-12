@@ -21,6 +21,16 @@ ceremony) can reconstruct. Nothing on this server, and nothing on KyRecovery, ca
 The mechanics are `github.com/Busness-app/ky-primitives/recoveryclient`; this repository
 supplies what it seals and how it checks a drill.
 
+**Capsules are SQLite-only today.** The snapshot is `VACUUM INTO` against the local database
+file; on `KY_DB_DRIVER=postgres` there is no snapshot and every backup refuses with "no
+consistent database snapshot for this driver". A Postgres deployment must back its database up
+itself, with `pg_dump` on its own schedule and its own retention, and must protect that dump:
+it is the plaintext of everything a capsule would have sealed. Nothing travels in a capsule
+there, because no capsule is made. The recovery key pin, the pairing and the schedule live in
+the database and so ride in the `pg_dump`; `data/encryption.key` and `data/recovery.pub` do
+not, and you must copy them separately. Without `encryption.key` no TOTP secret and no
+KyRecovery token in that dump can be decrypted.
+
 The admin screen **Backup & recovery** shows four facts (recovery key, KyRecovery, local
 copies, schedule) and the actions: Back up now, Download capsule, Run restore drill, the
 schedule, pairing with Unpair, and pinning the key by hand.

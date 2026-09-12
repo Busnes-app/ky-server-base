@@ -28,6 +28,14 @@ Everything a fresh server needs to be the old one:
 The restored directory is the live directory in the clear. Treat it like the running server's
 `data/`.
 
+**This procedure is for SQLite deployments.** A capsule carries `data/ky_server.db` because the
+collector snapshots SQLite with `VACUUM INTO`; on `KY_DB_DRIVER=postgres` no snapshot is
+possible, so no capsule is made at all and there is nothing here to restore from. Back a
+Postgres deployment up with `pg_dump` on its own schedule, guard that dump as the plaintext of
+everything above, and copy `data/encryption.key` and `data/recovery.pub` separately — the
+recovery key pin, the pairing and the schedule are rows in the database and come back with the
+dump, but nothing in it can be decrypted without `encryption.key`.
+
 ## Before you start
 
 - **Pick the capsule.** In the KyRecovery dashboard, open Capsules, find the newest one for

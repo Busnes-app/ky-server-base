@@ -10,6 +10,7 @@ Owns user interface components, service worker caching, PWA installation manifes
 - Strict TypeScript type safety without unused imports.
 - Dynamic theme selection applies `data-theme` attribute to the root HTML document and persists to `localStorage`.
 - Authenticated state-changing requests use `secureFetch` so the `ky_csrf` cookie is mirrored into `X-CSRF-Token`.
+- `Backup.tsx` warns for as long as `database_driver` from `/api/backup/status` is not `sqlite`: only the SQLite path can snapshot a database into a capsule, so a Postgres deployment makes no capsules at all.
 
 ## Verification
 - `cd web && npm test && npm run build` (vitest with jsdom; `src/pages/Backup.test.tsx` renders the recovery screen against a stubbed status route). Commit `web/dist` after a build; CI diffs it.

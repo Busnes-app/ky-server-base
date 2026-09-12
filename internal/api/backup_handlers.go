@@ -467,7 +467,9 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"app_name":               s.config.Server.AppName,
 		"app_version":            appVersion,
 		"allow_private_recovery": s.config.Backup.AllowPrivateRecovery,
-		"members":                backup.Members(s.config),
+		// Only the SQLite path can snapshot a database into a capsule; the screen says so.
+		"database_driver": s.config.Database.Driver,
+		"members":         backup.Members(s.config),
 	}
 	if u, err := s.store.Settings().GetSetting(ctx, "kyrecovery_url"); err == nil {
 		out["recovery_url"] = u
