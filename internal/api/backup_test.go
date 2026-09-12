@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
 	"net/http"
 	"net/http/httptest"
@@ -299,6 +301,16 @@ func TestExportCapsuleOnlyPOST(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment;") {
 		t.Fatalf("POST export: got %d %v", w.Code, w.Header())
 	}
+	// A capsule that left the server is a copy of everything it holds: the trail names it.
+	m, err := capsule.ReadUnverifiedManifest(w.Body.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := auditRows(t, st, "admin.backup_export")
+	if len(rows) != 1 || rows[0].Resource != m.CapsuleID || rows[0].UserID != "usr_alice" ||
+		!strings.Contains(rows[0].Details, fmt.Sprintf("size_bytes=%q", fmt.Sprint(w.Body.Len()))) {
+		t.Errorf("export audit: %+v", rows)
+	}
 }
 
 func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
@@ -342,5 +354,95 @@ func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
 		if !found {
 			t.Errorf("missing check %s", name)
 		}
+	}
+}
+
+// A stored KyRecovery URL that now resolves private is not a server fault: the run must name
+// the switch that admits it, the way pairing does, rather than answer a bare 500.
+func TestRunRefusesAPrivateDestination(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	api.SetRecoveryClientForTest(srv, &fakeDepositor{err: fmt.Errorf(
+		"recovery host resolves only to private or reserved addresses: %w", recoveryclient.ErrPrivateDestination)})
+
+	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("private destination: got %d, want 412: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "KY_BACKUP_ALLOW_PRIVATE_RECOVERY") {
+		t.Errorf("body does not name the switch: %s", w.Body.String())
+	}
+}
+
+// brokenReceiptStore is the store with one write broken, the receipt row: the only way to
+// reach the state where KyRecovery holds a capsule this side cannot record.
+type brokenReceiptStore struct{ store.Store }
+
+func (b brokenReceiptStore) Settings() store.SettingsStore {
+	return brokenReceiptSettings{b.Store.Settings()}
+}
+
+type brokenReceiptSettings struct{ store.SettingsStore }
+
+func (b brokenReceiptSettings) SetSetting(ctx context.Context, key, val string) error {
+	if key == "kyrecovery_last_deposit" {
+		return errors.New("settings write failed")
+	}
+	return b.SettingsStore.SetSetting(ctx, key, val)
+}
+
+// The screen keys its "deposited, but unrecorded" warning off this exact reply: 200, the
+// result fields it reads, and receipt_unrecorded. A shape change here silently lies to the
+// admin about what KyRecovery is holding.
+func TestRunReportsAnUnrecordedReceipt(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	session := loginAs(t, srv, st, "alice", "admin")
+	api.SetRecoveryClientForTest(srv, &fakeDepositor{})
+	api.SetStoreForTest(srv, brokenReceiptStore{st})
+
+	w := adminPost(t, srv, session, "/api/backup/deposit")
+	if w.Code != http.StatusOK {
+		t.Fatalf("unrecorded receipt: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		recoveryclient.Result
+		ReceiptUnrecorded bool `json:"receipt_unrecorded"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.ReceiptUnrecorded {
+		t.Errorf("reply does not carry receipt_unrecorded: %s", w.Body.String())
+	}
+	if out.Manifest.CapsuleID == "" || out.Receipt == nil || out.Receipt.CapsuleID != out.Manifest.CapsuleID {
+		t.Errorf("reply lacks the fields the screen reads: %s", w.Body.String())
+	}
+	// The capsule is at KyRecovery, so the run is audited a success with the cause attached.
+	var audited bool
+	for _, rec := range auditRows(t, st, "admin.backup_run") {
+		if rec.Resource == out.Manifest.CapsuleID && strings.Contains(rec.Details, `outcome="success"`) &&
+			strings.Contains(rec.Details, "receipt_unrecorded=") {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Error("no successful admin.backup_run row naming the unrecorded receipt")
 	}
 }

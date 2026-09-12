@@ -25,6 +25,10 @@ const appVersion = "1.0.0"
 // on disk disagree, so refuse rather than seal a capsule nobody's custodians can open.
 const errRecoveryKeyMismatch = "Recovery key file does not match the pinned key ID; refusing to seal"
 
+// privateRecoveryHint names the opt-in, so a refused LAN destination is not a dead end. Both
+// the pairing and the run refusals end with it.
+const privateRecoveryHint = " (set KY_BACKUP_ALLOW_PRIVATE_RECOVERY=true for a KyRecovery on your own network)"
+
 // depositWriteBudget is how long the admin's connection may stay open for the receipt: the
 // upload budget plus room for sealing. The listener's WriteTimeout is sized for JSON replies.
 const depositWriteBudget = 16 * time.Minute
@@ -132,6 +136,7 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	actor := s.actorID(r)
 	settings := backup.Settings(ctx, s.store.Settings())
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	if errors.Is(err, recoveryclient.ErrNotPaired) {
@@ -170,6 +175,8 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.kycap"`, recoveryclient.FilenameSafe(m.CapsuleID)))
 	w.Header().Set("X-Recovery-Key-ID", m.RecoveryKeyID)
+	// A capsule leaving the server is a copy of everything it holds; the trail says who took one.
+	s.auditBackup(ctx, actor, r, "admin.backup_export", m.CapsuleID, AuditDetails(map[string]any{"size_bytes": len(raw)}))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
 }
@@ -199,8 +206,8 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 	// or audited as a pairing attempt.
 	if err := recoveryclient.ValidateURL(req.RecoveryURL, s.config.Backup.AllowPrivateRecovery); err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "private") {
-			msg += "; set KY_BACKUP_ALLOW_PRIVATE_RECOVERY to allow this"
+		if errors.Is(err, recoveryclient.ErrPrivateDestination) {
+			msg += privateRecoveryHint
 		}
 		s.writeError(w, http.StatusBadRequest, msg)
 		return
@@ -306,6 +313,10 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusConflict, "A backup is already in progress")
 		case errors.Is(err, recoveryclient.ErrKeyMismatch):
 			s.writeError(w, http.StatusConflict, errRecoveryKeyMismatch)
+		case errors.Is(err, recoveryclient.ErrPrivateDestination):
+			// The pairing was stored before the opt-in was turned off, or the host now resolves
+			// private. Nothing left; the operator needs the switch named, not a 500.
+			s.writeError(w, http.StatusPreconditionFailed, recoveryclient.AuditSafe(err.Error())+privateRecoveryHint)
 		case errors.Is(err, capsule.ErrCapsuleTooLarge):
 			s.writeError(w, http.StatusRequestEntityTooLarge, recoveryclient.TooLargeMessage)
 		case errors.Is(err, recoveryclient.ErrRemote):
