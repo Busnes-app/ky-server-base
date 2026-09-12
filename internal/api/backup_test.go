@@ -446,3 +446,65 @@ func TestRunReportsAnUnrecordedReceipt(t *testing.T) {
 		t.Error("no successful admin.backup_run row naming the unrecorded receipt")
 	}
 }
+
+// cancellingPairer drops the admin's connection while the pairing is being claimed, the way
+// a closed browser tab does.
+type cancellingPairer struct {
+	fakePairer
+	cancel context.CancelFunc
+}
+
+func (c *cancellingPairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	c.cancel()
+	return c.fakePairer.ClaimPairing(ctx, serverURL, pairingCode, serviceName, appName)
+}
+
+// Pairing is write-once and irreversible: once KyRecovery has handed back the suite key the
+// pin, the stored pairing and the audit row must all land even if the admin's connection is
+// gone, or the instance is left half-paired with nothing on record.
+func TestPairRemoteOutlivesTheRequest(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	api.SetRecoveryClientForTest(srv, &cancellingPairer{
+		fakePairer: fakePairer{result: recoveryclient.PairingResult{APIToken: "kyrec_live_t",
+			Key: recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}}},
+		cancel: cancel,
+	})
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	body, _ := json.Marshal(map[string]string{"recovery_url": "https://recovery.busnes.app", "pairing_code": "123456"})
+	req := httptest.NewRequest("POST", "/api/backup/pair-remote", bytes.NewReader(body)).WithContext(reqCtx)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+	req.Header.Set(auth.HeaderCSRF, "test-csrf")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("pair: got %d: %s", w.Code, w.Body.String())
+	}
+	settings := backupSettings(ctx, st)
+	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, settings)
+	if err != nil {
+		t.Fatalf("the key pin did not survive the dropped connection: %v", err)
+	}
+	if key.Public.ID() != priv.Public().ID() {
+		t.Errorf("pinned key: got %s, want %s", key.Public.ID(), priv.Public().ID())
+	}
+	if !recoveryclient.HasPairing(settings) {
+		t.Error("no pairing stored after the request went away")
+	}
+	var audited bool
+	for _, rec := range auditRows(t, st, "backup.paired") {
+		if rec.UserID == "usr_alice" && strings.Contains(rec.Details, "recovery_key_id="+priv.Public().ID()) {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Error("no admin-attributed backup.paired row after the request went away")
+	}
+}

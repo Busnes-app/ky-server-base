@@ -315,6 +315,16 @@ func TestPairRemoteStoresTheRecoveryKey(t *testing.T) {
 		t.Errorf("details do not name the key: %s", paired.Details)
 	}
 
+	// The sealed token must not reach the admin settings screen under any spelling: the
+	// filter drops every kyrecovery_token* row the lib may write.
+	settingsBody := adminDo(t, srv, cookie, "GET", "/api/settings", nil)
+	if settingsBody.Code != http.StatusOK {
+		t.Fatalf("settings: got %d: %s", settingsBody.Code, settingsBody.Body.String())
+	}
+	if strings.Contains(settingsBody.Body.String(), "tok_pair") || strings.Contains(settingsBody.Body.String(), "kyrecovery_token") {
+		t.Errorf("/api/settings carries the KyRecovery token: %s", settingsBody.Body.String())
+	}
+
 	// Pairing again to a different key must not silently re-point the product.
 	other, _ := recoverykey.Generate()
 	api.SetRecoveryClientForTest(srv, fakePairer{result: recoveryclient.PairingResult{

@@ -37,6 +37,10 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   library's private, disposable subdirectories. Drills use throwaway keys, not custodian shares.
 - `Members` names what `Collect` would seal now, for the status route and the screen; keep
   the two in step.
+- `GET /api/settings`'s `extra_settings` never carries `kyrecovery_token_enc` or a legacy
+  plaintext `kyrecovery_token`; the filter drops every key with the `kyrecovery_token`
+  prefix, so a rename in the lib cannot leak. An admin sees the paired `kyrecovery_url`,
+  never the credential.
 - Pairing, the write-once key pin, `Run` (one seal, every destination), the schedule, local
   copies and their pruning, drill mechanics, restore and the decrypt guard are the lib's;
   their contracts are in the `recoveryclient` README. `client_test.go` pins only what this
