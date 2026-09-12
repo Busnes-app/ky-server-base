@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: ky_server_base
     restart: unless-stopped
+    # Covers cmd/server's shutdownTimeout (5s HTTP drain) plus backupWaitTimeout (17m for a
+    # deposit already on the wire), so SIGKILL cannot land on a capsule mid-upload.
+    stop_grace_period: 20m
     ports:
       - "8080:8080"
     environment:

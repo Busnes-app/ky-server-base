@@ -39,7 +39,17 @@ type Server struct {
 	mux        *http.ServeMux
 	attemptsMu sync.Mutex
 	attempts   map[string]attemptWindow
+	// detached counts the handler goroutines still running on a context deliberately
+	// separated from their request. http.Server.Shutdown does not know about them, so
+	// runServer waits on this before the store closes.
+	detached sync.WaitGroup
 }
+
+// WaitDetached blocks until every handler that detached from its request has finished. It is
+// called after http.Server.Shutdown and before the store is closed: pairing, the key pin and a
+// deposit all keep writing after their connection is gone, and a closed store under them leaves
+// a key pinned on disk with no row recording it.
+func (s *Server) WaitDetached() { s.detached.Wait() }
 
 type attemptWindow struct {
 	count int

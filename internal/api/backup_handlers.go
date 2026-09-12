@@ -217,6 +217,8 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 	// if the admin's connection drops mid-claim. The actor is resolved while it is still live.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
+	s.detached.Add(1)
+	defer s.detached.Done()
 	target := recoveryclient.AuditSafe(req.RecoveryURL)
 
 	// The service name sent here is what kyrecovery pins for the token and what every
@@ -278,6 +280,8 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 	// the row exists.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
+	s.detached.Add(1)
+	defer s.detached.Done()
 
 	rc, err := backup.RunConfig(s.config, appVersion)
 	if err != nil {
@@ -400,6 +404,8 @@ func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
 	// Write-once like pairing, so the pin and its audit row outlive the request too.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
+	s.detached.Add(1)
+	defer s.detached.Done()
 	settings := backup.Settings(ctx, s.store.Settings())
 	if err := recoveryclient.StoreRecoveryKey(s.config.Database.DataDir, settings, key); err != nil {
 		if errors.Is(err, fs.ErrExist) {

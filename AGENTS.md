@@ -109,8 +109,13 @@ Run the same checks locally with `make ci` (`tidy-check lint test-race test-web 
 returns with `scheduler disabled: ...` if that fails, because a run that never stamps its
 attempt would log and audit the same failure every minute forever. It closes its `done` channel
 only where it returns, between runs, and `runServer` cancels and waits on that channel after
-`httpServer.Shutdown` and before the store closes, so an in-flight deposit is never killed
-mid-flight or left writing a receipt into a closed store. The wait is unbounded; SIGKILL is the
-backstop.
+`httpServer.Shutdown` and before the store closes, then waits on `api.Server.WaitDetached()` for
+the pair, pin-key and deposit handlers, which detach from their requests and so outlive
+`Shutdown`. Nothing writes into a closed store. Both waits share one `backupWaitTimeout`
+deadline (17m, the lib's 15m deposit ceiling plus sealing); the HTTP drain is `shutdownTimeout`
+(5s). `docker-compose.yml` grants a `stop_grace_period` above their sum, so the guarantee holds
+in the shipped deployment instead of assuming a supervisor grace period;
+`TestComposeGracePeriodCoversTheShutdownBudget` keeps the three in step. Past the deadline the
+work is abandoned with a log line rather than killed silently.
 
 The KyRecovery wire contract is `kyrecovery-server/zero_code_pairing_handoff_spec.md` (v2.0.0, sealed-capsule deposit); the product half is `ky-primitives/recoveryclient`, wired through `internal/backup` and `internal/api` so every server built on this base inherits it. Operator documents: `README.md` (disaster recovery, every `KY_BACKUP_*` variable, the LAN DNS override) and `docs/RESTORE.md` (the restore runbook, proven against a scratch 2-of-3 kit).

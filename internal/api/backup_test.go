@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoveryclient"
@@ -541,5 +542,65 @@ func TestPairRemoteOutlivesTheRequest(t *testing.T) {
 	}
 	if !audited {
 		t.Error("no admin-attributed backup.paired row after the request went away")
+	}
+}
+
+// blockingPairer holds the pairing open until it is released, standing in for a claim still on
+// the wire when SIGTERM arrives.
+type blockingPairer struct {
+	fakePairer
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingPairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	close(b.entered)
+	<-b.release
+	return b.fakePairer.ClaimPairing(ctx, serverURL, pairingCode, serviceName, appName)
+}
+
+// The detached handlers keep writing after their connection is gone, and http.Server.Shutdown
+// knows nothing about them. WaitDetached is what stands between them and the store closing, so
+// it must not return while one is still running.
+func TestWaitDetachedBlocksUntilAPairingFinishes(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	priv, _ := recoverykey.Generate()
+	pairer := &blockingPairer{
+		fakePairer: fakePairer{result: recoveryclient.PairingResult{APIToken: "kyrec_live_t",
+			Key: recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}}},
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	api.SetRecoveryClientForTest(srv, pairer)
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	go func() {
+		body, _ := json.Marshal(map[string]string{"recovery_url": "https://recovery.busnes.app", "pairing_code": "123456"})
+		req := httptest.NewRequest("POST", "/api/backup/pair-remote", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-pairer.entered // the handler has detached and is inside the claim
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned while a pairing was still in flight; the store would close under it")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(pairer.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the pairing finished")
+	}
+	// The wait is only worth anything if the work it waited for actually landed.
+	if _, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backupSettings(context.Background(), st)); err != nil {
+		t.Errorf("the pairing did not complete before WaitDetached returned: %v", err)
 	}
 }

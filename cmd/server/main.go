@@ -52,6 +52,17 @@ func main() {
 	runServer()
 }
 
+// shutdownTimeout drains in-flight HTTP requests. Short on purpose: it is spent before the
+// backup wait below, and both must fit inside the deployment's stop_grace_period.
+const shutdownTimeout = 5 * time.Second
+
+// backupWaitTimeout bounds the wait for detached backup work. recoveryclient caps one deposit
+// at 15 minutes (its uploadTimeout, for a container of at most capsule.MaxContainerBytes,
+// 384 MiB); the extra two minutes cover sealing and the local copy either side of the upload.
+// docker-compose.yml's stop_grace_period must exceed shutdownTimeout + backupWaitTimeout, and
+// TestComposeGracePeriodCoversTheShutdownBudget holds the two in step.
+const backupWaitTimeout = 17 * time.Minute
+
 func runServer() {
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -121,22 +132,41 @@ func runServer() {
 	<-stop
 	log.Println("[KY-BASE] Shutting down gracefully...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
-	// A scheduled run ignores cancellation once bytes are moving, so it is waited out here,
-	// before the deferred st.Close(): otherwise it writes its receipt into a closed store, or
-	// dies mid-deposit and leaves KyRecovery holding a capsule with no record on this side.
-	// The wait is unbounded on purpose; the supervisor's SIGKILL is the backstop.
+	// Backup work ignores cancellation once bytes are moving: the scheduler's run, and the
+	// pair, pin-key and deposit handlers, all detach from their caller. They are waited out
+	// here, before the deferred st.Close(), or they write into a closed store -- a key pinned
+	// on disk with no row recording it, or a capsule at KyRecovery with no receipt this side.
+	//
+	// The wait is bounded by backupWaitTimeout and the two budgets are sized to fit inside the
+	// compose stop_grace_period, so the guarantee holds in the shipped deployment rather than
+	// resting on an assumed supervisor grace period. Past the deadline the work is abandoned
+	// and said so; a SIGKILL would have been silent.
 	cancel()
+	deadline := time.After(backupWaitTimeout)
 	select {
 	case <-backupDone:
 	default:
 		log.Println("[KY-BASE] waiting for the scheduled backup in flight...")
-		<-backupDone
+		select {
+		case <-backupDone:
+		case <-deadline:
+			log.Printf("[KY-BASE] abandoning a scheduled deposit still running after %s; its receipt may be unrecorded", backupWaitTimeout)
+		}
+	}
+	// The detached admin handlers share the same deadline: the wait as a whole cannot outlast
+	// backupWaitTimeout, whichever half consumes it.
+	handlersDone := make(chan struct{})
+	go func() { defer close(handlersDone); srv.WaitDetached() }()
+	select {
+	case <-handlersDone:
+	case <-deadline:
+		log.Printf("[KY-BASE] abandoning a detached backup handler still running after %s; its writes may be unrecorded", backupWaitTimeout)
 	}
 	log.Println("[KY-BASE] Server stopped")
 }
