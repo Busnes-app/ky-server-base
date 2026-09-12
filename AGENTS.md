@@ -105,4 +105,12 @@ Run the same checks locally with `make ci`; add `make test-postgres` when a Post
 - [internal/api/AGENTS.md](file:///home/yoshi/git/ky_server_base/internal/api/AGENTS.md): HTTP REST API endpoints, routing, and middleware.
 - [web/AGENTS.md](file:///home/yoshi/git/ky_server_base/web/AGENTS.md): React 19 + TypeScript + Vite PWA frontend and KySecurity design system.
 
+`cmd/server` owns the scheduler: `backupLoop` builds the `RunConfig` and client once and
+returns with `scheduler disabled: ...` if that fails, because a run that never stamps its
+attempt would log and audit the same failure every minute forever. It closes its `done` channel
+only where it returns, between runs, and `runServer` cancels and waits on that channel after
+`httpServer.Shutdown` and before the store closes, so an in-flight deposit is never killed
+mid-flight or left writing a receipt into a closed store. The wait is unbounded; SIGKILL is the
+backstop.
+
 The KyRecovery wire contract is `kyrecovery-server/zero_code_pairing_handoff_spec.md` (v2.0.0, sealed-capsule deposit); the product half is `ky-primitives/recoveryclient`, wired through `internal/backup` and `internal/api` so every server built on this base inherits it. Operator documents: `README.md` (disaster recovery, every `KY_BACKUP_*` variable, the LAN DNS override) and `docs/RESTORE.md` (the restore runbook, proven against a scratch 2-of-3 kit).

@@ -96,7 +96,8 @@ func runServer() {
 	}
 
 	srv := api.NewServer(cfg, st)
-	go backupLoop(ctx, cfg, st)
+	backupDone := make(chan struct{})
+	go backupLoop(ctx, cfg, st, backupDone)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpServer := &http.Server{
@@ -126,10 +127,22 @@ func runServer() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
+	// A scheduled run ignores cancellation once bytes are moving, so it is waited out here,
+	// before the deferred st.Close(): otherwise it writes its receipt into a closed store, or
+	// dies mid-deposit and leaves KyRecovery holding a capsule with no record on this side.
+	// The wait is unbounded on purpose; the supervisor's SIGKILL is the backstop.
+	cancel()
+	select {
+	case <-backupDone:
+	default:
+		log.Println("[KY-BASE] waiting for the scheduled backup in flight...")
+		<-backupDone
+	}
 	log.Println("[KY-BASE] Server stopped")
 }
 
-// runBackup seals one capsule and delivers it to every configured destination.
+// runBackup seals one capsule and delivers it to every configured destination, for the CLI:
+// it builds its own RunConfig because a one-shot failure is reported to the operator and ends.
 func runBackup(ctx context.Context, cfg *config.Config, st store.Store) (recoveryclient.Result, error) {
 	rc, err := backup.RunConfig(cfg, appVersion)
 	if err != nil {
@@ -142,9 +155,19 @@ func runBackup(ctx context.Context, cfg *config.Config, st store.Store) (recover
 
 // backupLoop polls the admin's schedule once a minute; a change in the UI needs no restart
 // and a restart never loses its place, the last attempt is in the database. The wait honours
-// shutdown; the run does not, so SIGTERM cannot land between KyRecovery storing a capsule
-// and the receipt being written.
-func backupLoop(ctx context.Context, cfg *config.Config, st store.Store) {
+// shutdown; the run does not, and done is closed only once the loop is between runs, so
+// SIGTERM cannot land between KyRecovery storing a capsule and the receipt being written.
+func backupLoop(ctx context.Context, cfg *config.Config, st store.Store, done chan<- struct{}) {
+	defer close(done)
+	// Built once: a deployment key that cannot seal is a configuration fault, not a run that
+	// might succeed next minute. Run never gets far enough to stamp the attempt, so retrying
+	// would log and audit a failure every tick forever.
+	rc, err := backup.RunConfig(cfg, appVersion)
+	if err != nil {
+		log.Printf("[BACKUP] scheduler disabled: %v", err)
+		return
+	}
+	client := recoveryclient.NewClient(recoveryclient.Options{AllowPrivate: cfg.Backup.AllowPrivateRecovery})
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -162,9 +185,10 @@ func backupLoop(ctx context.Context, cfg *config.Config, st store.Store) {
 			continue
 		}
 		runCtx := context.WithoutCancel(ctx)
-		res, err := runBackup(runCtx, cfg, st)
+		res, err := recoveryclient.Run(runCtx, rc, backup.Settings(runCtx, st.Settings()),
+			func() (recoveryclient.Payload, error) { return backup.Collect(runCtx, cfg, appVersion) }, client)
 		if errors.Is(err, recoveryclient.ErrNotPaired) || errors.Is(err, recoveryclient.ErrNoDestination) {
-			continue
+			continue // never configured; nothing to report
 		}
 		recordRun(runCtx, st, "system", res, err)
 	}
