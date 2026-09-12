@@ -84,12 +84,12 @@ When the user requests a durable behavior change, record it here or in the relev
 CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
 - `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 17
-- Frontend typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
+- Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
 - `govulncheck` and `npm audit --audit-level=high`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
 
-Run the same checks locally with `make ci`; add `make test-postgres` when a Postgres instance is available.
+Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
 
 ## Child DOX Index
 

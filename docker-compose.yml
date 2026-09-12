@@ -17,7 +17,7 @@ services:
       # Disaster recovery. Sealed capsules land in KY_BACKUP_DIR (empty = no local copies);
       # the schedule below is only the default the admin screen overrides. KY_DNS lives in
       # docker-compose.lan-dns.yml, never here.
-      - KY_BACKUP_DIR=${KY_BACKUP_DIR:-/app/backups}
+      - KY_BACKUP_DIR=${KY_BACKUP_DIR-/app/backups}
       - KY_BACKUP_KEEP=${KY_BACKUP_KEEP:-7}
       - KY_BACKUP_DEPOSIT_INTERVAL=${KY_BACKUP_DEPOSIT_INTERVAL:-24h}
       - KY_BACKUP_ALLOW_PRIVATE_RECOVERY=${KY_BACKUP_ALLOW_PRIVATE_RECOVERY:-false}
