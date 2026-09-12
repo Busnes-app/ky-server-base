@@ -370,8 +370,11 @@ func TestRunRefusesAPrivateDestination(t *testing.T) {
 	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
 		t.Fatal(err)
 	}
-	api.SetRecoveryClientForTest(srv, &fakeDepositor{err: fmt.Errorf(
-		"recovery host resolves only to private or reserved addresses: %w", recoveryclient.ErrPrivateDestination)})
+	// The lib wraps both sentinels on the dial path, so this pins the case order too: were the
+	// 502 ErrRemote arm to come first, a private destination would report a remote refusal.
+	api.SetRecoveryClientForTest(srv, &fakeDepositor{err: fmt.Errorf("%w: deposit request failed: %w",
+		recoveryclient.ErrRemote,
+		fmt.Errorf("recovery host resolves only to private or reserved addresses: %w", recoveryclient.ErrPrivateDestination))})
 
 	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
 	if w.Code != http.StatusPreconditionFailed {
@@ -379,6 +382,38 @@ func TestRunRefusesAPrivateDestination(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "KY_BACKUP_ALLOW_PRIVATE_RECOVERY") {
 		t.Errorf("body does not name the switch: %s", w.Body.String())
+	}
+}
+
+// Only SQLite can be snapshotted into a capsule, so on Postgres "Back up now" can never
+// succeed. It must say why -- the driver, in the body -- not answer a bare 500, which is what
+// the README and the screen's standing warning promise.
+func TestRunRefusesWithoutADatabaseSnapshot(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDepositor{}
+	api.SetRecoveryClientForTest(srv, fake)
+	// The store stays SQLite so the fixture works; the collector reads the driver from the
+	// config, which is what decides whether a snapshot is possible.
+	cfg.Database.Driver = "postgres"
+
+	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("no database snapshot: got %d, want 412: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "snapshot") || !strings.Contains(w.Body.String(), "postgres") {
+		t.Errorf("body does not name the snapshot refusal and the driver: %s", w.Body.String())
+	}
+	if fake.got != nil {
+		t.Error("an instance that cannot snapshot its database sent bytes to the store")
 	}
 }
 

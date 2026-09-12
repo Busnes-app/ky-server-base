@@ -309,6 +309,10 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusPreconditionFailed, "Paired, but recovery.pub is missing or does not match the pin")
 		case errors.Is(err, recoveryclient.ErrNotPaired):
 			s.writeError(w, http.StatusPreconditionFailed, "No recovery key")
+		case errors.Is(err, backup.ErrNoDatabaseSnapshot):
+			// Only SQLite can be snapshotted, so on any other driver no capsule can be made at
+			// all. A configuration fact the operator must read, not a server fault.
+			s.writeError(w, http.StatusPreconditionFailed, err.Error())
 		case errors.Is(err, recoveryclient.ErrNoDestination):
 			s.writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KY_BACKUP_DIR")
 		case errors.Is(err, recoveryclient.ErrInProgress):
@@ -318,7 +322,7 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, recoveryclient.ErrPrivateDestination):
 			// The pairing was stored before the opt-in was turned off, or the host now resolves
 			// private. Nothing left; the operator needs the switch named, not a 500.
-			s.writeError(w, http.StatusPreconditionFailed, recoveryclient.AuditSafe(err.Error())+privateRecoveryHint)
+			s.writeError(w, http.StatusPreconditionFailed, "The recovery host resolves to a private address"+privateRecoveryHint)
 		case errors.Is(err, capsule.ErrCapsuleTooLarge):
 			s.writeError(w, http.StatusRequestEntityTooLarge, recoveryclient.TooLargeMessage)
 		case errors.Is(err, recoveryclient.ErrRemote):
