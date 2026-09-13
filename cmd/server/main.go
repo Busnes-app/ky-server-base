@@ -138,37 +138,41 @@ func runServer() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
-	// Backup work ignores cancellation once bytes are moving: the scheduler's run, and the
-	// pair, pin-key and deposit handlers, all detach from their caller. They are waited out
-	// here, before the deferred st.Close(), or they write into a closed store -- a key pinned
-	// on disk with no row recording it, or a capsule at KyRecovery with no receipt this side.
-	//
-	// The wait is bounded by backupWaitTimeout and the two budgets are sized to fit inside the
-	// compose stop_grace_period, so the guarantee holds in the shipped deployment rather than
-	// resting on an assumed supervisor grace period. Past the deadline the work is abandoned
-	// and said so; a SIGKILL would have been silent.
 	cancel()
-	deadline := time.After(backupWaitTimeout)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), backupWaitTimeout)
+	defer waitCancel()
+	waitForBackupWork(waitCtx, backupDone, srv.WaitDetached)
+	log.Println("[KY-BASE] Server stopped")
+}
+
+// waitForBackupWork blocks until the scheduler loop and every detached handler have finished,
+// or until ctx expires. Backup work ignores cancellation once bytes are moving: the scheduler's
+// run, and the pair, pin-key and deposit handlers, all detach from their caller. They are waited
+// out before the store closes, or they write into a closed store -- a key pinned on disk with no
+// row recording it, or a capsule at KyRecovery with no receipt this side.
+//
+// Both phases share one context, not one timer channel: a timer channel delivers its value once,
+// so a first phase that consumed it would leave the second waiting forever -- unbounded in
+// exactly the stuck-deposit case this is written for. Past the deadline the work is abandoned and
+// said so; a SIGKILL would have been silent.
+func waitForBackupWork(ctx context.Context, backupDone <-chan struct{}, waitDetached func()) {
 	select {
 	case <-backupDone:
 	default:
 		log.Println("[KY-BASE] waiting for the scheduled backup in flight...")
 		select {
 		case <-backupDone:
-		case <-deadline:
+		case <-ctx.Done():
 			log.Printf("[KY-BASE] abandoning a scheduled deposit still running after %s; its receipt may be unrecorded", backupWaitTimeout)
 		}
 	}
-	// The detached admin handlers share the same deadline: the wait as a whole cannot outlast
-	// backupWaitTimeout, whichever half consumes it.
 	handlersDone := make(chan struct{})
-	go func() { defer close(handlersDone); srv.WaitDetached() }()
+	go func() { defer close(handlersDone); waitDetached() }()
 	select {
 	case <-handlersDone:
-	case <-deadline:
+	case <-ctx.Done():
 		log.Printf("[KY-BASE] abandoning a detached backup handler still running after %s; its writes may be unrecorded", backupWaitTimeout)
 	}
-	log.Println("[KY-BASE] Server stopped")
 }
 
 // runBackup seals one capsule and delivers it to every configured destination, for the CLI:

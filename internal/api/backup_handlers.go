@@ -189,6 +189,11 @@ type RemotePairRequest struct {
 // handlePairRemoteRecovery claims a 6-digit PIN with KyRecovery, pins the suite recovery
 // public key it hands back, and stores the URL and the sealed bearer token.
 func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -217,8 +222,6 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 	// if the admin's connection drops mid-claim. The actor is resolved while it is still live.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
-	s.detached.Add(1)
-	defer s.detached.Done()
 	target := recoveryclient.AuditSafe(req.RecoveryURL)
 
 	// The service name sent here is what kyrecovery pins for the token and what every
@@ -270,6 +273,11 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 // The run uses a context that outlives the request: once bytes are on their way, a closed
 // tab must not leave KyRecovery holding a capsule this instance has no receipt for.
 func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -280,8 +288,6 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 	// the row exists.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
-	s.detached.Add(1)
-	defer s.detached.Done()
 
 	rc, err := backup.RunConfig(s.config, appVersion)
 	if err != nil {
@@ -387,6 +393,11 @@ type PinKeyRequest struct {
 // KyRecovery to pair with. The key is the one the ceremony page shows; the topology is the
 // k-of-n it was split with. Write-once, like pairing.
 func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -404,8 +415,6 @@ func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
 	// Write-once like pairing, so the pin and its audit row outlive the request too.
 	actor := s.actorID(r)
 	ctx := context.WithoutCancel(r.Context())
-	s.detached.Add(1)
-	defer s.detached.Done()
 	settings := backup.Settings(ctx, s.store.Settings())
 	if err := recoveryclient.StoreRecoveryKey(s.config.Database.DataDir, settings, key); err != nil {
 		if errors.Is(err, fs.ErrExist) {

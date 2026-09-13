@@ -69,3 +69,22 @@ func TestComposeGracePeriodCoversTheShutdownBudget(t *testing.T) {
 		t.Errorf("stop_grace_period %s does not cover shutdownTimeout+backupWaitTimeout (%s)", grace, budget)
 	}
 }
+
+// Both wait phases share one context, not one timer channel: a timer channel delivers its value
+// once, so a scheduler wait that consumed it would leave the handler wait unbounded -- the stuck
+// deposit this whole path exists to bound. Neither channel here ever closes, so the only way out
+// is the deadline, twice.
+func TestWaitForBackupWorkIsBoundedInBothPhases(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		waitForBackupWork(ctx, make(chan struct{}), func() { select {} })
+	}()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForBackupWork did not return; the second phase outlived the shared deadline")
+	}
+}

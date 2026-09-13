@@ -111,8 +111,9 @@ attempt would log and audit the same failure every minute forever. It closes its
 only where it returns, between runs, and `runServer` cancels and waits on that channel after
 `httpServer.Shutdown` and before the store closes, then waits on `api.Server.WaitDetached()` for
 the pair, pin-key and deposit handlers, which detach from their requests and so outlive
-`Shutdown`. Nothing writes into a closed store. Both waits share one `backupWaitTimeout`
-deadline (17m, the lib's 15m deposit ceiling plus sealing); the HTTP drain is `shutdownTimeout`
+`Shutdown`. Nothing writes into a closed store. Both waits run under one `backupWaitTimeout`
+context (17m, the lib's 15m deposit ceiling plus sealing) -- a context, not a timer channel,
+which delivers once and would leave the second wait unbounded; the HTTP drain is `shutdownTimeout`
 (5s). `docker-compose.yml` grants a `stop_grace_period` above their sum, so the guarantee holds
 in the shipped deployment instead of assuming a supervisor grace period;
 `TestComposeGracePeriodCoversTheShutdownBudget` keeps the three in step. Past the deadline the

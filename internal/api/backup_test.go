@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -602,5 +604,52 @@ func TestWaitDetachedBlocksUntilAPairingFinishes(t *testing.T) {
 	// The wait is only worth anything if the work it waited for actually landed.
 	if _, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backupSettings(context.Background(), st)); err != nil {
 		t.Errorf("the pairing did not complete before WaitDetached returned: %v", err)
+	}
+}
+
+// blockingBody is a request body that stalls mid-read, the way a slow client does.
+type blockingBody struct {
+	reading chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.reading) })
+	<-b.release
+	return 0, io.EOF
+}
+
+// Shutdown returns after its own timeout with slow requests still active, so a handler that
+// registers only after decoding its body is invisible to WaitDetached: the counter reads zero,
+// the wait returns and the store closes under a request that is about to pair. Registration has
+// to happen before the first byte is read.
+func TestDetachedHandlerRegistersBeforeReadingItsBody(t *testing.T) {
+	srv, st, _ := setupSQLiteServer(t)
+	session := loginAs(t, srv, st, "alice", "admin")
+	body := &blockingBody{reading: make(chan struct{}), release: make(chan struct{})}
+
+	go func() {
+		req := httptest.NewRequest("POST", "/api/backup/pair-remote", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-body.reading // inside the handler, stalled on the body
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned while a handler was still reading its request; it registered too late")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(body.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the handler finished")
 	}
 }
