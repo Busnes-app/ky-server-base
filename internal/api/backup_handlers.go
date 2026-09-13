@@ -188,12 +188,9 @@ type RemotePairRequest struct {
 
 // handlePairRemoteRecovery claims a 6-digit PIN with KyRecovery, pins the suite recovery
 // public key it hands back, and stores the URL and the sealed bearer token.
+// The route wraps it in `tracked`, so it is counted as detached from the moment ServeHTTP
+// dispatches, before requireAdmin authenticates.
 func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request) {
-	// Registered before a byte of the request is read: Shutdown returns after its timeout with
-	// slow requests still active, and one that had not yet registered would leave WaitDetached
-	// looking at a zero counter and the store closing under it.
-	s.detached.Add(1)
-	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -272,12 +269,9 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 //
 // The run uses a context that outlives the request: once bytes are on their way, a closed
 // tab must not leave KyRecovery holding a capsule this instance has no receipt for.
+// The route wraps it in `tracked`, so it is counted as detached from the moment ServeHTTP
+// dispatches, before requireAdmin authenticates.
 func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
-	// Registered before a byte of the request is read: Shutdown returns after its timeout with
-	// slow requests still active, and one that had not yet registered would leave WaitDetached
-	// looking at a zero counter and the store closing under it.
-	s.detached.Add(1)
-	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -392,12 +386,9 @@ type PinKeyRequest struct {
 // handlePinKey pins the suite recovery public key by hand, for an instance with no
 // KyRecovery to pair with. The key is the one the ceremony page shows; the topology is the
 // k-of-n it was split with. Write-once, like pairing.
+// The route wraps it in `tracked`, so it is counted as detached from the moment ServeHTTP
+// dispatches, before requireAdmin authenticates.
 func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
-	// Registered before a byte of the request is read: Shutdown returns after its timeout with
-	// slow requests still active, and one that had not yet registered would leave WaitDetached
-	// looking at a zero counter and the store closing under it.
-	s.detached.Add(1)
-	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return

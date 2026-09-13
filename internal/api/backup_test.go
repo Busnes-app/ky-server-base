@@ -653,3 +653,148 @@ func TestDetachedHandlerRegistersBeforeReadingItsBody(t *testing.T) {
 		t.Fatal("WaitDetached did not return after the handler finished")
 	}
 }
+
+// blockingSessions stalls the session lookup that requireAdmin does before the handler runs.
+type blockingSessions struct {
+	store.SessionStore
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingSessions) GetSession(ctx context.Context, tokenHash string) (*store.Session, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return b.SessionStore.GetSession(ctx, tokenHash)
+}
+
+// blockingSessionStore is the store with only its session lookup stalled.
+type blockingSessionStore struct {
+	store.Store
+	sessions store.SessionStore
+}
+
+func (b *blockingSessionStore) Sessions() store.SessionStore { return b.sessions }
+
+// The routes are s.tracked(s.requireAdmin(s.handleX)), and requireAdmin authenticates against
+// the store before the handler is ever called. ReadTimeout (15s) outlasts shutdownTimeout (5s),
+// so a SIGTERM landing during that lookup finds a counter registration must already cover:
+// otherwise WaitDetached sees zero, returns, and the store closes under a request that is about
+// to enter handlePinKey and pin a key. Registration inside the handler is too late.
+func TestDetachedRegistrationCoversTheAuthLookup(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	blocked := &blockingSessions{SessionStore: st.Sessions(), entered: make(chan struct{}), release: make(chan struct{})}
+	stalled := api.NewServer(cfg, &blockingSessionStore{Store: st, sessions: blocked})
+
+	go func() {
+		body, _ := json.Marshal(map[string]string{"public_key": "", "threshold": ""})
+		req := httptest.NewRequest("POST", "/api/backup/pin-key", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		stalled.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-blocked.entered // inside requireAdmin's store round-trip, before the handler
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); stalled.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned during the auth lookup; the store would close under a request about to pin a key")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(blocked.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the request finished")
+	}
+}
+
+// A sync.WaitGroup panics with "sync: WaitGroup misuse" when Add from zero races an in-progress
+// Wait, and Shutdown returning on its timeout is no barrier: two admin requests arriving at
+// SIGTERM can do exactly this. The counter has to tolerate registration concurrent with the wait.
+func TestDetachedRegistrationRacesWait(t *testing.T) {
+	srv := &api.Server{} // the zero value has to work: this exercises the counter, nothing else
+	release := api.RegisterDetachedForTest(srv)
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); release() }()                          // counter falls to zero
+	go func() { defer wg.Done(); api.RegisterDetachedForTest(srv)() }() // ...as another registers
+	wg.Wait()
+
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return once every registration had finished")
+	}
+}
+
+// blockingDepositor stalls inside the upload, where a deposit spends nearly all of its life.
+type blockingDepositor struct {
+	fakeDepositor
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingDepositor) Deposit(ctx context.Context, url, token string, container []byte) (recoveryclient.Receipt, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return b.fakeDepositor.Deposit(ctx, url, token, container)
+}
+
+// A deposit is the longest-running detached write in the system, and the only thing that keeps
+// it visible to WaitDetached is the s.tracked( wrapper on its route: the handler no longer
+// registers itself. Without this test that one route line can be deleted and the suite stays
+// green, while a SIGTERM mid-upload closes the store under the run and leaves KyRecovery holding
+// a capsule this instance has no receipt for.
+func TestDetachedTrackingCoversADepositInFlight(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	depositor := &blockingDepositor{entered: make(chan struct{}), release: make(chan struct{})}
+	api.SetRecoveryClientForTest(srv, depositor)
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	go func() {
+		req := httptest.NewRequest("POST", "/api/backup/deposit", nil)
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-depositor.entered // the capsule is on its way to KyRecovery
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned with a deposit still uploading; the store would close before the receipt was written")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(depositor.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the deposit finished")
+	}
+	if _, ok, _ := recoveryclient.LastDeposit(backupSettings(ctx, st)); !ok {
+		t.Error("the wait returned but no receipt was recorded: it did not cover the write it exists for")
+	}
+}

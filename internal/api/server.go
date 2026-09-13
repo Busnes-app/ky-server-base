@@ -39,17 +39,74 @@ type Server struct {
 	mux        *http.ServeMux
 	attemptsMu sync.Mutex
 	attempts   map[string]attemptWindow
-	// detached counts the handler goroutines still running on a context deliberately
-	// separated from their request. http.Server.Shutdown does not know about them, so
-	// runServer waits on this before the store closes.
-	detached sync.WaitGroup
+	// detached counts the requests running on a context deliberately separated from their
+	// connection. http.Server.Shutdown does not know about them, so runServer waits on this
+	// before the store closes.
+	detached detachedCounter
 }
 
-// WaitDetached blocks until every handler that detached from its request has finished. It is
+// detachedCounter is a WaitGroup that tolerates a registration arriving while the wait is
+// already running. sync.WaitGroup panics on an Add from zero concurrent with Wait, and there is
+// no barrier that rules that out here: Shutdown returns when its own timeout expires, with
+// requests still in flight, so a second admin request can register just as the first finishes
+// and drops the count to zero. A counter under a condition variable has no such rule.
+type detachedCounter struct {
+	once sync.Once
+	mu   sync.Mutex
+	cond *sync.Cond
+	n    int
+}
+
+// signal builds the condition variable on first use, so the zero value of Server works.
+func (d *detachedCounter) signal() *sync.Cond {
+	d.once.Do(func() { d.cond = sync.NewCond(&d.mu) })
+	return d.cond
+}
+
+func (d *detachedCounter) add() {
+	c := d.signal()
+	c.L.Lock()
+	d.n++
+	c.L.Unlock()
+}
+
+func (d *detachedCounter) done() {
+	c := d.signal()
+	c.L.Lock()
+	d.n--
+	c.L.Unlock()
+	c.Broadcast()
+}
+
+// tracked counts a request as detached for as long as h runs. It wraps the auth middleware
+// rather than the handler: requireAdmin authenticates against the store before the handler is
+// reached, ReadTimeout (15s) outlasts cmd/server's shutdownTimeout (5s), and a SIGTERM landing
+// during that lookup would otherwise leave the counter at zero, WaitDetached returning and the
+// store closing under a request about to pin a key.
+//
+// The window before ServeHTTP is entered -- while net/http is still reading the request line
+// and headers -- cannot be covered by any counter: there is no handler goroutine to register
+// yet. Shutdown's own drain is all that covers it, which is why shutdownTimeout is spent first.
+func (s *Server) tracked(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.detached.add()
+		defer s.detached.done()
+		h(w, r)
+	}
+}
+
+// WaitDetached blocks until every request that detached from its connection has finished. It is
 // called after http.Server.Shutdown and before the store is closed: pairing, the key pin and a
 // deposit all keep writing after their connection is gone, and a closed store under them leaves
 // a key pinned on disk with no row recording it.
-func (s *Server) WaitDetached() { s.detached.Wait() }
+func (s *Server) WaitDetached() {
+	c := s.detached.signal()
+	c.L.Lock()
+	defer c.L.Unlock()
+	for s.detached.n > 0 {
+		c.Wait()
+	}
+}
 
 type attemptWindow struct {
 	count int
@@ -169,10 +226,10 @@ func (s *Server) routes() {
 	// CSRF check covers a download that carries the whole instance.
 	s.mux.HandleFunc("POST /api/backup/drill", s.requireAdmin(s.handleBackupDrill))
 	s.mux.HandleFunc("POST /api/backup/export-capsule", s.requireAdmin(s.handleExportCapsule))
-	s.mux.HandleFunc("POST /api/backup/pair-remote", s.requireAdmin(s.handlePairRemoteRecovery))
-	s.mux.HandleFunc("POST /api/backup/deposit", s.requireAdmin(s.handleRunBackup))
+	s.mux.HandleFunc("POST /api/backup/pair-remote", s.tracked(s.requireAdmin(s.handlePairRemoteRecovery)))
+	s.mux.HandleFunc("POST /api/backup/deposit", s.tracked(s.requireAdmin(s.handleRunBackup)))
 	s.mux.HandleFunc("DELETE /api/backup/pairing", s.requireAdmin(s.handleUnpair))
-	s.mux.HandleFunc("POST /api/backup/pin-key", s.requireAdmin(s.handlePinKey))
+	s.mux.HandleFunc("POST /api/backup/pin-key", s.tracked(s.requireAdmin(s.handlePinKey)))
 	s.mux.HandleFunc("PUT /api/backup/schedule", s.requireAdmin(s.handleSetSchedule))
 	s.mux.HandleFunc("GET /api/backup/status", s.requireAdmin(s.handleBackupStatus))
 

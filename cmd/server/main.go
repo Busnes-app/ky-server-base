@@ -151,11 +151,17 @@ func runServer() {
 // out before the store closes, or they write into a closed store -- a key pinned on disk with no
 // row recording it, or a capsule at KyRecovery with no receipt this side.
 //
-// Both phases share one context, not one timer channel: a timer channel delivers its value once,
-// so a first phase that consumed it would leave the second waiting forever -- unbounded in
-// exactly the stuck-deposit case this is written for. Past the deadline the work is abandoned and
-// said so; a SIGKILL would have been silent.
+// Both waits start before either blocks, and both are bounded by the one context rather than a
+// timer channel: a timer channel delivers its value once, so whichever wait consumed it would
+// leave the other unbounded -- exactly the stuck-deposit case this is written for. Starting them
+// together matters as much: waited one after the other, a hung scheduled deposit spends the whole
+// budget on its own and the handler wait is read only once the deadline has already passed,
+// giving a live detached handler no time at all. Past the deadline the work is abandoned and said
+// so; a SIGKILL would have been silent.
 func waitForBackupWork(ctx context.Context, backupDone <-chan struct{}, waitDetached func()) {
+	handlersDone := make(chan struct{})
+	go func() { defer close(handlersDone); waitDetached() }()
+
 	select {
 	case <-backupDone:
 	default:
@@ -166,8 +172,6 @@ func waitForBackupWork(ctx context.Context, backupDone <-chan struct{}, waitDeta
 			log.Printf("[KY-BASE] abandoning a scheduled deposit still running after %s; its receipt may be unrecorded", backupWaitTimeout)
 		}
 	}
-	handlersDone := make(chan struct{})
-	go func() { defer close(handlersDone); waitDetached() }()
 	select {
 	case <-handlersDone:
 	case <-ctx.Done():
