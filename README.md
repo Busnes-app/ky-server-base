@@ -11,7 +11,9 @@ make run       # build and start on :8080; first start prints the bootstrap admi
 # Existing source install? Add that line before the first `up -d` on this checkout: the old
 # image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
 docker compose up -d
-docker compose pull && docker compose up -d   # update a published-image install
+docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
+# A digest-pinned install (KY_IMAGE in .env) must re-run the pin recipe in docker-compose.yml
+# first, or delete that line to follow :latest again; `pull` alone is a no-op for a pinned digest.
 ```
 
 `AGENTS.md` is the contract for working in this repository.

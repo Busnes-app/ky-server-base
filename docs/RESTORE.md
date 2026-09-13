@@ -70,13 +70,15 @@ under a different app name; the capsule's service name must match or the restore
 reading a share.
 
 For a published-image install, and always on a fresh recovery machine, pin the image to a
-digest you have verified before it reads a single share (`gh` must be logged in):
+digest you have verified before it reads a single share (`gh` must be logged in). The
+chain stops at the first failure, so a failed verify never writes the pin. The pin persists
+in `.env` after the drill: see the README's upgrade note for moving off it.
 
 ```bash
-d=$(docker buildx imagetools inspect ghcr.io/busness-app/ky_server_base:latest --format '{{.Manifest.Digest}}')
-gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
-  --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master
-(umask 077; echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" >> .env); chmod 600 .env
+d=$(docker buildx imagetools inspect ghcr.io/busness-app/ky_server_base:latest --format '{{.Manifest.Digest}}') \
+  && gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
+       --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
+  && (umask 077; touch .env; sed -i '/^KY_IMAGE=/d' .env; echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" >> .env; chmod 600 .env)
 ```
 
 With Docker Compose, from the repository directory, mount the capsule and an empty target
