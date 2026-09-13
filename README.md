@@ -7,7 +7,7 @@ disaster recovery through the suite's KyRecovery.
 ```bash
 make ci        # gofmt, vet, race tests, smoke test
 make run       # build and start on :8080; first start prints the bootstrap admin password
-(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env   # source build; omit to run the published image
+(umask 077; printf '\n%s\n' 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env); chmod 600 .env   # source build; omit to run the published image
 # Existing source install? Add that line before the first `up -d` on this checkout: the old
 # image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
 docker compose up -d
@@ -78,10 +78,10 @@ refused deposit does not remove the local copy.
 Reach a KyRecovery that only your LAN's DNS knows:
 
 ```bash
-# Both live in .env: the overlay joins COMPOSE_FILE (a published-image install uses
-# COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml) and the resolver next to it,
-# since every later compose command needs it once the overlay is in the chain.
-(umask 077; printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\n' >> .env); chmod 600 .env
+# Both live in .env: the overlay joins COMPOSE_FILE and the resolver sits next to it, since
+# every later compose command needs it once the overlay is in the chain. Pick ONE line:
+(umask 077; printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\n' >> .env); chmod 600 .env                          # published image
+(umask 077; printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\n' >> .env); chmod 600 .env   # source install
 KY_BACKUP_ALLOW_PRIVATE_RECOVERY=true docker compose up -d --force-recreate
 docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
 ```

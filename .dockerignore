@@ -1,1 +1,18 @@
+# Mirrors .gitignore: nothing the operator's working tree accumulates (live data, sealed
+# capsules, secrets, build output) may enter the build context, since the Dockerfile copies it.
+.git
 .env
+.env.local
+/data/
+/backups/
+*.db
+*.db-wal
+*.db-shm
+*.kycap
+web/node_modules/
+*.log
+coverage.out
+/ky_server_base
+.claude/
+.codex/
+.superpowers/
