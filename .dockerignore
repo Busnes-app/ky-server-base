@@ -1,17 +1,21 @@
-# Mirrors .gitignore: nothing the operator's working tree accumulates (live data, sealed
-# capsules, secrets, build output) may enter the build context, since the Dockerfile copies it.
+# Translated from .gitignore, not copied: Docker matches patterns from the context root, so
+# unanchored ones need **/ to match at any depth. Nothing the working tree accumulates (live
+# data, restored copies, capsules, keys, secrets, build output) may enter the build context.
 .git
-.env
-.env.local
+**/.env
+**/.env.local
 /data/
 /backups/
-*.db
-*.db-wal
-*.db-shm
-*.kycap
-web/node_modules/
-*.log
-coverage.out
+/restored/
+/old-data/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.kycap
+**/*.key
+**/*.log
+**/coverage.out
+**/node_modules
 /ky_server_base
 .claude/
 .codex/

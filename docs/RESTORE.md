@@ -71,23 +71,28 @@ reading a share.
 
 For a published-image install, and always on a fresh recovery machine, pin the image to a
 digest you have verified before it reads a single share (`gh` must be logged in). The
-chain stops at the first failure and writes the pin whole or not at all. The pin persists
+chain stops at the first failure and replaces `.env` only if the filtered copy was written in
+full, so your secrets are never truncated. The pin persists
 in `.env` after the drill: see the README's upgrade note for moving off it.
 
 ```bash
 d=$(docker buildx imagetools inspect ghcr.io/busness-app/ky_server_base:latest --format '{{.Manifest.Digest}}') \
   && gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
        --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
-  && (umask 077; touch .env; { grep -v '^KY_IMAGE=' .env || true; echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d"; } > .env.tmp \
-      && chmod 600 .env.tmp && mv .env.tmp .env) \
+  && (umask 077; t=$(mktemp) && touch .env && { grep -v '^KY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
+      && echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" >> "$t" && mv "$t" .env) \
   && grep -qxF "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" .env
 ```
 
-Then refuse to go on unless the image in effect is that pinned digest, or the local build of a
-source install (`docker-compose.build.yml` wins over the pin, which is what a source install wants):
+Then, in the same shell (the check compares against `$d`), refuse to go on unless the image in
+effect is exactly that digest. A source install passes on its `ky_server_base:local` build instead,
+since `docker-compose.build.yml` wins over the pin, which is what a source install wants. The
+two refusal messages are distinct on purpose: a broken invocation is not an unpinned image.
 
 ```bash
-docker compose config --images | grep -Eq '@sha256:|:local$' || { echo 'refusing: the image in effect is a floating tag'; false; }
+imgs=$(docker compose config --images) || { echo 'refusing: compose could not resolve the image'; false; }
+printf '%s\n' "$imgs" | grep -qxF "ghcr.io/busness-app/ky_server_base@$d" || printf '%s\n' "$imgs" | grep -qxF 'ky_server_base:local' \
+  || { echo "refusing: image in effect is '$imgs', not the digest verified above"; false; }
 ```
 
 With Docker Compose, from the repository directory, mount the capsule and an empty target
