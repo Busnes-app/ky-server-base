@@ -4,19 +4,33 @@ The scaffold every Busnes.app server is built from: Go backend, embedded React P
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
 disaster recovery through the suite's KyRecovery.
 
+Published image:
+
 ```bash
 make ci        # gofmt, vet, race tests, smoke test
 make run       # build and start on :8080; first start prints the bootstrap admin password
-# Existing install? Your .env is kept: the copy below never overwrites one, and the COMPOSE_FILE line
-# is replaced in place. A source install must set it before its first `up -d` on this checkout,
-# or a bare `up -d` pulls the published image instead of rebuilding.
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
 docker compose up -d
-docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
-# A digest-pinned install (KY_IMAGE in .env) must re-run the pin recipe in docker-compose.yml
-# with the commit sha it wants first, or delete that line to follow :latest again; `pull` alone is a
-# no-op for a pinned digest.
 ```
+
+Source install (never paste this into a published-image install: the build overlay wins over a
+`KY_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+new checkout):
+
+```bash
+make ci        # gofmt, vet, race tests, smoke test
+make run       # build and start on :8080; first start prints the bootstrap admin password
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
+docker compose up -d
+```
+
+Update a published-image install on the rolling tag:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+A digest-pinned install (`KY_IMAGE` in `.env`) gets nothing from `pull`: re-run the pin recipe in
+`docker-compose.yml` with the commit sha you want first, or delete that line to follow `:latest` again.
 
 `AGENTS.md` is the contract for working in this repository.
 
@@ -100,7 +114,18 @@ docker compose up -d --force-recreate
 docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
 ```
 
-`KY_DNS` takes effect only while `docker-compose.lan-dns.yml` is in `COMPOSE_FILE`.
+Turning it off: remove the resolver and the flag, drop the overlay from `COMPOSE_FILE` (a
+published-image install deletes the line; a source install re-runs its install line
+afterwards), and recreate:
+
+```bash
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && mv "$t" .env)
+docker compose up -d --force-recreate
+```
+
+`KY_DNS` takes effect only while `docker-compose.lan-dns.yml` is in `COMPOSE_FILE`, but
+`KY_BACKUP_ALLOW_PRIVATE_RECOVERY` persists in `.env` on its own and keeps relaxing destination checks until you
+remove it.
 
 ### Upgrading from plaintext local backups
 

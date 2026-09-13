@@ -24,4 +24,4 @@ web/node_modules/
 
 # Coverage
 coverage.out
-.env.*
+.env.??????
