@@ -10,11 +10,12 @@ make run       # build and start on :8080; first start prints the bootstrap admi
 # Existing install? Your .env is kept: the copy below never overwrites one, and the COMPOSE_FILE line
 # is replaced in place. A source install must set it before its first `up -d` on this checkout,
 # or a bare `up -d` pulls the published image instead of rebuilding.
-(umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)   # source build; omit to run the published image
 docker compose up -d
 docker compose pull && docker compose up -d   # update a published-image install on the rolling tag
 # A digest-pinned install (KY_IMAGE in .env) must re-run the pin recipe in docker-compose.yml
-# first, or delete that line to follow :latest again; `pull` alone is a no-op for a pinned digest.
+# with the commit sha it wants first, or delete that line to follow :latest again; `pull` alone is a
+# no-op for a pinned digest.
 ```
 
 `AGENTS.md` is the contract for working in this repository.
@@ -82,8 +83,8 @@ Reach a KyRecovery that only your LAN's DNS knows:
 # All of it lives in .env, replaced in place (never appended twice): the overlay joins COMPOSE_FILE,
 # the resolver and the private-recovery flag sit next to it, since every later compose command recreates the
 # container from .env. Pick ONE line:
-(umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # published image
-(umask 077; t=$(mktemp) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # source install
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # published image
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # source install
 docker compose up -d --force-recreate
 docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
 ```
