@@ -33,3 +33,10 @@ func AttemptKeysForTest(s *Server) []string {
 func AllowAttemptForTest(s *Server, key string, limit int, window time.Duration) bool {
 	return s.allowAttempt(key, limit, window)
 }
+
+// RegisterDetachedForTest registers one detached handler and returns its unregister func, so a
+// test can drive the counter without an HTTP request. Test-only.
+func RegisterDetachedForTest(s *Server) func() {
+	s.detached.add()
+	return s.detached.done
+}
