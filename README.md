@@ -79,12 +79,23 @@ refused deposit does not remove the local copy.
 
 Reach a KyRecovery that only your LAN's DNS knows:
 
+Everything lives in `.env`, replaced in place (never appended twice): the overlay joins
+`COMPOSE_FILE`, the resolver and the private-recovery flag sit next to it, since every later compose
+command recreates the container from `.env`. Two variants, one block each, so a single
+copy-paste can never run both:
+
+Published image:
+
 ```bash
-# All of it lives in .env, replaced in place (never appended twice): the overlay joins COMPOSE_FILE,
-# the resolver and the private-recovery flag sit next to it, since every later compose command recreates the
-# container from .env. Pick ONE line:
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # published image
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)   # source install
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)
+docker compose up -d --force-recreate
+docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
+```
+
+Source install:
+
+```bash
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml:docker-compose.lan-dns.yml\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' >> "$t" && mv "$t" .env)
 docker compose up -d --force-recreate
 docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
 ```
