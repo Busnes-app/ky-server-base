@@ -88,7 +88,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - `govulncheck` and `npm audit --audit-level=high`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
-- On a push to the default branch that passes every job, the `publish` job pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busness-app/<repo>` as `:latest` and `:<commit sha>`, then attests and verifies its provenance; `docker-compose.yml` names that image with `pull_policy: missing`.
+- On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busness-app/ky_server_base:<commit sha>`, attests it and verifies the attestation; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source builds use `docker-compose.build.yml`, tagged `ky_server_base:local`.
 
 Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
 

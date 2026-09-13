@@ -1,0 +1,10 @@
+# Source build. Layer over the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+# The result is tagged ky_server_base:local so it never occupies the published name.
+services:
+  app:
+    image: ky_server_base:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
