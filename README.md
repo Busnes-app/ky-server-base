@@ -14,12 +14,18 @@ docker compose up -d
 
 Source install (never paste this into a published-image install: the build overlay wins over a
 `KY_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
-new checkout):
+new checkout; an install from before the published image existed has no such line yet, so run
+this block once and confirm with `docker compose config --images`, which must print
+`ky_server_base:local` rather than the `ghcr.io` name):
 
 ```bash
 make ci        # gofmt, vet, race tests, smoke test
 make run       # build and start on :8080; first start prints the bootstrap admin password
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+  && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+  && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
+  && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" \
+  && printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t" && mv "$t" .env)
 docker compose up -d
 ```
 
@@ -95,16 +101,19 @@ Reach a KyRecovery that only your LAN's DNS knows:
 
 The snippet appends `docker-compose.lan-dns.yml` to whatever `COMPOSE_FILE` chain `.env` already
 holds (build overlay, local override) and leaves the rest of the chain alone; the resolver and the private-recovery flag
-are replaced in place next to it. Re-running it is a no-op. One block for every install type:
+sit next to it: a resolver you already set in `.env` or passed as
+`KY_DNS=<addr>` on the command line is used; there is no default, the block refuses to guess, and the flag is set to true. Re-running it is a no-op. One block for every install type:
 
 ```bash
-(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+(umask 077; touch .env \
   && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+  && dns=${KY_DNS:-$({ grep '^KY_DNS=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-)} \
+  && : "${dns:?no resolver chosen: re-run this block prefixed with KY_DNS=<your LAN resolver>}" \
   && case ":$cf:" in *:docker-compose.lan-dns.yml:*) ;; *) cf="$cf:docker-compose.lan-dns.yml";; esac \
-  && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" \
-  && printf 'COMPOSE_FILE=%s\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' "$cf" >> "$t" && mv "$t" .env)
+  && t=$(mktemp ./.env.XXXXXX) && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" \
+  && printf 'COMPOSE_FILE=%s\nKY_DNS=%s\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' "$cf" "$dns" >> "$t" && mv "$t" .env)
 docker compose up -d --force-recreate
-docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
+docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # must print the resolver you chose
 ```
 
 Turning it off: remove the resolver and the flag, strip only `docker-compose.lan-dns.yml` from
