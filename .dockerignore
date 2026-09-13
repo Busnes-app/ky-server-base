@@ -20,4 +20,5 @@
 .claude/
 .codex/
 .superpowers/
-**/.env.??????
+**/.env.*
+!**/.env.example
