@@ -4,15 +4,33 @@ The scaffold every Busnes.app server is built from: Go backend, embedded React P
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
 disaster recovery through the suite's KyRecovery.
 
+Published image:
+
 ```bash
 make ci        # gofmt, vet, race tests, smoke test
 make run       # build and start on :8080; first start prints the bootstrap admin password
-(umask 077; echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml' >> .env)   # source build; omit to run the published image
-# Existing source install? Add that line before the first `up -d` on this checkout: the old
-# image name is gone and a bare `up -d` would pull the published image instead of rebuilding.
 docker compose up -d
-docker compose pull && docker compose up -d   # update a published-image install
 ```
+
+Source install (never paste this into a published-image install: the build overlay wins over a
+`KY_IMAGE` digest pin, and a source install must set this line before its first `up -d` on a
+new checkout):
+
+```bash
+make ci        # gofmt, vet, race tests, smoke test
+make run       # build and start on :8080; first start prints the bootstrap admin password
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v -e '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } > "$t" && printf 'COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml\n' >> "$t" && mv "$t" .env)
+docker compose up -d
+```
+
+Update a published-image install on the rolling tag:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+A digest-pinned install (`KY_IMAGE` in `.env`) gets nothing from `pull`: re-run the pin recipe in
+`docker-compose.yml` with the commit sha you want first, or delete that line to follow `:latest` again.
 
 `AGENTS.md` is the contract for working in this repository.
 
@@ -75,15 +93,34 @@ refused deposit does not remove the local copy.
 
 Reach a KyRecovery that only your LAN's DNS knows:
 
+The snippet appends `docker-compose.lan-dns.yml` to whatever `COMPOSE_FILE` chain `.env` already
+holds (build overlay, local override) and leaves the rest of the chain alone; the resolver and the private-recovery flag
+are replaced in place next to it. Re-running it is a no-op. One block for every install type:
+
 ```bash
-# Append :docker-compose.lan-dns.yml to COMPOSE_FILE in .env first (a published-image install
-# sets COMPOSE_FILE=docker-compose.yml:docker-compose.lan-dns.yml). An explicit -f list would
-# drop the build overlay for a source install.
-KY_BACKUP_ALLOW_PRIVATE_RECOVERY=true KY_DNS=192.168.1.1 docker compose up -d --force-recreate
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+  && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
+  && case ":$cf:" in *:docker-compose.lan-dns.yml:*) ;; *) cf="$cf:docker-compose.lan-dns.yml";; esac \
+  && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" \
+  && printf 'COMPOSE_FILE=%s\nKY_DNS=192.168.1.1\nKY_BACKUP_ALLOW_PRIVATE_RECOVERY=true\n' "$cf" >> "$t" && mv "$t" .env)
+docker compose up -d --force-recreate
 docker inspect ky_server_base --format '{{.HostConfig.Dns}}'   # [192.168.1.1]
 ```
 
-Setting `KY_DNS` in `.env` alone does nothing; the override file must be named.
+Turning it off: remove the resolver and the flag, strip only `docker-compose.lan-dns.yml` from
+`COMPOSE_FILE` (a build overlay or local override in the chain survives), and recreate:
+
+```bash
+(umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
+  && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2- | tr ':' '\n' | grep -vx docker-compose.lan-dns.yml | paste -sd: -) \
+  && { grep -v -e '^COMPOSE_FILE=' -e '^KY_DNS=' -e '^KY_BACKUP_ALLOW_PRIVATE_RECOVERY=' .env || [ $? -eq 1 ]; } > "$t" \
+  && { [ -z "$cf" ] || [ "$cf" = docker-compose.yml ] || printf 'COMPOSE_FILE=%s\n' "$cf" >> "$t"; } && mv "$t" .env)
+docker compose up -d --force-recreate
+```
+
+`KY_DNS` takes effect only while `docker-compose.lan-dns.yml` is in `COMPOSE_FILE`, but
+`KY_BACKUP_ALLOW_PRIVATE_RECOVERY` persists in `.env` on its own and keeps relaxing destination checks until you
+remove it.
 
 ### Upgrading from plaintext local backups
 
