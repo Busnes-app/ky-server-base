@@ -15,10 +15,11 @@ that made the backup never could. That is the point, and it is also why you shou
 procedure once as a drill before you ever need it.
 
 The `docker compose` commands below use the base file alone, which runs the published
-image. If this server was installed from source, `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml`
-must be in `.env` (the README install step writes it); otherwise a restore silently pulls a
-different binary than the one you built and are running. A published-image install reuses the
-image already on the host; run `docker compose pull` first to restore onto the newest attested one.
+image. Source install: confirm `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` is in
+`.env` before the first command (the quickstart in `README.md` writes it); otherwise
+a restore silently pulls a different binary than the one you built and are running.
+Published install: never restore onto a floating `:latest`; the step before the restore
+command pins and verifies a digest.
 
 ## What a capsule holds
 
@@ -67,6 +68,16 @@ ky_server_base restore -capsule Busnes_2eapp.cap-XXXXXXXX.kycap -to ./restored
 `-service` defaults to `KY_APP_NAME`, then `Busnes.app`. Pass it only when the backup was made
 under a different app name; the capsule's service name must match or the restore stops before
 reading a share.
+
+For a published-image install, and always on a fresh recovery machine, pin the image to a
+digest you have verified before it reads a single share (`gh` must be logged in):
+
+```bash
+d=$(docker buildx imagetools inspect ghcr.io/busness-app/ky_server_base:latest --format '{{.Manifest.Digest}}')
+gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
+  --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master
+(umask 077; echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" >> .env); chmod 600 .env
+```
 
 With Docker Compose, from the repository directory, mount the capsule and an empty target
 directory into a one-off container. Create the target yourself at mode 700 and run the

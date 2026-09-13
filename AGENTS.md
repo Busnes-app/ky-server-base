@@ -88,7 +88,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - `govulncheck` and `npm audit --audit-level=high`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
-- On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busness-app/ky_server_base:<commit sha>`, attests it and verifies the attestation; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs set `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
+- On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busness-app/ky_server_base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs set `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
 Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
 
