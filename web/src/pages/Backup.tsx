@@ -36,6 +36,7 @@ export interface BackupStatus {
   app_name: string;
   app_version: string;
   allow_private_recovery: boolean;
+  database_driver: string;
   members: string[];
   recovery_url?: string;
   recovery_key_id?: string;
@@ -342,6 +343,12 @@ export const Backup: React.FC = () => {
 
       {statusError && <Alert kind="error">{statusError}</Alert>}
       {status?.recovery_key_error && <Alert kind="error">{status.recovery_key_error}</Alert>}
+      {status && status.database_driver !== 'sqlite' && (
+        <Alert kind="warn">
+          Backups do not include the PostgreSQL database: a capsule can only snapshot SQLite. Back this database up
+          with pg_dump on its own schedule.
+        </Alert>
+      )}
       {status && !keyPinned && <Alert kind="warn">No backups are being made. Pair with KyRecovery or pin the suite recovery key below.</Alert>}
       {status && keyPinned && !paired && !hasLocal && (
         <Alert kind="warn">A key is pinned but capsules have nowhere to go. Pair with KyRecovery, or set KY_BACKUP_DIR to keep copies on this host.</Alert>

@@ -25,6 +25,10 @@ const appVersion = "1.0.0"
 // on disk disagree, so refuse rather than seal a capsule nobody's custodians can open.
 const errRecoveryKeyMismatch = "Recovery key file does not match the pinned key ID; refusing to seal"
 
+// privateRecoveryHint names the opt-in, so a refused LAN destination is not a dead end. Both
+// the pairing and the run refusals end with it.
+const privateRecoveryHint = " (set KY_BACKUP_ALLOW_PRIVATE_RECOVERY=true for a KyRecovery on your own network)"
+
 // depositWriteBudget is how long the admin's connection may stay open for the receipt: the
 // upload budget plus room for sealing. The listener's WriteTimeout is sized for JSON replies.
 const depositWriteBudget = 16 * time.Minute
@@ -132,6 +136,7 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	actor := s.actorID(r)
 	settings := backup.Settings(ctx, s.store.Settings())
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	if errors.Is(err, recoveryclient.ErrNotPaired) {
@@ -170,6 +175,8 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.kycap"`, recoveryclient.FilenameSafe(m.CapsuleID)))
 	w.Header().Set("X-Recovery-Key-ID", m.RecoveryKeyID)
+	// A capsule leaving the server is a copy of everything it holds; the trail says who took one.
+	s.auditBackup(ctx, actor, r, "admin.backup_export", m.CapsuleID, AuditDetails(map[string]any{"size_bytes": len(raw)}))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
 }
@@ -182,6 +189,11 @@ type RemotePairRequest struct {
 // handlePairRemoteRecovery claims a 6-digit PIN with KyRecovery, pins the suite recovery
 // public key it hands back, and stores the URL and the sealed bearer token.
 func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -199,15 +211,17 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 	// or audited as a pairing attempt.
 	if err := recoveryclient.ValidateURL(req.RecoveryURL, s.config.Backup.AllowPrivateRecovery); err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "private") {
-			msg += "; set KY_BACKUP_ALLOW_PRIVATE_RECOVERY to allow this"
+		if errors.Is(err, recoveryclient.ErrPrivateDestination) {
+			msg += privateRecoveryHint
 		}
 		s.writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 
-	ctx := r.Context()
+	// Pairing is write-once: the pin, the stored pairing and the audit row must all land even
+	// if the admin's connection drops mid-claim. The actor is resolved while it is still live.
 	actor := s.actorID(r)
+	ctx := context.WithoutCancel(r.Context())
 	target := recoveryclient.AuditSafe(req.RecoveryURL)
 
 	// The service name sent here is what kyrecovery pins for the token and what every
@@ -259,6 +273,11 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 // The run uses a context that outlives the request: once bytes are on their way, a closed
 // tab must not leave KyRecovery holding a capsule this instance has no receipt for.
 func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -300,12 +319,20 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusPreconditionFailed, "Paired, but recovery.pub is missing or does not match the pin")
 		case errors.Is(err, recoveryclient.ErrNotPaired):
 			s.writeError(w, http.StatusPreconditionFailed, "No recovery key")
+		case errors.Is(err, backup.ErrNoDatabaseSnapshot):
+			// Only SQLite can be snapshotted, so on any other driver no capsule can be made at
+			// all. A configuration fact the operator must read, not a server fault.
+			s.writeError(w, http.StatusPreconditionFailed, err.Error())
 		case errors.Is(err, recoveryclient.ErrNoDestination):
 			s.writeError(w, http.StatusPreconditionFailed, "Nowhere to put a capsule: pair with KyRecovery or set KY_BACKUP_DIR")
 		case errors.Is(err, recoveryclient.ErrInProgress):
 			s.writeError(w, http.StatusConflict, "A backup is already in progress")
 		case errors.Is(err, recoveryclient.ErrKeyMismatch):
 			s.writeError(w, http.StatusConflict, errRecoveryKeyMismatch)
+		case errors.Is(err, recoveryclient.ErrPrivateDestination):
+			// The pairing was stored before the opt-in was turned off, or the host now resolves
+			// private. Nothing left; the operator needs the switch named, not a 500.
+			s.writeError(w, http.StatusPreconditionFailed, "The recovery host resolves to a private address"+privateRecoveryHint)
 		case errors.Is(err, capsule.ErrCapsuleTooLarge):
 			s.writeError(w, http.StatusRequestEntityTooLarge, recoveryclient.TooLargeMessage)
 		case errors.Is(err, recoveryclient.ErrRemote):
@@ -366,6 +393,11 @@ type PinKeyRequest struct {
 // KyRecovery to pair with. The key is the one the ceremony page shows; the topology is the
 // k-of-n it was split with. Write-once, like pairing.
 func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
+	// Registered before a byte of the request is read: Shutdown returns after its timeout with
+	// slow requests still active, and one that had not yet registered would leave WaitDetached
+	// looking at a zero counter and the store closing under it.
+	s.detached.Add(1)
+	defer s.detached.Done()
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -380,8 +412,9 @@ func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx := r.Context()
+	// Write-once like pairing, so the pin and its audit row outlive the request too.
 	actor := s.actorID(r)
+	ctx := context.WithoutCancel(r.Context())
 	settings := backup.Settings(ctx, s.store.Settings())
 	if err := recoveryclient.StoreRecoveryKey(s.config.Database.DataDir, settings, key); err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -453,7 +486,9 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		"app_name":               s.config.Server.AppName,
 		"app_version":            appVersion,
 		"allow_private_recovery": s.config.Backup.AllowPrivateRecovery,
-		"members":                backup.Members(s.config),
+		// Only the SQLite path can snapshot a database into a capsule; the screen says so.
+		"database_driver": s.config.Database.Driver,
+		"members":         backup.Members(s.config),
 	}
 	if u, err := s.store.Settings().GetSetting(ctx, "kyrecovery_url"); err == nil {
 		out["recovery_url"] = u

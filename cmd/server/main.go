@@ -52,6 +52,17 @@ func main() {
 	runServer()
 }
 
+// shutdownTimeout drains in-flight HTTP requests. Short on purpose: it is spent before the
+// backup wait below, and both must fit inside the deployment's stop_grace_period.
+const shutdownTimeout = 5 * time.Second
+
+// backupWaitTimeout bounds the wait for detached backup work. recoveryclient caps one deposit
+// at 15 minutes (its uploadTimeout, for a container of at most capsule.MaxContainerBytes,
+// 384 MiB); the extra two minutes cover sealing and the local copy either side of the upload.
+// docker-compose.yml's stop_grace_period must exceed shutdownTimeout + backupWaitTimeout, and
+// TestComposeGracePeriodCoversTheShutdownBudget holds the two in step.
+const backupWaitTimeout = 17 * time.Minute
+
 func runServer() {
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -96,7 +107,8 @@ func runServer() {
 	}
 
 	srv := api.NewServer(cfg, st)
-	go backupLoop(ctx, cfg, st)
+	backupDone := make(chan struct{})
+	go backupLoop(ctx, cfg, st, backupDone)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpServer := &http.Server{
@@ -120,16 +132,51 @@ func runServer() {
 	<-stop
 	log.Println("[KY-BASE] Shutting down gracefully...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
+	cancel()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), backupWaitTimeout)
+	defer waitCancel()
+	waitForBackupWork(waitCtx, backupDone, srv.WaitDetached)
 	log.Println("[KY-BASE] Server stopped")
 }
 
-// runBackup seals one capsule and delivers it to every configured destination.
+// waitForBackupWork blocks until the scheduler loop and every detached handler have finished,
+// or until ctx expires. Backup work ignores cancellation once bytes are moving: the scheduler's
+// run, and the pair, pin-key and deposit handlers, all detach from their caller. They are waited
+// out before the store closes, or they write into a closed store -- a key pinned on disk with no
+// row recording it, or a capsule at KyRecovery with no receipt this side.
+//
+// Both phases share one context, not one timer channel: a timer channel delivers its value once,
+// so a first phase that consumed it would leave the second waiting forever -- unbounded in
+// exactly the stuck-deposit case this is written for. Past the deadline the work is abandoned and
+// said so; a SIGKILL would have been silent.
+func waitForBackupWork(ctx context.Context, backupDone <-chan struct{}, waitDetached func()) {
+	select {
+	case <-backupDone:
+	default:
+		log.Println("[KY-BASE] waiting for the scheduled backup in flight...")
+		select {
+		case <-backupDone:
+		case <-ctx.Done():
+			log.Printf("[KY-BASE] abandoning a scheduled deposit still running after %s; its receipt may be unrecorded", backupWaitTimeout)
+		}
+	}
+	handlersDone := make(chan struct{})
+	go func() { defer close(handlersDone); waitDetached() }()
+	select {
+	case <-handlersDone:
+	case <-ctx.Done():
+		log.Printf("[KY-BASE] abandoning a detached backup handler still running after %s; its writes may be unrecorded", backupWaitTimeout)
+	}
+}
+
+// runBackup seals one capsule and delivers it to every configured destination, for the CLI:
+// it builds its own RunConfig because a one-shot failure is reported to the operator and ends.
 func runBackup(ctx context.Context, cfg *config.Config, st store.Store) (recoveryclient.Result, error) {
 	rc, err := backup.RunConfig(cfg, appVersion)
 	if err != nil {
@@ -142,9 +189,19 @@ func runBackup(ctx context.Context, cfg *config.Config, st store.Store) (recover
 
 // backupLoop polls the admin's schedule once a minute; a change in the UI needs no restart
 // and a restart never loses its place, the last attempt is in the database. The wait honours
-// shutdown; the run does not, so SIGTERM cannot land between KyRecovery storing a capsule
-// and the receipt being written.
-func backupLoop(ctx context.Context, cfg *config.Config, st store.Store) {
+// shutdown; the run does not, and done is closed only once the loop is between runs, so
+// SIGTERM cannot land between KyRecovery storing a capsule and the receipt being written.
+func backupLoop(ctx context.Context, cfg *config.Config, st store.Store, done chan<- struct{}) {
+	defer close(done)
+	// Built once: a deployment key that cannot seal is a configuration fault, not a run that
+	// might succeed next minute. Run never gets far enough to stamp the attempt, so retrying
+	// would log and audit a failure every tick forever.
+	rc, err := backup.RunConfig(cfg, appVersion)
+	if err != nil {
+		log.Printf("[BACKUP] scheduler disabled: %v", err)
+		return
+	}
+	client := recoveryclient.NewClient(recoveryclient.Options{AllowPrivate: cfg.Backup.AllowPrivateRecovery})
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -162,9 +219,10 @@ func backupLoop(ctx context.Context, cfg *config.Config, st store.Store) {
 			continue
 		}
 		runCtx := context.WithoutCancel(ctx)
-		res, err := runBackup(runCtx, cfg, st)
+		res, err := recoveryclient.Run(runCtx, rc, backup.Settings(runCtx, st.Settings()),
+			func() (recoveryclient.Payload, error) { return backup.Collect(runCtx, cfg, appVersion) }, client)
 		if errors.Is(err, recoveryclient.ErrNotPaired) || errors.Is(err, recoveryclient.ErrNoDestination) {
-			continue
+			continue // never configured; nothing to report
 		}
 		recordRun(runCtx, st, "system", res, err)
 	}

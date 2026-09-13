@@ -84,12 +84,12 @@ When the user requests a durable behavior change, record it here or in the relev
 CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
 - `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 17
-- Frontend typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
+- Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
 - `govulncheck` and `npm audit --audit-level=high`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
 
-Run the same checks locally with `make ci`; add `make test-postgres` when a Postgres instance is available.
+Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
 
 ## Child DOX Index
 
@@ -104,5 +104,19 @@ Run the same checks locally with `make ci`; add `make test-postgres` when a Post
 - [internal/testdb/AGENTS.md](file:///home/yoshi/git/ky_server_base/internal/testdb/AGENTS.md): Test-only isolated database provisioning (SQLite or PostgreSQL).
 - [internal/api/AGENTS.md](file:///home/yoshi/git/ky_server_base/internal/api/AGENTS.md): HTTP REST API endpoints, routing, and middleware.
 - [web/AGENTS.md](file:///home/yoshi/git/ky_server_base/web/AGENTS.md): React 19 + TypeScript + Vite PWA frontend and KySecurity design system.
+
+`cmd/server` owns the scheduler: `backupLoop` builds the `RunConfig` and client once and
+returns with `scheduler disabled: ...` if that fails, because a run that never stamps its
+attempt would log and audit the same failure every minute forever. It closes its `done` channel
+only where it returns, between runs, and `runServer` cancels and waits on that channel after
+`httpServer.Shutdown` and before the store closes, then waits on `api.Server.WaitDetached()` for
+the pair, pin-key and deposit handlers, which detach from their requests and so outlive
+`Shutdown`. Nothing writes into a closed store. Both waits run under one `backupWaitTimeout`
+context (17m, the lib's 15m deposit ceiling plus sealing) -- a context, not a timer channel,
+which delivers once and would leave the second wait unbounded; the HTTP drain is `shutdownTimeout`
+(5s). `docker-compose.yml` grants a `stop_grace_period` above their sum, so the guarantee holds
+in the shipped deployment instead of assuming a supervisor grace period;
+`TestComposeGracePeriodCoversTheShutdownBudget` keeps the three in step. Past the deadline the
+work is abandoned with a log line rather than killed silently.
 
 The KyRecovery wire contract is `kyrecovery-server/zero_code_pairing_handoff_spec.md` (v2.0.0, sealed-capsule deposit); the product half is `ky-primitives/recoveryclient`, wired through `internal/backup` and `internal/api` so every server built on this base inherits it. Operator documents: `README.md` (disaster recovery, every `KY_BACKUP_*` variable, the LAN DNS override) and `docs/RESTORE.md` (the restore runbook, proven against a scratch 2-of-3 kit).

@@ -1,10 +1,10 @@
-.PHONY: all build build-web test test-race test-postgres lint smoke ci run clean docker-build
+.PHONY: all build build-web test test-race test-postgres test-web tidy-check lint smoke ci run clean docker-build
 
 all: build-web build
 
 build-web:
 	@echo "==> Building frontend web assets..."
-	@cd web && npm install && npm run build
+	@cd web && npm ci && npm run build
 
 build:
 	@echo "==> Compiling ky_server_base binary..."
@@ -24,6 +24,16 @@ test-postgres:
 	@echo "==> Running test suite against PostgreSQL..."
 	@KY_TEST_POSTGRES_DSN="$${KY_TEST_POSTGRES_DSN:-postgres://postgres:postgrespassword@127.0.0.1:5432/ky_server?sslmode=disable}" go test -count=1 ./...
 
+test-web:
+	@echo "==> Running frontend test suite..."
+	@cd web && npm ci && npm test
+
+# The same gate CI runs: a stale go.sum fails the build there, so fail here first.
+tidy-check:
+	@echo "==> Checking go.mod is tidy..."
+	@go mod tidy
+	@git diff --exit-code go.mod go.sum
+
 lint:
 	@echo "==> Checking formatting and vet..."
 	@test -z "$$(gofmt -l $$(git ls-files '*.go'))" || { echo "gofmt needed:"; gofmt -l $$(git ls-files '*.go'); exit 1; }
@@ -32,7 +42,7 @@ lint:
 smoke: build
 	@./scripts/smoke-test.sh
 
-ci: lint test-race smoke
+ci: tidy-check lint test-race test-web smoke
 	@echo "==> Local CI checks passed"
 
 run: build

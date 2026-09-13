@@ -5,13 +5,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Busness-app/ky-primitives/capsule"
 	"github.com/Busness-app/ky-primitives/recoveryclient"
@@ -299,6 +304,16 @@ func TestExportCapsuleOnlyPOST(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment;") {
 		t.Fatalf("POST export: got %d %v", w.Code, w.Header())
 	}
+	// A capsule that left the server is a copy of everything it holds: the trail names it.
+	m, err := capsule.ReadUnverifiedManifest(w.Body.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := auditRows(t, st, "admin.backup_export")
+	if len(rows) != 1 || rows[0].Resource != m.CapsuleID || rows[0].UserID != "usr_alice" ||
+		!strings.Contains(rows[0].Details, fmt.Sprintf("size_bytes=%q", fmt.Sprint(w.Body.Len()))) {
+		t.Errorf("export audit: %+v", rows)
+	}
 }
 
 func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
@@ -342,5 +357,299 @@ func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
 		if !found {
 			t.Errorf("missing check %s", name)
 		}
+	}
+}
+
+// A stored KyRecovery URL that now resolves private is not a server fault: the run must name
+// the switch that admits it, the way pairing does, rather than answer a bare 500.
+func TestRunRefusesAPrivateDestination(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	// The lib wraps both sentinels on the dial path, so this pins the case order too: were the
+	// 502 ErrRemote arm to come first, a private destination would report a remote refusal.
+	api.SetRecoveryClientForTest(srv, &fakeDepositor{err: fmt.Errorf("%w: deposit request failed: %w",
+		recoveryclient.ErrRemote,
+		fmt.Errorf("recovery host resolves only to private or reserved addresses: %w", recoveryclient.ErrPrivateDestination))})
+
+	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("private destination: got %d, want 412: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "KY_BACKUP_ALLOW_PRIVATE_RECOVERY") {
+		t.Errorf("body does not name the switch: %s", w.Body.String())
+	}
+}
+
+// Only SQLite can be snapshotted into a capsule, so on Postgres "Back up now" can never
+// succeed. It must say why -- the driver, in the body -- not answer a bare 500, which is what
+// the README and the screen's standing warning promise.
+func TestRunRefusesWithoutADatabaseSnapshot(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDepositor{}
+	api.SetRecoveryClientForTest(srv, fake)
+	// The store stays SQLite so the fixture works; the collector reads the driver from the
+	// config, which is what decides whether a snapshot is possible.
+	cfg.Database.Driver = "postgres"
+
+	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("no database snapshot: got %d, want 412: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "snapshot") || !strings.Contains(w.Body.String(), "postgres") {
+		t.Errorf("body does not name the snapshot refusal and the driver: %s", w.Body.String())
+	}
+	if fake.got != nil {
+		t.Error("an instance that cannot snapshot its database sent bytes to the store")
+	}
+}
+
+// brokenReceiptStore is the store with one write broken, the receipt row: the only way to
+// reach the state where KyRecovery holds a capsule this side cannot record.
+type brokenReceiptStore struct{ store.Store }
+
+func (b brokenReceiptStore) Settings() store.SettingsStore {
+	return brokenReceiptSettings{b.Store.Settings()}
+}
+
+type brokenReceiptSettings struct{ store.SettingsStore }
+
+func (b brokenReceiptSettings) SetSetting(ctx context.Context, key, val string) error {
+	if key == "kyrecovery_last_deposit" {
+		return errors.New("settings write failed")
+	}
+	return b.SettingsStore.SetSetting(ctx, key, val)
+}
+
+// The screen keys its "deposited, but unrecorded" warning off this exact reply: 200, the
+// result fields it reads, and receipt_unrecorded. A shape change here silently lies to the
+// admin about what KyRecovery is holding.
+func TestRunReportsAnUnrecordedReceipt(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
+		recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	session := loginAs(t, srv, st, "alice", "admin")
+	api.SetRecoveryClientForTest(srv, &fakeDepositor{})
+	api.SetStoreForTest(srv, brokenReceiptStore{st})
+
+	w := adminPost(t, srv, session, "/api/backup/deposit")
+	if w.Code != http.StatusOK {
+		t.Fatalf("unrecorded receipt: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		recoveryclient.Result
+		ReceiptUnrecorded bool `json:"receipt_unrecorded"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.ReceiptUnrecorded {
+		t.Errorf("reply does not carry receipt_unrecorded: %s", w.Body.String())
+	}
+	if out.Manifest.CapsuleID == "" || out.Receipt == nil || out.Receipt.CapsuleID != out.Manifest.CapsuleID {
+		t.Errorf("reply lacks the fields the screen reads: %s", w.Body.String())
+	}
+	// The capsule is at KyRecovery, so the run is audited a success with the cause attached.
+	var audited bool
+	for _, rec := range auditRows(t, st, "admin.backup_run") {
+		if rec.Resource == out.Manifest.CapsuleID && strings.Contains(rec.Details, `outcome="success"`) &&
+			strings.Contains(rec.Details, "receipt_unrecorded=") {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Error("no successful admin.backup_run row naming the unrecorded receipt")
+	}
+}
+
+// cancellingPairer drops the admin's connection while the pairing is being claimed, the way
+// a closed browser tab does.
+type cancellingPairer struct {
+	fakePairer
+	cancel context.CancelFunc
+}
+
+func (c *cancellingPairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	c.cancel()
+	return c.fakePairer.ClaimPairing(ctx, serverURL, pairingCode, serviceName, appName)
+}
+
+// Pairing is write-once and irreversible: once KyRecovery has handed back the suite key the
+// pin, the stored pairing and the audit row must all land even if the admin's connection is
+// gone, or the instance is left half-paired with nothing on record.
+func TestPairRemoteOutlivesTheRequest(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	api.SetRecoveryClientForTest(srv, &cancellingPairer{
+		fakePairer: fakePairer{result: recoveryclient.PairingResult{APIToken: "kyrec_live_t",
+			Key: recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}}},
+		cancel: cancel,
+	})
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	body, _ := json.Marshal(map[string]string{"recovery_url": "https://recovery.busnes.app", "pairing_code": "123456"})
+	req := httptest.NewRequest("POST", "/api/backup/pair-remote", bytes.NewReader(body)).WithContext(reqCtx)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+	req.Header.Set(auth.HeaderCSRF, "test-csrf")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("pair: got %d: %s", w.Code, w.Body.String())
+	}
+	settings := backupSettings(ctx, st)
+	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, settings)
+	if err != nil {
+		t.Fatalf("the key pin did not survive the dropped connection: %v", err)
+	}
+	if key.Public.ID() != priv.Public().ID() {
+		t.Errorf("pinned key: got %s, want %s", key.Public.ID(), priv.Public().ID())
+	}
+	if !recoveryclient.HasPairing(settings) {
+		t.Error("no pairing stored after the request went away")
+	}
+	var audited bool
+	for _, rec := range auditRows(t, st, "backup.paired") {
+		if rec.UserID == "usr_alice" && strings.Contains(rec.Details, "recovery_key_id="+priv.Public().ID()) {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Error("no admin-attributed backup.paired row after the request went away")
+	}
+}
+
+// blockingPairer holds the pairing open until it is released, standing in for a claim still on
+// the wire when SIGTERM arrives.
+type blockingPairer struct {
+	fakePairer
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingPairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	close(b.entered)
+	<-b.release
+	return b.fakePairer.ClaimPairing(ctx, serverURL, pairingCode, serviceName, appName)
+}
+
+// The detached handlers keep writing after their connection is gone, and http.Server.Shutdown
+// knows nothing about them. WaitDetached is what stands between them and the store closing, so
+// it must not return while one is still running.
+func TestWaitDetachedBlocksUntilAPairingFinishes(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	priv, _ := recoverykey.Generate()
+	pairer := &blockingPairer{
+		fakePairer: fakePairer{result: recoveryclient.PairingResult{APIToken: "kyrec_live_t",
+			Key: recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}}},
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	api.SetRecoveryClientForTest(srv, pairer)
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	go func() {
+		body, _ := json.Marshal(map[string]string{"recovery_url": "https://recovery.busnes.app", "pairing_code": "123456"})
+		req := httptest.NewRequest("POST", "/api/backup/pair-remote", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-pairer.entered // the handler has detached and is inside the claim
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned while a pairing was still in flight; the store would close under it")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(pairer.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the pairing finished")
+	}
+	// The wait is only worth anything if the work it waited for actually landed.
+	if _, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backupSettings(context.Background(), st)); err != nil {
+		t.Errorf("the pairing did not complete before WaitDetached returned: %v", err)
+	}
+}
+
+// blockingBody is a request body that stalls mid-read, the way a slow client does.
+type blockingBody struct {
+	reading chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.reading) })
+	<-b.release
+	return 0, io.EOF
+}
+
+// Shutdown returns after its own timeout with slow requests still active, so a handler that
+// registers only after decoding its body is invisible to WaitDetached: the counter reads zero,
+// the wait returns and the store closes under a request that is about to pair. Registration has
+// to happen before the first byte is read.
+func TestDetachedHandlerRegistersBeforeReadingItsBody(t *testing.T) {
+	srv, st, _ := setupSQLiteServer(t)
+	session := loginAs(t, srv, st, "alice", "admin")
+	body := &blockingBody{reading: make(chan struct{}), release: make(chan struct{})}
+
+	go func() {
+		req := httptest.NewRequest("POST", "/api/backup/pair-remote", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-body.reading // inside the handler, stalled on the body
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned while a handler was still reading its request; it registered too late")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(body.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the handler finished")
 	}
 }

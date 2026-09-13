@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type ThemeUpdateRequest struct {
@@ -42,8 +43,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusInternalServerError, "Failed to load settings")
 			return
 		}
-		delete(settings, "kyrecovery_token_enc")
-		delete(settings, "kyrecovery_token")
+		// By prefix, not by literal: the lib owns the token's key name, and a future
+		// spelling must not leak by default.
+		for k := range settings {
+			if strings.HasPrefix(k, "kyrecovery_token") {
+				delete(settings, k)
+			}
+		}
 		out["extra_settings"] = settings
 	}
 
