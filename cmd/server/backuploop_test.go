@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,5 +87,24 @@ func TestWaitForBackupWorkIsBoundedInBothPhases(t *testing.T) {
 	case <-returned:
 	case <-time.After(5 * time.Second):
 		t.Fatal("waitForBackupWork did not return; the second phase outlived the shared deadline")
+	}
+}
+
+// The two waits run concurrently, not one after the other. A scheduled deposit that hangs eats
+// the whole shared budget, and a sequential handler wait would then start already past the
+// deadline and give a live detached handler zero time -- the store closes under the pin or the
+// deposit it exists to protect. Starting both before either blocks costs nothing and means the
+// handler wait has run for the whole budget by the time it is read.
+func TestWaitForBackupWorkWaitsBothAtOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	var finished atomic.Bool
+	// backupDone never closes: the scheduled run is the one that hangs.
+	waitForBackupWork(ctx, make(chan struct{}), func() {
+		time.Sleep(10 * time.Millisecond)
+		finished.Store(true)
+	})
+	if !finished.Load() {
+		t.Fatal("the detached-handler wait had not run when waitForBackupWork returned; a hung scheduled deposit consumed its whole budget")
 	}
 }

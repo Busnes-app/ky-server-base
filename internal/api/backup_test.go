@@ -737,3 +737,64 @@ func TestDetachedRegistrationRacesWait(t *testing.T) {
 		t.Fatal("WaitDetached did not return once every registration had finished")
 	}
 }
+
+// blockingDepositor stalls inside the upload, where a deposit spends nearly all of its life.
+type blockingDepositor struct {
+	fakeDepositor
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingDepositor) Deposit(ctx context.Context, url, token string, container []byte) (recoveryclient.Receipt, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return b.fakeDepositor.Deposit(ctx, url, token, container)
+}
+
+// A deposit is the longest-running detached write in the system, and the only thing that keeps
+// it visible to WaitDetached is the s.tracked( wrapper on its route: the handler no longer
+// registers itself. Without this test that one route line can be deleted and the suite stays
+// green, while a SIGTERM mid-upload closes the store under the run and leaves KyRecovery holding
+// a capsule this instance has no receipt for.
+func TestDetachedTrackingCoversADepositInFlight(t *testing.T) {
+	srv, st, cfg := setupSQLiteServer(t)
+	ctx := context.Background()
+	priv, _ := recoverykey.Generate()
+	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.busnes.app", "kyrec_live_t"); err != nil {
+		t.Fatal(err)
+	}
+	depositor := &blockingDepositor{entered: make(chan struct{}), release: make(chan struct{})}
+	api.SetRecoveryClientForTest(srv, depositor)
+	session := loginAs(t, srv, st, "alice", "admin")
+
+	go func() {
+		req := httptest.NewRequest("POST", "/api/backup/deposit", nil)
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: "test-csrf"})
+		req.Header.Set(auth.HeaderCSRF, "test-csrf")
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-depositor.entered // the capsule is on its way to KyRecovery
+
+	waited := make(chan struct{})
+	go func() { defer close(waited); srv.WaitDetached() }()
+	select {
+	case <-waited:
+		t.Fatal("WaitDetached returned with a deposit still uploading; the store would close before the receipt was written")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(depositor.release)
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDetached did not return after the deposit finished")
+	}
+	if _, ok, _ := recoveryclient.LastDeposit(backupSettings(ctx, st)); !ok {
+		t.Error("the wait returned but no receipt was recorded: it did not cover the write it exists for")
+	}
+}
