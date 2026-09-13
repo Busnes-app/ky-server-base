@@ -88,6 +88,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - `govulncheck` and `npm audit --audit-level=high`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
+- On a push to the default branch that passes every job, the `publish` job pushes the image to `ghcr.io/busness-app/<repo>` as `:latest` and `:<commit sha>`; `docker-compose.yml` names that image.
 
 Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
 
