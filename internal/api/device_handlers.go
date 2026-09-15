@@ -59,7 +59,12 @@ func (s *Server) handlePairVerify(w http.ResponseWriter, r *http.Request) {
 	// Issue session token for the mobile device if pairing had user
 	var sessionToken string
 	if pairing.UserID != "" {
-		_, rawToken, err := s.sessions.IssueSession(r.Context(), w, r, pairing.UserID)
+		user, err := s.store.Users().GetUserByID(r.Context(), pairing.UserID)
+		if err != nil {
+			s.writeError(w, http.StatusUnauthorized, "User not found")
+			return
+		}
+		_, rawToken, err := s.sessions.IssueSession(r.Context(), w, r, user)
 		if err == nil {
 			sessionToken = rawToken
 		}
