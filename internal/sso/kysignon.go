@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Busness-app/ky_server_base/internal/config"
-	"github.com/Busness-app/ky_server_base/internal/crypto"
-	"github.com/Busness-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
 // KySignOnClient manages interactions with the central KySignOn identity provider.

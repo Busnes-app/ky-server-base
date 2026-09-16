@@ -19,18 +19,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Busnes-app/ky_server_base/internal/api"
+	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/backup"
+	"github.com/Busnes-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
+	"github.com/Busnes-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/testdb"
 	"github.com/Busness-app/ky-primitives/keyfile"
 	"github.com/Busness-app/ky-primitives/password"
 	"github.com/Busness-app/ky-primitives/recoveryclient"
 	"github.com/Busness-app/ky-primitives/recoverykey"
 	"github.com/Busness-app/ky-primitives/totp"
-	"github.com/Busness-app/ky_server_base/internal/api"
-	"github.com/Busness-app/ky_server_base/internal/auth"
-	"github.com/Busness-app/ky_server_base/internal/backup"
-	"github.com/Busness-app/ky_server_base/internal/config"
-	"github.com/Busness-app/ky_server_base/internal/crypto"
-	"github.com/Busness-app/ky_server_base/internal/store"
-	"github.com/Busness-app/ky_server_base/internal/testdb"
 )
 
 func setupTestServer(t *testing.T) (*api.Server, store.Store, *config.Config) {

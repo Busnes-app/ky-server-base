@@ -1,4 +1,4 @@
-module github.com/Busness-app/ky_server_base
+module github.com/Busnes-app/ky_server_base
 
 go 1.26.6
 

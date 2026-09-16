@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Busness-app/ky_server_base/internal/devices"
-	"github.com/Busness-app/ky_server_base/internal/store"
-	"github.com/Busness-app/ky_server_base/internal/testdb"
+	"github.com/Busnes-app/ky_server_base/internal/devices"
+	"github.com/Busnes-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/testdb"
 )
 
 func TestPairingLifecycle(t *testing.T) {

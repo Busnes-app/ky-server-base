@@ -36,7 +36,7 @@ rsync -av --progress "$BASE_DIR/" "$TARGET_DIR/" \
 cd "$TARGET_DIR"
 
 MODULE_OLD="$(cd "$BASE_DIR" && go list -m)"
-MODULE_NEW="github.com/Busness-app/${APP_NAME}"
+MODULE_NEW="github.com/Busnes-app/${APP_NAME}"
 
 echo "🔄 Updating Go module paths (${MODULE_OLD} -> ${MODULE_NEW})..."
 find . -type f \( -name "*.go" -o -name "go.mod" -o -name "*.md" \) -exec sed -i "s|${MODULE_OLD}|${MODULE_NEW}|g" {} +
