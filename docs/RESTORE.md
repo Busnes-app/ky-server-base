@@ -82,15 +82,15 @@ in `.env` after the drill: see the README's upgrade note for moving off it.
 
 ```bash
 sha=<full commit sha you intend to run, e.g. $(git rev-parse origin/master)>
-d=$(docker buildx imagetools inspect ghcr.io/busness-app/ky_server_base:$sha --format '{{.Manifest.Digest}}') \
-  && gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
-       --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
-  && [ "$(gh attestation verify "oci://ghcr.io/busness-app/ky_server_base@$d" --repo Busness-app/ky_server_base \
-       --cert-identity https://github.com/Busness-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
+d=$(docker buildx imagetools inspect ghcr.io/busnes-app/ky_server_base:$sha --format '{{.Manifest.Digest}}') \
+  && gh attestation verify "oci://ghcr.io/busnes-app/ky_server_base@$d" --repo Busnes-app/ky_server_base \
+       --cert-identity https://github.com/Busnes-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
+  && [ "$(gh attestation verify "oci://ghcr.io/busnes-app/ky_server_base@$d" --repo Busnes-app/ky_server_base \
+       --cert-identity https://github.com/Busnes-app/ky_server_base/.github/workflows/ci.yml@refs/heads/master \
        --format json --jq '.[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit')" = "$sha" ] \
   && (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env && { grep -v '^KY_IMAGE=' .env || [ $? -eq 1 ]; } > "$t" \
-      && echo "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" >> "$t" && mv "$t" .env) \
-  && grep -qxF "KY_IMAGE=ghcr.io/busness-app/ky_server_base@$d" .env
+      && echo "KY_IMAGE=ghcr.io/busnes-app/ky_server_base@$d" >> "$t" && mv "$t" .env) \
+  && grep -qxF "KY_IMAGE=ghcr.io/busnes-app/ky_server_base@$d" .env
 ```
 
 Then, in the same shell (the check compares against `$d`), refuse to go on unless the image in
@@ -100,7 +100,7 @@ two refusal messages are distinct on purpose: a broken invocation is not an unpi
 
 ```bash
 imgs=$(docker compose config --images) || { echo 'refusing: compose could not resolve the image'; false; }
-printf '%s\n' "$imgs" | grep -qxF "ghcr.io/busness-app/ky_server_base@$d" || printf '%s\n' "$imgs" | grep -qxF 'ky_server_base:local' \
+printf '%s\n' "$imgs" | grep -qxF "ghcr.io/busnes-app/ky_server_base@$d" || printf '%s\n' "$imgs" | grep -qxF 'ky_server_base:local' \
   || { echo "refusing: image in effect is '$imgs', not the digest verified above"; false; }
 ```
 

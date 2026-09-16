@@ -3,7 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
-	"github.com/Busness-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 	"sync"
 	"testing"
 	"time"

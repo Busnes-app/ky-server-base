@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Busness-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/config"
 )
 
 func TestConfigLoadDefaults(t *testing.T) {
