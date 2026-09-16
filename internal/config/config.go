@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Busness-app/ky-primitives/keyfile"
+	"github.com/Busnes-app/ky-primitives/keyfile"
 )
 
 // Config encapsulates all runtime configuration for ky_server_base.
