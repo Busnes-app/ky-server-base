@@ -88,7 +88,7 @@ grep -rn "Yoshiofthewire" . ; echo "exit=$?"
 Expected: no output, `exit=1`.
 
 ```bash
-git diff | grep -E "^[-+]" | grep -vE "Busness-app|Yoshiofthewire" | grep -vE "^(---|\+\+\+)"
+git diff | grep -E "^[-+]" | grep -vE "Busnes-app|Yoshiofthewire" | grep -vE "^(---|\+\+\+)"
 ```
 
 Must print nothing. **Any line it prints is a change the rename should not have made.**
@@ -99,7 +99,7 @@ Must print nothing. **Any line it prints is a change the rename should not have 
 go mod tidy
 gofmt -l . && go vet ./... && go test -race -count=1 ./... 2>&1 | tee /tmp/gridlock-after.txt
 diff <(sed 's|Yoshiofthewire/ky_server_base|MODULE|g' /tmp/gridlock-before.txt) \
-     <(sed 's|Busness-app/gridlock-server|MODULE|g' /tmp/gridlock-after.txt)
+     <(sed 's|Busnes-app/gridlock-server|MODULE|g' /tmp/gridlock-after.txt)
 ```
 
 Only timing should differ.
