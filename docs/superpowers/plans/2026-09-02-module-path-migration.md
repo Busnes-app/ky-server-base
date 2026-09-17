@@ -2,7 +2,8 @@
 
 > **Retired owner:** `Busness-app` below is the organisation's former name, renamed to `Busnes-app` on 2026-09-16 and no longer held by this project. It is kept as a dated record; do not fetch from it.
 
-> **2026-09-16:** the organisation was renamed. `gh api orgs/Busnes-app --jq .login` returns `Busnes-app` and `gh api orgs/Busnes-app` returns 404. Module paths, image names and attestation identities now use `Busnes-app`; the measurements below are kept as recorded on 2026-09-02.
+> **2026-09-16:** the organisation was renamed. `gh api orgs/Busnes-app --jq .login` returns `Busnes-app`.
+> The former `gh api orgs/Busness-app` lookup returns 404. Module paths, image names and attestation identities now use `Busnes-app`; the measurements below are kept as recorded on 2026-09-02.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -26,7 +27,7 @@
 
 ## Why this plan exists, and why it goes first
 
-The repositories moved to the `Busness-app` GitHub organisation. **No `go.mod` followed them.** Measured 2026-09-02:
+On 2026-09-02, the repositories were recorded under the then-current `Busness-app` GitHub organisation. **No `go.mod` followed them.**
 
 | Repo | `go.mod` says | `origin` says |
 |---|---|---|
@@ -278,7 +279,7 @@ done
 
 ## Task 5: Prove the suite is consistent
 
-- [x] **Step 1: Every module declares its own Busness-app path**
+- [x] **Step 1: Every module declares its own Busnes-app path**
 
 ```bash
 cd /home/yoshi/busness.app
