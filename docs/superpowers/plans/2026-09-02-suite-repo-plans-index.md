@@ -105,13 +105,13 @@ kyrecovery-server                              Busness-app/kyrecovery-server
 
 [The module path migration plan](2026-09-02-module-path-migration.md) fixes all eight.
 
-**The casing is settled: `Busness-app`, capital B, matching the GitHub org.** Taken from
+**The casing is settled: `Busnes-app`, capital B, matching the GitHub org.** Taken from
 the API rather than a remote URL, because remote URLs are case-insensitive and prove
 nothing:
 
 ```bash
-gh api orgs/Busness-app --jq .login          # -> Busness-app
-gh api orgs/Busness-app/repos --jq '.[].name'
+gh api orgs/Busnes-app --jq .login          # -> Busnes-app
+gh api orgs/Busnes-app/repos --jq '.[].name'
 ```
 
 Go module paths are case-sensitive — an uppercase letter is escaped as `!b` in the module
