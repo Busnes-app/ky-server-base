@@ -1,5 +1,7 @@
 # Suite Repo Plans: Index and Sequencing
 
+> **Retired owner:** `Busness-app` below is the organisation's former name, renamed to `Busnes-app` on 2026-09-16 and no longer held by this project. It is kept as a dated record; do not fetch from it.
+
 The [suite shared primitives plan](2026-09-02-suite-shared-primitives.md) covers nine
 repositories in one document. This index splits the work that remains into plans that
 can each be executed, reviewed and reverted on their own.
@@ -91,14 +93,14 @@ not:
 
 ```
 go.mod says                                    origin says
-github.com/Yoshiofthewire/ky_server_base       Busnes-app/ky_server_base
+github.com/Yoshiofthewire/ky_server_base       Busness-app/ky_server_base
 github.com/Yoshiofthewire/ky_server_base       (no origin)          <- gridlock-server
-github.com/Yoshiofthewire/kysignon-server      Busnes-app/kysignon-server
-github.com/yoshiofthewire/kydns-server         Busnes-app/kydns-server
-github.com/yoshiofthewire/kynotes-server       Busnes-app/kynotes-server
-kybookmarks-server                             Busnes-app/kybookmarks-server
-kypassword-server                              Busnes-app/kypassword-server
-kyrecovery-server                              Busnes-app/kyrecovery-server
+github.com/Yoshiofthewire/kysignon-server      Busness-app/kysignon-server
+github.com/yoshiofthewire/kydns-server         Busness-app/kydns-server
+github.com/yoshiofthewire/kynotes-server       Busness-app/kynotes-server
+kybookmarks-server                             Busness-app/kybookmarks-server
+kypassword-server                              Busness-app/kypassword-server
+kyrecovery-server                              Busness-app/kyrecovery-server
 ```
 
 [The module path migration plan](2026-09-02-module-path-migration.md) fixes all eight.

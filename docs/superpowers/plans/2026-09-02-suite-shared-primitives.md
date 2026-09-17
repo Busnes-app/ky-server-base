@@ -1,5 +1,7 @@
 # Suite Shared Primitives Implementation Plan
 
+> **Retired owner:** `Busness-app` below is the organisation's former name, renamed to `Busnes-app` on 2026-09-16 and no longer held by this project. It is kept as a dated record; do not fetch from it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stop the KySecurity suite from carrying divergent copies of the primitives where divergence is a correctness bug rather than a maintenance annoyance — threshold key splitting, the backup capsule format, the hash-chained audit record, and the pairing protocol spec — and cut the scaffold back to the suite's dependency floor so every future product starts lean instead of starting heavy.

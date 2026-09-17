@@ -1,5 +1,7 @@
 # ky_server_base Adopts ky-primitives v0.4.0 Implementation Plan
 
+> **Retired owner:** `Busness-app` below is the organisation's former name, renamed to `Busnes-app` on 2026-09-16 and no longer held by this project. It is kept as a dated record; do not fetch from it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The scaffold stops carrying its own crypto and backup primitives and uses `github.com/Busnes-app/ky-primitives v0.4.0` for password hashing, TOTP, recovery codes, key files, and capsules sealed to the suite recovery public key.
@@ -1786,7 +1788,7 @@ MODULE_OLD="$(cd "$BASE_DIR" && go list -m)"
 
 Add `go` to whatever prerequisite check the script has (it already needs `go` for `go mod tidy`, so none is needed beyond the existing `set -euo pipefail`). Run `shellcheck scripts/ky-init.sh` (the `smoke` CI job does).
 
-The spec's line 300 says `go mod tidy` "must now resolve a module under the Busnes-app org" and needs `GOPRIVATE`. It does not: `github.com/Busnes-app/ky-primitives` is public and resolves through the proxy. Do not add `GOPRIVATE`.
+The spec's line 300 says `go mod tidy` "must now resolve a module under the Busness-app org" and needs `GOPRIVATE`. It does not: `github.com/Busnes-app/ky-primitives` is public and resolves through the proxy. Do not add `GOPRIVATE`.
 
 - [ ] **Step 2: Compat workflow**
 

@@ -1,5 +1,10 @@
 # Module Path Migration Implementation Plan
 
+> **Retired owner:** `Busness-app` below is the organisation's former name, renamed to `Busnes-app` on 2026-09-16 and no longer held by this project. It is kept as a dated record; do not fetch from it.
+
+> **2026-09-16:** the organisation was renamed. `gh api orgs/Busnes-app --jq .login` returns `Busnes-app`.
+> The former `gh api orgs/Busness-app` lookup returns 404. Module paths, image names and attestation identities now use `Busnes-app`; the measurements below are kept as recorded on 2026-09-02.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every Go module in the suite declare the path it actually lives at, `github.com/Busnes-app/<name>`, before anything imports anything else.
@@ -12,7 +17,7 @@
 
 ## Global Constraints
 
-- **The canonical prefix is `github.com/Busnes-app/`, capital B, matching the GitHub org exactly.** Confirmed against the API, not inferred from a remote URL — `gh api orgs/Busnes-app --jq .login` returns `Busnes-app`. Repository names come from `gh api orgs/Busnes-app/repos --jq '.[].name'` for the same reason.
+- **The canonical prefix is `github.com/Busnes-app/`, capital B, matching the GitHub org exactly.** Confirm with `gh api orgs/Busnes-app --jq .login` and `gh api orgs/Busnes-app/repos --jq '.[].name'`.
 - **Match the casing exactly, everywhere.** Go module paths are case-sensitive: an uppercase letter is escaped as `!b` in the module cache and on the proxy. That is normal and works fine — plenty of published modules do it — but `github.com/Busnes-app/x` and `github.com/busnes-app/x` are two different modules to the toolchain. The suite already carries the scar of getting this inconsistent: `kydns-server` and `kynotes-server` say `yoshiofthewire` while three others say `Yoshiofthewire`.
 - **No behaviour change in any repo.** A rename commit that also changes logic is unreviewable.
 - Gates stay green in every repo touched: `gofmt -l .` empty, `go vet ./...`, `go test -race ./...`.
@@ -22,18 +27,18 @@
 
 ## Why this plan exists, and why it goes first
 
-The repositories moved to the `Busnes-app` GitHub organisation. **No `go.mod` followed them.** Measured 2026-09-02:
+On 2026-09-02, the repositories were recorded under the then-current `Busness-app` GitHub organisation. **No `go.mod` followed them.**
 
 | Repo | `go.mod` says | `origin` says |
 |---|---|---|
-| `ky_server_base` | `github.com/Yoshiofthewire/ky_server_base` | `Busnes-app/ky_server_base` |
-| `kysignon-server` | `github.com/Yoshiofthewire/kysignon-server` | `Busnes-app/kysignon-server` |
+| `ky_server_base` | `github.com/Yoshiofthewire/ky_server_base` | `Busness-app/ky_server_base` |
+| `kysignon-server` | `github.com/Yoshiofthewire/kysignon-server` | `Busness-app/kysignon-server` |
 | `gridlock-server` | `github.com/Yoshiofthewire/ky_server_base` | **no origin** |
-| `kydns-server` | `github.com/yoshiofthewire/kydns-server` | `Busnes-app/kydns-server` |
-| `kynotes-server` | `github.com/yoshiofthewire/kynotes-server` | `Busnes-app/kynotes-server` |
-| `kybookmarks-server` | `kybookmarks-server` | `Busnes-app/kybookmarks-server` |
-| `kypassword-server` | `kypassword-server` | `Busnes-app/kypassword-server` |
-| `kyrecovery-server` | `kyrecovery-server` | `Busnes-app/kyrecovery-server` |
+| `kydns-server` | `github.com/yoshiofthewire/kydns-server` | `Busness-app/kydns-server` |
+| `kynotes-server` | `github.com/yoshiofthewire/kynotes-server` | `Busness-app/kynotes-server` |
+| `kybookmarks-server` | `kybookmarks-server` | `Busness-app/kybookmarks-server` |
+| `kypassword-server` | `kypassword-server` | `Busness-app/kypassword-server` |
+| `kyrecovery-server` | `kyrecovery-server` | `Busness-app/kyrecovery-server` |
 
 Four conventions: the old org capitalised, the old org lowercased, a bare name with no domain, and — in `gridlock-server` — another repository's path entirely.
 
@@ -351,7 +356,7 @@ touched it, because it never contains the literal old module path — only the o
 plus a variable. Every product scaffolded after the rename would have been born on the old
 organisation. Fixed in both.
 
-**2. A capital first letter reorders import blocks.** `Busnes-app` sorts before lowercase
+**2. A capital first letter reorders import blocks.** `Busness-app` sorts before lowercase
 paths where `yoshiofthewire` sorted after, so gofmt regroups. Twelve files in
 `kydns-server` and four in `kyrecovery-server` needed `gofmt -w`; the diff is import
 ordering only. `kydns-server` was gofmt-clean before, so this was caused by the rename,
@@ -365,7 +370,7 @@ residual `grep` for the bare owner name is what caught both — searching only f
 `github.com/<org>/` would have missed them.
 
 **4. GHCR must be lowercase even though the module path is not.** OCI registries reject a
-mixed-case repository name, so the image namespace is `ghcr.io/busnes-app/kydns-server`
+mixed-case repository name; after the 2026-09-16 owner move, the image namespace is `ghcr.io/busnes-app/kydns-server`
 while the module is `github.com/Busnes-app/kydns-server`. The workflow's own comment
 already said so. **This changes where images publish** and needs the org's package
 permissions to allow it — worth confirming before that workflow next runs.
