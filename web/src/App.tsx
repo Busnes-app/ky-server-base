@@ -27,9 +27,6 @@ export const App: React.FC = () => {
         if (setResp.ok) {
           const s = await setResp.json();
           setSettings(s);
-          if (s.theme) {
-            document.documentElement.setAttribute('data-theme', s.theme);
-          }
         }
 
         if (authResp.ok) {
@@ -54,9 +51,6 @@ export const App: React.FC = () => {
     if (resp.ok) {
       const s = await resp.json();
       setSettings(s);
-      if (s.theme) {
-        document.documentElement.setAttribute('data-theme', s.theme);
-      }
     }
   };
 

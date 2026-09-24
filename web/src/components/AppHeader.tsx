@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Smartphone, LogOut, Shield, Users, Settings as SettingsIcon, LayoutDashboard, Archive } from 'lucide-react';
+import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive } from 'lucide-react';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { QRPairingModal } from './QRPairingModal';
 
@@ -39,7 +39,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '18px', color: 'var(--accent)' }}>
-            <Shield size={22} />
+            <img src="/app-icon.png" width={28} height={28} alt="" />
             <span>{appName || 'Busnes.app'}</span>
           </div>
 
