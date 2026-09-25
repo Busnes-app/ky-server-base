@@ -49,9 +49,9 @@
   --bg: #05070a;
   --panel: #0d121d;
   --panel-hover: #131b2a;
-  --ink: #64748b;
-  --ink-strong: #00ffcc;
-  --accent: #00ffcc;
+  --ink: #aab7c8;
+  --ink-strong: #eef6f5;
+  --accent: #00d9bd;
   --accent-soft: rgba(0, 255, 204, 0.18);
   --line: #1e293b;
   --line-strong: #00ffcc44;
@@ -117,6 +117,23 @@ body {
   transition: background 0.2s ease, color 0.2s ease;
   -webkit-font-smoothing: antialiased;
 }
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); }
+.app-header { display: flex; flex-direction: column; gap: 1.25rem; position: sticky; top: 0; height: 100vh; padding: 1.25rem 1rem; background: linear-gradient(180deg, var(--sidebar-start, var(--panel)), var(--sidebar-end, var(--panel))); border-right: 1px solid var(--line); z-index: 10; }
+.app-brand { display: flex; align-items: center; gap: .7rem; padding: .25rem .5rem 1rem; color: var(--ink-strong); font-size: 1.15rem; font-weight: 700; }
+.app-brand img { border-radius: .45rem; flex: none; }
+.app-nav { display: flex; flex-direction: column; gap: .2rem; }
+.app-nav button { justify-content: flex-start; width: 100%; border: 0; border-left: 3px solid transparent; border-radius: .45rem; padding: .6rem .65rem; background: transparent; color: var(--ink); font-size: .86rem; text-align: left; }
+.app-nav button:hover { background: var(--panel-hover); color: var(--ink-strong); }
+.app-nav button.active { border-left-color: var(--accent); background: var(--accent-soft); color: var(--ink-strong); }
+.app-header-actions { display: flex; flex-direction: column; gap: .65rem; margin-top: auto; }
+.app-pair { justify-content: flex-start; width: 100%; font-size: .82rem; }
+.app-user { display: flex; align-items: center; gap: .55rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+.app-user-copy { min-width: 0; flex: 1; font-size: .8rem; }
+.app-user-copy > div:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-user-copy > div:last-child { color: var(--ink); font-size: .7rem; }
+.app-logout { padding: .45rem; color: var(--danger); }
+.app-main { min-width: 0; }
+@media (max-width: 720px) { .app-shell { display: block; } .app-header { position: sticky; height: auto; padding: .75rem 1rem; border-right: 0; border-bottom: 1px solid var(--line); } .app-brand { padding: 0; } .app-nav { flex-direction: row; overflow-x: auto; } .app-nav button { width: auto; flex: 0 0 auto; border-left: 0; border-bottom: 3px solid transparent; white-space: nowrap; } .app-nav button.active { border-bottom-color: var(--accent); } .app-header-actions { flex-direction: row; margin-top: 0; align-items: center; } .app-pair { width: auto; } .app-user { border-top: 0; border-left: 1px solid var(--line); padding: 0 0 0 .65rem; } .app-user-copy { display: none; } }
 
 code, pre, .font-mono {
   font-family: var(--font-mono);

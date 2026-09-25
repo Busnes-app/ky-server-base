@@ -29,8 +29,9 @@ jobs:
           set -euo pipefail
           img="ghcr.io/${GITHUB_REPOSITORY,,}"
           ident="https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/master"
-          # every compose file and every non-historical doc an operator might copy from
-          mapfile -t all < <(git ls-files 'docker-compose*.yml' '*.md')
+          # every compose file and every non-historical doc an operator might copy from;
+          # superpowers plans are historical records and may retain old coordinates.
+          mapfile -t all < <(git ls-files 'docker-compose*.yml' '*.md' | grep -v '^docs/superpowers/')
           grep -qxF '## Upgrading after the Busnes-app owner move' README.md || { echo 'README upgrade warning is missing'; exit 1; }
           grep -qxF 'The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/ky-server-base`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KY_IMAGE` still names the old namespace or image name, re-pinning is required, not optional: inspect `git remote -v` before any `git pull`, `make ci`, or `docker compose` command, and replace a retired-owner remote with `https://github.com/Busnes-app/ky-server-base.git` (prefer a fresh clone plus a known commit). Then remove `KY_IMAGE` to follow the compose default or verify and pin a digest using `docs/RESTORE.md` before pulling.' README.md || { echo 'README upgrade warning text is missing'; exit 1; }
           bad=$(grep -in 'busness-app' README.md | grep -vE '^[0-9]+:(## Upgrading after the Busnes-app owner move|The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr\.io/busnes-app/ky-server-base`\.)' || true); [ -z "$bad" ] || { echo "retired owner outside the README warning lines:"; echo "$bad"; exit 1; }

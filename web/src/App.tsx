@@ -91,7 +91,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="app-shell">
       <AppHeader
         appName={settings?.app_name || 'Busnes.app'}
         activeTab={activeTab}
@@ -100,7 +100,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       />
 
-      <main style={{ flex: 1 }}>
+      <main className="app-main">
         {activeTab === 'dashboard' && <Dashboard settings={settings} user={user} onNavigate={(tab) => setActiveTab(tab)} />}
         {activeTab === 'scim' && <SCIMAdmin />}
         {activeTab === 'backup' && <Backup />}

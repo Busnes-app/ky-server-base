@@ -80,6 +80,10 @@ Default section order:
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
+- Container network IP configuration belongs to Compose: the optional
+  `docker-compose.static-ip.yml` overlay requires `KY_CONTAINER_IP` and `KY_NETWORK_SUBNET`.
+  Preserve existing overlays when updating `COMPOSE_FILE`; the base keeps automatic addressing.
+
 ## Verification
 
 CI (`.github/workflows/ci.yml`) runs on every push and pull request:
