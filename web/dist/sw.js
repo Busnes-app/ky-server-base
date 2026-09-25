@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ky-base-pwa-busnes-v2';
+const CACHE_NAME = 'ky-base-pwa-busnes-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -30,26 +30,31 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only cache GET requests and non-API paths
-  if (event.request.method !== 'GET' || event.request.url.includes('/api/') || event.request.url.includes('/scim/')) {
-    return;
-  }
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  const shell = url.pathname === '/' || url.pathname === '/index.html';
+  // Allow public shell/assets only, never API, SCIM, SSO or future dynamic routes.
+  if (!shell && url.pathname !== '/manifest.json' && !url.pathname.startsWith('/assets/')) return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).then((response) => {
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-          return response;
-        })
-      );
-    })
-  );
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // HTML must refresh online so a deploy can advance its hashed asset URLs.
+    if (!shell) {
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+    }
+    let response;
+    try {
+      response = await fetch(event.request);
+    } catch (error) {
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+      throw error;
+    }
+    if (response.status === 200 && response.type === 'basic' && !response.redirected) {
+      // Storage/quota failures must not hide a successful network response.
+      try { await cache.put(event.request, response.clone()); } catch {}
+    }
+    return response;
+  })());
 });

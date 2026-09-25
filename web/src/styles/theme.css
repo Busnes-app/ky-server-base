@@ -257,6 +257,18 @@ input:focus, select:focus, textarea:focus {
   backdrop-filter: blur(4px);
 }
 
+dialog.modal-window {
+  margin: auto;
+  max-width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  color: var(--ink-strong);
+}
+dialog.modal-window::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
 .modal-window {
   background: var(--panel);
   border: 1px solid var(--line-strong);
