@@ -37,7 +37,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
                 <button
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
-                  className={active ? 'active' : undefined}
+                  className={active ? 'ky-nav-item active' : 'ky-nav-item'}
                   aria-current={active ? 'page' : undefined}
                 >
                   <Icon size={16} />

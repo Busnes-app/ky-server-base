@@ -124,7 +124,7 @@ body {
 .app-nav { display: flex; flex-direction: column; gap: .2rem; }
 .app-nav button { justify-content: flex-start; width: 100%; border: 0; border-left: 3px solid transparent; border-radius: .45rem; padding: .6rem .65rem; background: transparent; color: var(--ink); font-size: .86rem; text-align: left; }
 .app-nav button:hover { background: var(--panel-hover); color: var(--ink-strong); }
-.app-nav button.active { border-left-color: var(--accent); background: var(--accent-soft); color: var(--ink-strong); }
+/* Selected, hover and focus states are supplied by ky-ui/navigation.css. */
 .app-header-actions { display: flex; flex-direction: column; gap: .65rem; margin-top: auto; }
 .app-pair { justify-content: flex-start; width: 100%; font-size: .82rem; }
 .app-user { display: flex; align-items: center; gap: .55rem; border-top: 1px solid var(--line); padding-top: .8rem; }
@@ -320,96 +320,96 @@ input:focus, select:focus, textarea:focus {
 
 /* Busnes.app light/dark defaults. Existing named palettes remain selectable. */
 :root[data-theme="busnes-light"] {
-  --bg: #f8f6f0;
-  --panel: #ffffff;
-  --ink: #566461;
-  --ink-strong: #182326;
-  --accent: #bf3f18;
-  --accent-soft: #fbf0ec;
-  --line: rgba(24, 35, 38, 0.22);
+  --bg: var(--ky-bg);
+  --panel: var(--ky-panel);
+  --ink: var(--ky-ink);
+  --ink-strong: var(--ky-ink-strong);
+  --accent: var(--ky-accent);
+  --accent-soft: var(--ky-accent-soft);
+  --line: var(--ky-line);
   --glow: transparent;
-  --sidebar-start: #f2efe7;
-  --sidebar-end: #f2efe7;
-  --button-text: #ffffff;
-  --panel-hover: #f2efe7;
-  --panel-active: #f2efe7;
-  --ink-muted: #566461;
-  --accent-hover: #bf3f18;
-  --line-focus: #bf3f18;
-  --line-strong: rgba(24, 35, 38, 0.22);
-  --danger: #b42318;
-  --success: #267442;
-  --warning: #875b12;
+  --sidebar-start: var(--ky-sidebar-start);
+  --sidebar-end: var(--ky-sidebar-end);
+  --button-text: var(--ky-button-text);
+  --panel-hover: var(--ky-panel-hover);
+  --panel-active: var(--ky-panel-hover);
+  --ink-muted: var(--ky-ink-muted);
+  --accent-hover: var(--ky-accent);
+  --line-focus: var(--ky-accent);
+  --line-strong: var(--ky-line-strong);
+  --danger: var(--ky-danger);
+  --success: var(--ky-success);
+  --warning: var(--ky-warning);
   color-scheme: light;
 }
 :root:not([data-theme]) {
-  --bg: #f8f6f0;
-  --panel: #ffffff;
-  --ink: #566461;
-  --ink-strong: #182326;
-  --accent: #bf3f18;
-  --accent-soft: #fbf0ec;
-  --line: rgba(24, 35, 38, 0.22);
+  --bg: var(--ky-bg);
+  --panel: var(--ky-panel);
+  --ink: var(--ky-ink);
+  --ink-strong: var(--ky-ink-strong);
+  --accent: var(--ky-accent);
+  --accent-soft: var(--ky-accent-soft);
+  --line: var(--ky-line);
   --glow: transparent;
-  --sidebar-start: #f2efe7;
-  --sidebar-end: #f2efe7;
-  --button-text: #ffffff;
-  --panel-hover: #f2efe7;
-  --panel-active: #f2efe7;
-  --ink-muted: #566461;
-  --accent-hover: #bf3f18;
-  --line-focus: #bf3f18;
-  --line-strong: rgba(24, 35, 38, 0.22);
-  --danger: #b42318;
-  --success: #267442;
-  --warning: #875b12;
+  --sidebar-start: var(--ky-sidebar-start);
+  --sidebar-end: var(--ky-sidebar-end);
+  --button-text: var(--ky-button-text);
+  --panel-hover: var(--ky-panel-hover);
+  --panel-active: var(--ky-panel-hover);
+  --ink-muted: var(--ky-ink-muted);
+  --accent-hover: var(--ky-accent);
+  --line-focus: var(--ky-accent);
+  --line-strong: var(--ky-line-strong);
+  --danger: var(--ky-danger);
+  --success: var(--ky-success);
+  --warning: var(--ky-warning);
   color-scheme: light;
 }
 :root[data-theme="busnes-dark"] {
-  --bg: #182326;
-  --panel: #1f2b2e;
-  --ink: #b3bcb8;
-  --ink-strong: #f2efe8;
-  --accent: #f5865f;
-  --accent-soft: #2b2622;
-  --line: rgba(242, 239, 232, 0.24);
+  --bg: var(--ky-bg);
+  --panel: var(--ky-panel);
+  --ink: var(--ky-ink);
+  --ink-strong: var(--ky-ink-strong);
+  --accent: var(--ky-accent);
+  --accent-soft: var(--ky-accent-soft);
+  --line: var(--ky-line);
   --glow: transparent;
-  --sidebar-start: #1f2b2e;
-  --sidebar-end: #1f2b2e;
-  --button-text: #182326;
-  --panel-hover: #243033;
-  --panel-active: #243033;
-  --ink-muted: #b3bcb8;
-  --accent-hover: #f5865f;
-  --line-focus: #f5865f;
-  --line-strong: rgba(242, 239, 232, 0.24);
-  --danger: #eb9d93;
-  --success: #6fbf8a;
-  --warning: #d8a657;
+  --sidebar-start: var(--ky-sidebar-start);
+  --sidebar-end: var(--ky-sidebar-end);
+  --button-text: var(--ky-button-text);
+  --panel-hover: var(--ky-panel-hover);
+  --panel-active: var(--ky-panel-hover);
+  --ink-muted: var(--ky-ink-muted);
+  --accent-hover: var(--ky-accent);
+  --line-focus: var(--ky-accent);
+  --line-strong: var(--ky-line-strong);
+  --danger: var(--ky-danger);
+  --success: var(--ky-success);
+  --warning: var(--ky-warning);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
 :root:not([data-theme]) {
-  --bg: #182326;
-  --panel: #1f2b2e;
-  --ink: #b3bcb8;
-  --ink-strong: #f2efe8;
-  --accent: #f5865f;
-  --accent-soft: #2b2622;
-  --line: rgba(242, 239, 232, 0.24);
+  --bg: var(--ky-bg);
+  --panel: var(--ky-panel);
+  --ink: var(--ky-ink);
+  --ink-strong: var(--ky-ink-strong);
+  --accent: var(--ky-accent);
+  --accent-soft: var(--ky-accent-soft);
+  --line: var(--ky-line);
   --glow: transparent;
-  --sidebar-start: #1f2b2e;
-  --sidebar-end: #1f2b2e;
-  --button-text: #182326;
-  --panel-hover: #243033;
-  --panel-active: #243033;
-  --ink-muted: #b3bcb8;
-  --accent-hover: #f5865f;
-  --line-focus: #f5865f;
-  --line-strong: rgba(242, 239, 232, 0.24);
-  --danger: #eb9d93;
-  --success: #6fbf8a;
-  --warning: #d8a657;
+  --sidebar-start: var(--ky-sidebar-start);
+  --sidebar-end: var(--ky-sidebar-end);
+  --button-text: var(--ky-button-text);
+  --panel-hover: var(--ky-panel-hover);
+  --panel-active: var(--ky-panel-hover);
+  --ink-muted: var(--ky-ink-muted);
+  --accent-hover: var(--ky-accent);
+  --line-focus: var(--ky-accent);
+  --line-strong: var(--ky-line-strong);
+  --danger: var(--ky-danger);
+  --success: var(--ky-success);
+  --warning: var(--ky-warning);
   color-scheme: dark;
 }
 }

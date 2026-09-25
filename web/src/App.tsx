@@ -7,6 +7,8 @@ import { Backup } from './pages/Backup';
 import { SCIMAdmin } from './pages/SCIMAdmin';
 import { Settings } from './pages/Settings';
 import './styles/theme.css';
+import './ky-ui/tokens.css';
+import './ky-ui/navigation.css';
 import { secureFetch } from './api';
 
 export const App: React.FC = () => {
