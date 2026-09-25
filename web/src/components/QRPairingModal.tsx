@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Smartphone, CheckCircle, X, Copy, Check } from 'lucide-react';
 import { secureFetch } from '../api';
@@ -9,6 +9,12 @@ interface QRPairingModalProps {
 
 export const QRPairingModal: React.FC<QRPairingModalProps> = ({ onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, []);
   const [code, setCode] = useState<string>('');
   const [secondsLeft, setSecondsLeft] = useState<number>(90);
   const [paired, setPaired] = useState<boolean>(false);
@@ -77,12 +83,17 @@ export const QRPairingModal: React.FC<QRPairingModalProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-window" onClick={(e) => e.stopPropagation()}>
+    <dialog ref={dialogRef} className="modal-window" aria-labelledby="pairing-title" onCancel={onClose}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right ||
+            event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+      }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Smartphone size={20} style={{ color: 'var(--accent)' }} />
-            <h3 style={{ fontSize: '18px' }}>Link Mobile Device</h3>
+            <h3 id="pairing-title" style={{ fontSize: '18px' }}>Link Mobile Device</h3>
           </div>
           <button className="btn-secondary" style={{ padding: '4px' }} onClick={onClose} aria-label="Close modal">
             <X size={18} />
@@ -139,7 +150,6 @@ export const QRPairingModal: React.FC<QRPairingModalProps> = ({ onClose }) => {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </dialog>
   );
 };

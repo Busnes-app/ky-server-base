@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "prebuild": "node src/ky-ui/check-vendor.mjs",
     "pretest": "node src/ky-ui/check-vendor.mjs"
   },
@@ -18,11 +19,12 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@testing-library/react": "^16.3.0",
     "@types/node": "^22.13.4",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "@testing-library/react": "^16.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^26.1.0",
     "typescript": "~5.7.2",
