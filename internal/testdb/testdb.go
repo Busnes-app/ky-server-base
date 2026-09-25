@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Busness-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/google/uuid"
 )
 

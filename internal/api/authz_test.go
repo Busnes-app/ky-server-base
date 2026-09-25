@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Busness-app/ky-primitives/password"
-	"github.com/Busness-app/ky_server_base/internal/api"
-	"github.com/Busness-app/ky_server_base/internal/auth"
-	"github.com/Busness-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky-primitives/password"
+	"github.com/Busnes-app/ky_server_base/internal/api"
+	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
 // loginAs creates a user with the given role and returns its session cookie.

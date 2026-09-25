@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/Busness-app/ky_server_base/internal/crypto"
-	"github.com/Busness-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 	"golang.org/x/oauth2"
 )
 
@@ -92,7 +92,7 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user.ID)
+	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Session creation failed")
 		return

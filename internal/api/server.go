@@ -3,20 +3,21 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Busness-app/ky-primitives/recoveryclient"
-	"github.com/Busness-app/ky_server_base/internal/auth"
-	"github.com/Busness-app/ky_server_base/internal/config"
-	"github.com/Busness-app/ky_server_base/internal/devices"
-	"github.com/Busness-app/ky_server_base/internal/scim"
-	"github.com/Busness-app/ky_server_base/internal/sso"
-	"github.com/Busness-app/ky_server_base/internal/store"
-	"github.com/Busness-app/ky_server_base/web"
+	"github.com/Busnes-app/ky-primitives/recoveryclient"
+	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/devices"
+	"github.com/Busnes-app/ky_server_base/internal/scim"
+	"github.com/Busnes-app/ky_server_base/internal/sso"
+	"github.com/Busnes-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/web"
 )
 
 // recoveryClient is the KyRecovery client as the handlers use it, narrowed so tests can stand
@@ -209,6 +210,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/auth/mfa/recovery-code", s.handleMFARecovery)
 	s.mux.HandleFunc("/api/auth/logout", s.handleLogout)
 	s.mux.HandleFunc("/api/auth/me", s.handleMe)
+	s.mux.HandleFunc("/api/auth/change-password", s.handleChangePassword)
 
 	// SSO
 	s.mux.HandleFunc("/api/sso/kysignon/login", s.handleKySignOnLogin)
@@ -249,7 +251,11 @@ func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, _, err := s.sessions.AuthenticateRequest(r)
 		if err != nil {
-			s.writeError(w, http.StatusUnauthorized, "Authentication required")
+			if errors.Is(err, auth.ErrPasswordChangeRequired) {
+				s.writeJSON(w, http.StatusForbidden, map[string]string{"error": "Change your password before continuing", "code": "password_change_required"})
+			} else {
+				s.writeError(w, http.StatusUnauthorized, "Authentication required")
+			}
 			return
 		}
 		if user.Role != "admin" {
@@ -263,7 +269,11 @@ func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireAuthenticated(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, _, err := s.sessions.AuthenticateRequest(r); err != nil {
-			s.writeError(w, http.StatusUnauthorized, "Authentication required")
+			if errors.Is(err, auth.ErrPasswordChangeRequired) {
+				s.writeJSON(w, http.StatusForbidden, map[string]string{"error": "Change your password before continuing", "code": "password_change_required"})
+			} else {
+				s.writeError(w, http.StatusUnauthorized, "Authentication required")
+			}
 			return
 		}
 		h(w, r)

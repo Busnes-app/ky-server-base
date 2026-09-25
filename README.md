@@ -60,13 +60,23 @@ For an existing deployment, run `docker compose down` before changing these sett
 then `docker compose up -d` to recreate the network (brief downtime; omit `-v` to retain
 database volumes). For a new deployment, just run `docker compose up -d`.
 
+## First sign-in
+
+Every bootstrap or `init-admin` password must be replaced, including when
+`KY_ADMIN_PASSWORD` supplies it. Operator resets revoke existing sessions, MFA challenges and
+device pairings immediately, reactivate local admins and require replacement at the next login. Sign in, enter the current password and a different password
+of at least 12 characters, then sign in again. Until replacement, the session can only check
+its identity, change the password or sign out; privileged APIs remain blocked. Replacement
+revokes existing sessions, MFA transactions and device pairings atomically. Existing accounts
+are not retroactively flagged, since the server cannot infer whether they still use a bootstrap password.
+
 ## Disaster recovery
 
 Every backup is one `.kycap` capsule: the database snapshot, the deployment's encryption key,
 the settings that describe the deployment, and the pinned suite recovery public key. It is
 sealed to the suite recovery key, which only the custodians' cards (k of n, split at the suite
 ceremony) can reconstruct. Nothing on this server, and nothing on KyRecovery, can open one.
-The mechanics are `github.com/Busness-app/ky-primitives/recoveryclient`; this repository
+The mechanics are `github.com/Busnes-app/ky-primitives/recoveryclient`; this repository
 supplies what it seals and how it checks a drill.
 
 **Capsules are SQLite-only today.** The snapshot is `VACUUM INTO` against the local database
@@ -165,3 +175,7 @@ directory in the clear.
 
 `docs/RESTORE.md` is the runbook: opening a capsule with the custodians' cards, putting the
 result in service, and what to distrust afterwards. Drill it once a quarter with real cards.
+
+## Upgrading after the Busnes-app owner move
+
+The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/ky-server-base`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KY_IMAGE` still names the old namespace or image name, re-pinning is required, not optional: inspect `git remote -v` before any `git pull`, `make ci`, or `docker compose` command, and replace a retired-owner remote with `https://github.com/Busnes-app/ky-server-base.git` (prefer a fresh clone plus a known commit). Then remove `KY_IMAGE` to follow the compose default or verify and pin a digest using `docs/RESTORE.md` before pulling.

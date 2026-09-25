@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Busness-app/ky-primitives/password"
-	"github.com/Busness-app/ky-primitives/recoveryclient"
-	"github.com/Busness-app/ky_server_base/internal/api"
-	"github.com/Busness-app/ky_server_base/internal/backup"
-	"github.com/Busness-app/ky_server_base/internal/config"
-	"github.com/Busness-app/ky_server_base/internal/crypto"
-	"github.com/Busness-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky-primitives/password"
+	"github.com/Busnes-app/ky-primitives/recoveryclient"
+	"github.com/Busnes-app/ky_server_base/internal/api"
+	"github.com/Busnes-app/ky_server_base/internal/backup"
+	"github.com/Busnes-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
 // appVersion is what the capsule manifest records for this build.
@@ -94,13 +94,14 @@ func runServer() {
 			log.Fatalf("Failed to hash bootstrap admin password: %v", err)
 		}
 		if err := st.Users().CreateUser(ctx, &store.User{
-			ID:           fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-			Username:     "admin",
-			DisplayName:  "Administrator",
-			PasswordHash: hash,
-			Role:         "admin",
-			Status:       "active",
-			SSOProvider:  "local",
+			ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+			Username:           "admin",
+			DisplayName:        "Administrator",
+			PasswordHash:       hash,
+			Role:               "admin",
+			Status:             "active",
+			SSOProvider:        "local",
+			MustChangePassword: true,
 		}); err != nil {
 			log.Fatalf("Failed to create bootstrap admin: %v", err)
 		}
@@ -296,10 +297,7 @@ func runInitAdmin(args []string) {
 
 	existing, err := st.Users().GetUserByUsername(ctx, *username)
 	if err == nil && existing != nil {
-		existing.PasswordHash = hash
-		existing.Status = "active"
-		existing.Role = "admin"
-		if err := st.Users().UpdateUser(ctx, existing); err != nil {
+		if err := st.Users().ResetAdminPassword(ctx, existing.ID, hash); err != nil {
 			log.Fatalf("Failed to update admin: %v", err)
 		}
 		log.Printf("✓ Admin user %q password successfully reset", *username)
@@ -307,13 +305,14 @@ func runInitAdmin(args []string) {
 	}
 
 	user := &store.User{
-		ID:           fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-		Username:     *username,
-		DisplayName:  "Administrator",
-		PasswordHash: hash,
-		Role:         "admin",
-		Status:       "active",
-		SSOProvider:  "local",
+		ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+		Username:           *username,
+		DisplayName:        "Administrator",
+		PasswordHash:       hash,
+		Role:               "admin",
+		Status:             "active",
+		SSOProvider:        "local",
+		MustChangePassword: true,
 	}
 
 	if err := st.Users().CreateUser(ctx, user); err != nil {
