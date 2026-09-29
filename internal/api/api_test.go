@@ -478,13 +478,12 @@ func TestMFALimiterKeyIsBounded(t *testing.T) {
 	}
 }
 
-// The poll route is unauthenticated: anyone holding a secret must not learn the code, the
-// user behind it, or the device's push token.
+// The poll route is unauthenticated: anyone holding a secret must not learn the user behind
+// it or the device's push token.
 func TestPairPollProjectsTheRecord(t *testing.T) {
 	srv, st, _ := setupTestServer(t)
 
 	pairing := &store.DevicePairing{
-		Code:       "424242",
 		Secret:     "s3cr3t-pairing-secret",
 		UserID:     "usr_alice",
 		DeviceName: "Alice Phone",
@@ -506,7 +505,7 @@ func TestPairPollProjectsTheRecord(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, leak := range []string{"secret", "push_token", "code", "user_id", pairing.Secret, pairing.Code, pairing.PushToken, pairing.UserID} {
+	for _, leak := range []string{"secret", "push_token", "user_id", pairing.Secret, pairing.PushToken, pairing.UserID} {
 		if strings.Contains(body, leak) {
 			t.Errorf("poll response leaks %q: %s", leak, body)
 		}

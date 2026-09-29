@@ -217,6 +217,38 @@ ALTER TABLE mfa_challenges ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';`,
 		Postgres: `DELETE FROM mfa_challenges;
 ALTER TABLE mfa_challenges ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';`,
 	},
+	{
+		// Pairings live 90 seconds, so dropping rows on upgrade loses nothing. The anonymous
+		// verify route no longer accepts the guessable 6-digit code; only the 24-byte QR secret.
+		Version: 5,
+		Name:    "pairing_secret_only",
+		SQLite: `DROP TABLE IF EXISTS device_pairings;
+CREATE TABLE device_pairings (
+    secret TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    device_name TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    push_token TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    authenticated_at DATETIME NOT NULL
+);
+CREATE INDEX idx_pairings_expires ON device_pairings(expires_at);`,
+		Postgres: `DROP TABLE IF EXISTS device_pairings;
+CREATE TABLE device_pairings (
+    secret VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL DEFAULT '',
+    device_name VARCHAR(255) NOT NULL DEFAULT '',
+    platform VARCHAR(32) NOT NULL DEFAULT '',
+    push_token TEXT NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    authenticated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_pairings_expires ON device_pairings(expires_at);`,
+	},
 }
 
 // Run executes all pending migrations for the specified database driver.
