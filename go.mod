@@ -3,14 +3,14 @@ module github.com/Busnes-app/ky_server_base
 go 1.26.6
 
 require (
-	github.com/Busnes-app/ky-primitives v0.8.0
+	github.com/Busnes-app/ky-primitives v0.9.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/elimity-com/scim v0.0.0-20260728105928-2641426a1539
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -26,9 +26,9 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/scim2/filter-parser/v2 v2.3.1 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
