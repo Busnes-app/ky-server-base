@@ -66,7 +66,8 @@ jobs:
           (grep -ohE 'docs/[A-Za-z0-9._/-]+\.md' README.md || true) | sort -u | xargs -r -I{} test -f {}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
 
       - name: gofmt
@@ -117,7 +118,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
 
       # Same suite, real Postgres: each test gets its own schema (internal/testdb).
@@ -166,7 +168,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -196,7 +199,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -208,7 +212,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
 
       - run: shellcheck scripts/*.sh
