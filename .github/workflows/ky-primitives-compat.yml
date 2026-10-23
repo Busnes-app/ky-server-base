@@ -43,9 +43,16 @@ jobs:
           check-latest: true
           cache: false
 
+      # go mod tidy: the default branch may require newer versions of shared dependencies
+      # (for example golang.org/x/crypto) than this repository's go.mod pins. A real
+      # version bump would update go.mod the same way, so this is version skew, not a
+      # break. Without tidy, go build stops at "updates to go.mod needed" and the check
+      # never reaches the API it is meant to watch.
       - name: Point this repository at that checkout
         working-directory: consumer
-        run: go mod edit -replace github.com/Busnes-app/ky-primitives=../ky-primitives
+        run: |
+          go mod edit -replace github.com/Busnes-app/ky-primitives=../ky-primitives
+          go mod tidy
 
       - name: Build
         working-directory: consumer
