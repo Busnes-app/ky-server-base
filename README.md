@@ -38,7 +38,9 @@ docker compose pull && docker compose up -d
 A digest-pinned install (`KY_IMAGE` in `.env`) gets nothing from `pull`: re-run the pin recipe in
 `docker-compose.yml` with the commit sha you want first, or delete that line to follow `:latest` again.
 
-`AGENTS.md` is the contract for working in this repository.
+`AGENTS.md` is the contract for working in this repository. [CONTRIBUTING.md](CONTRIBUTING.md) has
+the process, test policy and coding standard, and [docs/ASSURANCE-CASE.md](docs/ASSURANCE-CASE.md)
+the threat model, trust boundaries and why the security requirements hold.
 
 ## Container IP address
 
