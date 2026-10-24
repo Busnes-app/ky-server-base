@@ -102,7 +102,8 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 - **Tests:** the whole suite under the race detector on SQLite and again on PostgreSQL 17;
   `authz_test.go` for route exposure; `scripts/smoke-test.sh` against the built binary; vitest
   and Chromium regressions against the production server for the UI.
-- **Static analysis:** `go vet`, `govulncheck`, `npm audit`, the TypeScript compiler in strict
+- **Static analysis:** CodeQL (GitHub default setup: Go, JavaScript/TypeScript, Actions) on every
+  push and pull request, `go vet`, `govulncheck`, `npm audit`, the TypeScript compiler in strict
   mode, and ShellCheck on `scripts/`.
 - **Dynamic analysis:** the race detector; bounded fuzzing in CI for the trusted-proxy parser,
   `ClientIP`, the proof-of-work check and AES-GCM.
