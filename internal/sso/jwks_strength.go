@@ -8,6 +8,8 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+
+	josejson "github.com/go-jose/go-jose/v4/json"
 )
 
 // This client belongs only to the upstream OIDC verifier's JWKS fetches. Keep
@@ -36,15 +38,21 @@ func (t strongJWKSTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, errors.New("OIDC JWKS exceeds 1 MiB")
 	}
 	var set struct {
-		Keys []struct {
-			Type string `json:"kty"`
-			N    string `json:"n"`
-		} `json:"keys"`
+		Keys []json.RawMessage `json:"keys"`
 	}
 	if err := json.Unmarshal(raw, &set); err != nil {
 		return nil, errors.New("invalid OIDC JWKS")
 	}
-	for _, key := range set.Keys {
+	for _, rawKey := range set.Keys {
+		// Match go-oidc's envelope and go-jose's case-sensitive JWK members
+		// so the floor checks the modulus the signature verifier uses.
+		var key struct {
+			Type string `json:"kty"`
+			N    string `json:"n"`
+		}
+		if err := josejson.Unmarshal(rawKey, &key); err != nil {
+			return nil, errors.New("invalid OIDC JWK")
+		}
 		if key.Type != "RSA" {
 			continue
 		}
