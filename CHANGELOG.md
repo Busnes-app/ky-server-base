@@ -14,8 +14,8 @@ to its source. A mutable `:latest` tag does not identify a historical release.
 
 The historical summaries below were reconstructed from source intervals and the
 public CI publish jobs on 2026-10-26. Dates are UTC CI run dates, which can differ
-from commit dates. They cover all 39 successful image publications found from the
-first publishing workflow through `bd9b4e3`. A successful publish is evidence of
+from commit dates. They cover all 40 successful image publications found from the
+first publishing workflow through `77d4d63`. A successful publish is evidence of
 publication at that time, not a claim that its old registry tag is still available
 or that its promote job moved `:latest`. Historical images predate later repairs;
 use the current trusted owner/image and the README's owner-move instructions.
@@ -64,12 +64,19 @@ the actual change. The required Go job gates publish, and publish gates promotio
 
 ## Historical image publications
 
+### 2026-10-26 — 95a3f11
+
+Source: [95a3f114712d43151a4a1bc14a1299cbdd8be0b8](https://github.com/Busnes-app/ky-server-base/commit/95a3f114712d43151a4a1bc14a1299cbdd8be0b8) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40313178303)
+
+- **Changes:** Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks the modulus the verifier uses; add signed-token regressions for both OIDC adapters.
+- **Upgrade impact:** Rebuild or replace the image and restart to load the repaired check and drop the old verifier/key cache; retire IdP RSA keys below 2048 bits first. No schema migration or new configuration.
+
 ### 2026-10-26 — 77d4d63
 
 Source: [77d4d6337b854ba2ec7ba9c2b546c1aa87809242](https://github.com/Busnes-app/ky-server-base/commit/77d4d6337b854ba2ec7ba9c2b546c1aa87809242) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40309420264)
 
-- **Changes:** Add the historical image-release archive and require a fresh human change summary and upgrade-impact note in CI before another image can be published.
-- **Upgrade impact:** No application migration for this notes-only change; source contributors need Python 3 for `make notes-check`/`make ci`.
+- **Changes:** Add the historical image-release archive and require a fresh human change summary and upgrade-impact note in CI before image publication. Link the notes from installation/contribution guidance; application code, embedded web assets and stored formats are unchanged.
+- **Upgrade impact:** No application migration is introduced by this notes-only release. Continue to verify and pin images; apply the strong-key migration when upgrading from before `bd9b4e3`. Source contributors need Python 3 for the notes gate and must update Current source for every proposed master update.
 
 ### 2026-10-26 — bd9b4e3
 

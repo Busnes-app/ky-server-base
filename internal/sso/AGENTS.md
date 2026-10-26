@@ -16,6 +16,8 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   `jwks_strength.go` bounds the verifier's private JWKS client, refuses redirects
   and rejects RSA members below 2048 actual modulus bits before caching. The
   provider/verifier pair is initialized once under the discovery mutex.
+  Match the verifier's envelope parsing and go-jose's case-sensitive JWK member
+  parsing; case variants must never substitute another modulus for this check.
 - When `fips140.Enabled()`, issuer/authorization/token/JWKS endpoints require
   HTTPS without URL credentials; discovery/token redirects are refused. Preserve
   caller TLS trust roots and ordinary verification. This mode is process-wide.
@@ -27,6 +29,8 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
 - Repeat with `GODEBUG=fips140=on`: RSA-1024/2047 refusal, strong token/cache/nonce
   behavior, no short-key sync mutation, bounded/malformed/redirected JWKS, HTTPS
   metadata policy and refusal of a trusted RSA-1024 TLS peer.
+- `TestOIDCJWKMemberParsingMatchesVerifier` uses real RSA signatures in both
+  adapters to check case variants, member order, and strong-key acceptance.
 
 ## Child DOX Index
 None.
