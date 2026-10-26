@@ -45,6 +45,11 @@ A digest-pinned install (`KY_IMAGE` in `.env`) gets nothing from `pull`: re-run 
 the process, test policy and coding standard, and [docs/ASSURANCE-CASE.md](docs/ASSURANCE-CASE.md)
 the threat model, trust boundaries and why the security requirements hold.
 
+[External interface reference](docs/INTERFACES.md) documents HTTP routes, request and
+response fields, authentication/CSRF, SCIM limitations, CLI commands and environment
+configuration. It describes the scaffold's implemented interfaces; derived products
+document their own additions.
+
 ## Container IP address
 
 To assign the app a static IP on the Docker network, append
