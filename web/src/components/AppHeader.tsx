@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive } from 'lucide-react';
-import { ThemeSwitcher } from './ThemeSwitcher';
+import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
 import { QRPairingModal } from './QRPairingModal';
 
 interface AppHeaderProps {
@@ -19,6 +18,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
     { id: 'scim', label: 'Directory & SCIM', icon: Users },
     { id: 'backup', label: 'KyBackup (Feature 0)', icon: Archive },
     { id: 'settings', label: 'Settings & DB', icon: SettingsIcon },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
   ];
 
   return (
@@ -52,7 +52,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
             <span>Pair Device</span>
           </button>
 
-          <ThemeSwitcher />
 
           {user && (
             <div className="app-user">

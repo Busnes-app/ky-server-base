@@ -34,6 +34,13 @@ These are human summaries, not a raw version-control log.
   source also includes the library's capsule size-budget, Shamir sampling and
   setup-refusal repairs; key/share/container formats remain unchanged.
 - Update the shared library's required x/crypto, x/sync and x/text dependencies.
+- Add an Appearance page reachable by every signed-in role: native radio theme cards
+  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
+  replacing the sidebar theme selector; the sign-in page keeps its selector.
+- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
+  8px radius, 24px titles, visible focus); remove decorative accent icons from page
+  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
+
 ### Upgrade impact
 
 - A stored short TOTP secret can no longer authenticate. Keep its sealed record
@@ -42,7 +49,9 @@ These are human summaries, not a raw version-control log.
   encryption/recovery keys. Existing generated 20-byte TOTP secrets remain usable.
 - Keep historical capsules and their original custodian shares. Verify a known
   restore with the updated shared library before deploying the upgrade.
-- Rebuild or replace the image and restart the server to load the updated library.
+- Rebuild or replace the image and restart the server to load the updated library
+  and embedded web assets. Saved browser theme choices (`ky_theme`) keep their
+  values, including base `patina`, which stays distinct from the suite Patina Ky.
 - No schema migration or new configuration is required. Preserve the database,
   session secret, encryption key, recovery pin/capsules and Compose overlay chain.
 

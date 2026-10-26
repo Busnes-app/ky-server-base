@@ -12,8 +12,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
     {
       title: 'Feature 0: KyBackup & Recovery',
       desc: 'Encrypted capsule container generation and automated sandboxed restore drills.',
-      status: 'Verified Ready',
-      statusType: 'success',
+      // Backup readiness lives on the backup page; no status is claimed here.
+      status: '',
+      statusType: 'neutral',
       icon: Archive,
       action: () => onNavigate('backup'),
       actionLabel: 'Run Restore Drill',
@@ -48,15 +49,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
   ];
 
   return (
-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
-      <div style={{ marginBottom: '32px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: 'bold', marginBottom: '6px' }}>
-          Welcome, {user?.display_name || user?.username}!
-        </h1>
-        <p style={{ color: 'var(--ink)', fontSize: '15px' }}>
-          {settings?.app_name || 'Busnes.app'} is initialized on the Ky Server Base platform.
-        </p>
-      </div>
+    <div className="dr-page">
+      <div className="dr-header"><h1>Welcome, {user?.display_name || user?.username}!</h1></div>
+      <p className="page-intro">{settings?.app_name || 'Busnes.app'} is initialized on the Ky Server Base platform.</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         {cards.map((c, i) => {
@@ -65,13 +60,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
             <div key={i} className="panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                  <div style={{ padding: '8px', background: 'var(--accent-soft)', borderRadius: '6px', color: 'var(--accent)' }}>
+                  <div style={{ padding: '8px', background: 'var(--panel-hover)', borderRadius: '8px', color: 'var(--ink-strong)' }}>
                     <Icon size={20} />
                   </div>
-                  <span className={`badge badge-${c.statusType === 'success' ? 'success' : c.statusType === 'accent' ? 'accent' : 'secondary'}`}>
+                  {c.status && <span className={`badge badge-${c.statusType === 'success' ? 'success' : c.statusType === 'accent' ? 'accent' : 'secondary'}`}>
                     {c.statusType === 'success' && <CheckCircle2 size={12} />}
                     {c.status}
-                  </span>
+                  </span>}
                 </div>
                 <h3 style={{ fontSize: '16px', marginBottom: '6px' }}>{c.title}</h3>
                 <p style={{ color: 'var(--ink)', fontSize: '13px', lineHeight: 1.5 }}>{c.desc}</p>

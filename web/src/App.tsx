@@ -6,9 +6,12 @@ import { ChangePassword } from './pages/ChangePassword';
 import { Backup } from './pages/Backup';
 import { SCIMAdmin } from './pages/SCIMAdmin';
 import { Settings } from './pages/Settings';
+import { Appearance } from './pages/Appearance';
 import './styles/theme.css';
 import './ky-ui/tokens.css';
 import './ky-ui/navigation.css';
+import './ky-ui/appearance.css';
+import './ky-ui/appearance-themes.css';
 import { secureFetch } from './api';
 
 export const App: React.FC = () => {
@@ -107,6 +110,7 @@ export const App: React.FC = () => {
         {activeTab === 'scim' && <SCIMAdmin />}
         {activeTab === 'backup' && <Backup />}
         {activeTab === 'settings' && <Settings settings={settings} />}
+        {activeTab === 'appearance' && <Appearance />}
       </main>
     </div>
   );

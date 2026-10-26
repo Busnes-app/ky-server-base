@@ -1,6 +1,5 @@
 import React from 'react';
-import { Settings as SettingsIcon, Database, Palette } from 'lucide-react';
-import { ThemeSwitcher } from '../components/ThemeSwitcher';
+import { Database } from 'lucide-react';
 
 interface SettingsProps {
   settings: any;
@@ -8,16 +7,9 @@ interface SettingsProps {
 
 export const Settings: React.FC<SettingsProps> = ({ settings }) => {
   return (
-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <SettingsIcon size={24} style={{ color: 'var(--accent)' }} />
-          <span>System Settings & Architecture</span>
-        </h1>
-        <p style={{ color: 'var(--ink)', fontSize: '14px', marginTop: '4px' }}>
-          Pluggable database drivers, color theme defaults, and instance configuration.
-        </p>
-      </div>
+    <div className="dr-page">
+      <div className="dr-header"><h1>System Settings & Architecture</h1></div>
+      <p className="page-intro">Pluggable database drivers and instance configuration. Themes are under Appearance.</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 480px), 1fr))', gap: '20px' }}>
         {/* Pluggable Database Card */}
@@ -42,21 +34,6 @@ export const Settings: React.FC<SettingsProps> = ({ settings }) => {
           </div>
         </div>
 
-        {/* KySecurity Theme Card */}
-        <div className="panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <Palette size={20} style={{ color: 'var(--accent)' }} />
-            <h3 style={{ fontSize: '16px' }}>KySecurity Design System</h3>
-          </div>
-          <p style={{ color: 'var(--ink)', fontSize: '13px', marginBottom: '16px' }}>
-            Color tokens: Patina Ky (`#0d0f14`/`#4deeea`), Cyber, Nord, Paper, OLED with Space Grotesk and IBM Plex Mono fonts.
-          </p>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '13px', color: 'var(--ink)' }}>Active Color Palette:</span>
-            <ThemeSwitcher />
-          </div>
-        </div>
       </div>
     </div>
   );
