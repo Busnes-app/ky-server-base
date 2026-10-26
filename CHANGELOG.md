@@ -14,8 +14,8 @@ to its source. A mutable `:latest` tag does not identify a historical release.
 
 The historical summaries below were reconstructed from source intervals and the
 public CI publish jobs on 2026-10-26. Dates are UTC CI run dates, which can differ
-from commit dates. They cover all 41 successful image publications found from the
-first publishing workflow through `95a3f11`. A successful publish is evidence of
+from commit dates. They cover all 42 successful image publications found from the
+first publishing workflow through `6c296a2`. A successful publish is evidence of
 publication at that time, not a claim that its old registry tag is still available
 or that its promote job moved `:latest`. Historical images predate later repairs;
 use the current trusted owner/image and the README's owner-move instructions.
@@ -34,12 +34,6 @@ These are human summaries, not a raw version-control log.
   source also includes the library's capsule size-budget, Shamir sampling and
   setup-refusal repairs; key/share/container formats remain unchanged.
 - Update the shared library's required x/crypto, x/sync and x/text dependencies.
-- Add an Appearance page reachable by every signed-in role: native radio theme cards
-  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
-  replacing the sidebar theme selector; the sign-in page keeps its selector.
-- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
-  8px radius, 24px titles, visible focus); remove decorative accent icons from page
-  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
 
 ### Upgrade impact
 
@@ -76,6 +70,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 6c296a2
+
+Source: [6c296a2ca7f33238857a499f8aa1e5444aec6089](https://github.com/Busnes-app/ky-server-base/commit/6c296a2ca7f33238857a499f8aa1e5444aec6089) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40325239762)
+
+- **Changes:** Add an Appearance page for every signed-in role over the shared ky-ui 0.4.0 catalog, replacing the sidebar theme selector while retaining the sign-in selector. Use shared shell geometry/type and remove decorative title icons and the unverified "Verified Ready" backup badge.
+- **Upgrade impact:** Rebuild or replace the image for the embedded web assets. No schema, configuration or stored-format migration is required; saved `ky_theme` choices remain valid, including base `patina`, distinct from suite Patina Ky.
 
 ### 2026-10-26 — 95a3f11
 
