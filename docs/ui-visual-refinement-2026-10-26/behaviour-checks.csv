@@ -1,0 +1,16 @@
+product,stage,phase,check,result,detail,source_commit,uncommitted_source_sha256,captured_at
+ky_server_base,00,before,overview: title to introduction gap,fail,12px,3bc078096723820e139bb1978d261e2e99415da1,,2026-10-26T16:29:58.570Z
+ky_server_base,00,before,settings-via-overview: title to introduction gap,fail,12px,3bc078096723820e139bb1978d261e2e99415da1,,2026-10-26T16:29:58.570Z
+ky_server_base,00,before,settings: no tinted box inside the database card,fail,"1 bordered, filled box(es)",3bc078096723820e139bb1978d261e2e99415da1,,2026-10-26T16:29:58.570Z
+ky_server_base,00,before,settings: the card uses no accent colour,fail,"svg.lucide.lucide-database, ellipse, path, path, span.badge.badge-accent.font-mono",3bc078096723820e139bb1978d261e2e99415da1,,2026-10-26T16:29:58.570Z
+ky_server_base,00,before,no console errors or CSP violations,pass,none,3bc078096723820e139bb1978d261e2e99415da1,,2026-10-26T16:29:58.570Z
+ky_server_base,01,after,overview: title to introduction gap,pass,8px,b2c773345c875ca1d844b01114689a558f9824e8,,2026-10-26T16:43:35.820Z
+ky_server_base,01,after,settings-via-overview: title to introduction gap,pass,8px,b2c773345c875ca1d844b01114689a558f9824e8,,2026-10-26T16:43:35.820Z
+ky_server_base,01,after,settings: no tinted box inside the database card,pass,none,b2c773345c875ca1d844b01114689a558f9824e8,,2026-10-26T16:43:35.820Z
+ky_server_base,01,after,settings: the card uses no accent colour,pass,none,b2c773345c875ca1d844b01114689a558f9824e8,,2026-10-26T16:43:35.820Z
+ky_server_base,01,after,no console errors or CSP violations,pass,none,b2c773345c875ca1d844b01114689a558f9824e8,,2026-10-26T16:43:35.820Z
+ky_server_base,02,after,overview: title to introduction gap,pass,8px,662642b6a72a40ca744214bc3763bbcf3db8a40d,,2026-10-26T16:47:44.836Z
+ky_server_base,02,after,settings-via-overview: title to introduction gap,pass,8px,662642b6a72a40ca744214bc3763bbcf3db8a40d,,2026-10-26T16:47:44.836Z
+ky_server_base,02,after,settings: no tinted box inside the database card,pass,none,662642b6a72a40ca744214bc3763bbcf3db8a40d,,2026-10-26T16:47:44.836Z
+ky_server_base,02,after,settings: the card uses no accent colour,pass,none,662642b6a72a40ca744214bc3763bbcf3db8a40d,,2026-10-26T16:47:44.836Z
+ky_server_base,02,after,no console errors or CSP violations,pass,none,662642b6a72a40ca744214bc3763bbcf3db8a40d,,2026-10-26T16:47:44.836Z

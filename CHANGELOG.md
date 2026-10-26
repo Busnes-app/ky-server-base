@@ -29,34 +29,15 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Keep error and success text readable on the six newly available light themes;
-  preserve the five original base theme palettes.
-- Keep the filled danger button label readable on the 15 suite themes (it takes the
-  page colour); Busnes and the five base themes are unchanged. Base renders no danger
-  button, so this protects products built from it.
-- On phones, bring the current page into view when an Overview action changes page,
-  without moving focus or scrolling the page.
-- Sync the ky-ui 0.4.1 catalog and generated classic-script export. Existing browser
-  storage IDs and named palette values stay unchanged.
-- Pin the merged shared-library TOTP repair: authentication refuses secrets
-  shorter than 16 decoded bytes while retaining strong RFC 6238 codes. This
-  source also includes the library's capsule size-budget, Shamir sampling and
-  setup-refusal repairs; key/share/container formats remain unchanged.
-- Update the shared library's required x/crypto, x/sync and x/text dependencies.
+- Show Settings & DB facts as plain label and value rows on the card: no tinted
+  inner box, accent icon or accent driver chip. The overview's database state uses
+  the neutral badge. Page introductions sit 8px under their title.
 
 ### Upgrade impact
 
-- A stored short TOTP secret can no longer authenticate. Keep its sealed record
-  and the database; use an enrolled recovery method or an authorized administrator
-  reset and then re-enroll with the issuer. Do not pad the secret or regenerate
-  encryption/recovery keys. Existing generated 20-byte TOTP secrets remain usable.
-- Keep historical capsules and their original custodian shares. Verify a known
-  restore with the updated shared library before deploying the upgrade.
-- Rebuild or replace the image and restart the server to load the updated library
-  and embedded web assets. Saved browser theme choices (`ky_theme`) keep their
-  values, including base `patina`, which stays distinct from the suite Patina Ky.
-- No schema migration or new configuration is required. Preserve the database,
-  session secret, encryption key, recovery pin/capsules and Compose overlay chain.
+- Rebuild or replace the image and restart to load the embedded web assets. No
+  schema, configuration or stored-format migration; saved `ky_theme` choices and
+  all database, session, encryption and recovery material stay as they are.
 
 ## Maintaining notes
 
@@ -79,6 +60,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 3bc0780
+
+Source: [3bc078096723820e139bb1978d261e2e99415da1](https://github.com/Busnes-app/ky-server-base/commit/3bc078096723820e139bb1978d261e2e99415da1) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40347422306)
+
+- **Changes:** Keep error/success text readable on the six new light themes and the filled danger label readable on the 15 suite themes (Busnes and the five base palettes unchanged); bring the current page into view on phones after an Overview action; sync ky-ui 0.4.1. Pin the shared-library TOTP repair (secrets under 16 decoded bytes refused) with its capsule size-budget, Shamir sampling and setup-refusal repairs, and update x/crypto, x/sync and x/text.
+- **Upgrade impact:** A stored short TOTP secret can no longer authenticate: keep its sealed record and the database, use a recovery method or an authorized reset, then re-enroll; do not pad secrets or regenerate keys. Keep historical capsules and shares and verify a known restore first. Rebuild/replace the image and restart. No schema migration or new configuration.
 
 ### 2026-10-26 — 6c296a2
 
