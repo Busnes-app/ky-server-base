@@ -56,8 +56,8 @@ type KySignOnSyncPayload struct {
 
 // HandleSyncWebhook processes inbound HMAC-SHA256 signed user updates from KySignOn server.
 func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, signature string) error {
-	if k.config.KySignOnHMACSecret == "" {
-		return errors.New("webhook HMAC secret is not configured")
+	if len(k.config.KySignOnHMACSecret) < crypto.MinHMACKeyBytes {
+		return fmt.Errorf("webhook HMAC secret must contain at least %d bytes", crypto.MinHMACKeyBytes)
 	}
 
 	if !crypto.VerifyHMACSHA256(body, k.config.KySignOnHMACSecret, signature) {

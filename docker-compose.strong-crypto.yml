@@ -1,0 +1,14 @@
+# Optional strong-key/TLS profile. Append to the existing COMPOSE_FILE chain;
+# preserve source-build, DNS, network and operator overlays. Requires Compose >=2.24.4.
+services:
+  app:
+    environment:
+      GODEBUG: fips140=on
+      KY_ENV: production
+      KY_COOKIE_SECURE: "true"
+      KY_APP_URL: ${KY_APP_URL:?Set KY_APP_URL to the public HTTPS URL}
+      KY_SESSION_SECRET: ${KY_SESSION_SECRET:?Set a durable independently random session secret}
+    # Replace the base's public HTTP binding, rather than adding a second binding.
+    # A host TLS proxy uses loopback; a container proxy joins the private app network.
+    ports: !override
+      - "127.0.0.1:8080:8080"

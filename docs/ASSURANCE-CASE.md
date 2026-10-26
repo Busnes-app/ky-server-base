@@ -43,7 +43,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
    (`internal/config/config.go`).
 2. **Server → identity providers.** OIDC goes through `golang.org/x/oauth2` and `coreos/go-oidc`
    with PKCE S256 and a nonce (`internal/sso/oauth.go`). KySignOn directory webhooks are
-   HMAC-SHA256 signed and accepted only within five minutes (`internal/sso/kysignon.go`). No SAML
+   HMAC-SHA256 signed with at least 16 key bytes and accepted only within five minutes (`internal/sso/kysignon.go`). No SAML
    assertion route is exposed.
 3. **SCIM clients → server.** A bearer token compared in constant time (`internal/scim/handler.go`).
 4. **Server → its database.** TOTP secrets are AES-256-GCM sealed; sessions and recovery codes are
@@ -76,6 +76,8 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 | CSRF | Credentialed writes need the CSRF cookie echoed in a header, compared in constant time; CORS admits only the exact `KY_APP_URL` origin | `internal/auth/session.go`, `internal/api/server.go`, `TestCookieAuthenticatedWriteRequiresCSRF` |
 | Broken access control | Admin wrapper on every privileged route; per-role tests for each | `internal/api/server.go`, `internal/api/authz_test.go` |
 | Forged federated identity | ID token signature, issuer, audience, expiry and one-time nonce verified; PKCE S256 | `internal/sso/oauth.go` |
+| Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; configured HMAC keys require 16 bytes and sync checks again before mutation | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
+| Weak TLS peers or HTTP IdP downgrade | Supported process profile enables Go's verified-chain key policy, requires HTTPS OIDC endpoints and refuses redirects; normal trust/hostname verification remains required | [Strong profile](STRONG-CRYPTO.md), `internal/sso/oauth.go`, `TestOIDCStrongModeRejectsWeakTLSPeer` |
 | Forged directory webhook | HMAC-SHA256 checked in constant time before any change; five-minute window | `internal/sso/kysignon.go`, `internal/crypto/crypto.go` |
 | SQL injection | Parameterised statements throughout (`?`, rebound per driver); the only `Sprintf` builds the SQLite DSN | `internal/store` |
 | Cross-site scripting, clickjacking | React escaping with no `dangerouslySetInnerHTML`; CSP `script-src 'self'`, `frame-ancestors 'none'`; `X-Frame-Options: DENY` | `web/src`, `internal/api/server.go` |

@@ -30,6 +30,22 @@ func TestConfigLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigRefusesShortHMACSecrets(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	for _, name := range []string{"KY_SESSION_SECRET", "KY_KYSIGNON_HMAC_SECRET"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, strings.Repeat("x", 15))
+			if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("short %s: %v", name, err)
+			}
+			t.Setenv(name, strings.Repeat("x", 16))
+			if _, err := config.LoadFromEnv(); err != nil {
+				t.Fatalf("minimum %s: %v", name, err)
+			}
+		})
+	}
+}
+
 func TestConfigLoadFromEnvOverrides(t *testing.T) {
 	t.Setenv("KY_DATA_DIR", t.TempDir())
 	t.Setenv("KY_PORT", "9090")
