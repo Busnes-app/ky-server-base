@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
 import { QRPairingModal } from './QRPairingModal';
 
@@ -12,6 +12,11 @@ interface AppHeaderProps {
 
 export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabChange, user, onLogout }) => {
   const [showPairing, setShowPairing] = useState<boolean>(false);
+  const navRef = useRef<HTMLElement>(null);
+  // Phones scroll the navigation sideways: keep the current page's row in view, also after Overview actions.
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [activeTab]);
 
   const navItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -29,7 +34,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
             <span>{appName || 'Busnes.app'}</span>
           </div>
 
-          <nav className="app-nav" aria-label="Primary">
+          <nav ref={navRef} className="app-nav" aria-label="Primary">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;

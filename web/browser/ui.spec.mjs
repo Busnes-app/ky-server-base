@@ -120,6 +120,35 @@ test('production CSP, worker, themes, keyboard, dialog and responsive shell', as
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   await expect(pair).toBeFocused();
+  // New suite palettes must keep status text readable against both app surfaces.
+  await nav.getByRole('button', { name: 'Appearance' }).click();
+  const statusContrast = [];
+  for (const id of ['light-matter', 'tropics', 'white-cliffs', 'sun', 'polished-ky', 'sky']) {
+    await page.locator(`.ky-appearance-radio[value="${id}"]`).check();
+    statusContrast.push(...await page.evaluate((theme) => {
+      const root = document.documentElement;
+      const probe = document.createElement('span');
+      root.append(probe);
+      const luminance = (value) => {
+        probe.style.color = value;
+        const color = getComputedStyle(probe).color;
+        const scale = color.startsWith('color(') ? 1 : 255;
+        return color.match(/[\d.]+/g).slice(0, 3).map(Number)
+          .map(c => c / scale).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+          .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+      };
+      const rows = ['--danger', '--success'].flatMap(status => ['--bg', '--panel'].map(surface => {
+        const [a, b] = [status, surface].map(v => luminance(`var(${v})`));
+        return { theme, status, surface, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+      }));
+      probe.remove();
+      return rows;
+    }, id));
+  }
+  await page.mouse.move(0, 0);
+  await testInfo.attach('status-contrast', { body: JSON.stringify(statusContrast, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath('sky-status-contrast.png'), fullPage: true });
+  for (const row of statusContrast) expect(row.ratio, JSON.stringify(row)).toBeGreaterThanOrEqual(4.5);
   await page.evaluate(() => fetch('/browser-regression-uncached'));
   const cachedDynamic = await page.evaluate(async () => {
     const keys = await caches.keys();

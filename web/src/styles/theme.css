@@ -101,6 +101,13 @@
   --success: #10b981;
 }
 
+/* The suite palettes (ky-ui themes.js sets their colours inline) have no status colours;
+   tint Busnes ones toward the palette's ink, as KyPost does, so they read on light and dark. */
+:root[data-theme]:not([data-theme^="busnes-"], [data-theme="patina"], [data-theme="cyber"], [data-theme="nord"], [data-theme="paper"], [data-theme="oled"]) {
+  --danger: color-mix(in srgb, var(--ky-danger) 50%, var(--ink-strong));
+  --success: color-mix(in srgb, var(--ky-success) 50%, var(--ink-strong));
+}
+
 /* ---------- Global Layout ---------- */
 
 * {

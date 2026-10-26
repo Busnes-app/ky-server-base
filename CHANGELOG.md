@@ -29,6 +29,12 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Keep error and success text readable on the six newly available light themes;
+  preserve the five original base theme palettes.
+- On phones, bring the current page into view when an Overview action changes page,
+  without moving focus or scrolling the page.
+- Sync the ky-ui 0.4.1 catalog and generated classic-script export. Existing browser
+  storage IDs and named palette values stay unchanged.
 - Pin the merged shared-library TOTP repair: authentication refuses secrets
   shorter than 16 decoded bytes while retaining strong RFC 6238 codes. This
   source also includes the library's capsule size-budget, Shamir sampling and

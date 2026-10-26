@@ -46,3 +46,8 @@ Run npm ci, npm test (where configured), and npm run build in web/, then start t
 ## 2026-10-26 fleet Appearance
 
 ky-ui 0.4.0 (shared source `4f83f34`): the Appearance theme-card picker over the shared catalog, plus shell geometry from shared tokens. Before/after screenshots, capture conditions, hashes, real-browser behaviour checks and the results spreadsheet are in [docs/ui-fleet-2026-10-26](docs/ui-fleet-2026-10-26/README.md). Ratings are set by the independent council, not this record.
+
+
+### Review F1: status contrast
+
+All six newly available light palettes now tint error/success toward their own ink. The five original base palettes keep their status values. The real production-server browser test failed in all four OS/width projects before the fix (error contrast 3.29:1 on Light Matter), and passes in all four afterward; the minimum measured status contrast is 7.70:1 across both surfaces. `docs/ui-fleet-2026-10-26/f1-before/` and `f1-after/` preserve matching Sky Appearance captures, per-project ratios, source patch and exact capture conditions (mobile regression viewport390x900). Frontend unit tests and typecheck/build passed. Earlier backend checks remain applicable to unchanged Go source; current-head CI is required after pushing. DOX: updated web/AGENTS.md with the status-color contract; parent ownership/index unchanged.

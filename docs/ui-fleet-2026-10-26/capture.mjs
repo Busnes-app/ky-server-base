@@ -55,6 +55,8 @@ function worktreeHash() {
 const surfaces = {
   overview: { nav: 'Overview', ready: /Welcome/ },
   appearance: { nav: phase === 'before' ? 'Settings & DB' : 'Appearance', ready: phase === 'before' ? 'System Settings & Architecture' : 'Appearance' },
+  // Fleet review F6: a page change from an Overview action, not a nav click (which scrolls the nav itself).
+  ...(stage >= '03' && { 'settings-via-overview': { action: 'Database Config', ready: 'System Settings & Architecture' } }),
 };
 
 try {
@@ -79,13 +81,16 @@ try {
       const page = await ctx.newPage();
       for (const [surface, s] of Object.entries(surfaces)) {
         await page.goto('/');
-        await page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: s.nav, exact: true }).click();
+        if (s.action) {
+          await page.getByRole('heading', { name: /Welcome/ }).waitFor();
+          await page.getByRole('button', { name: s.action }).click();
+        } else await page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: s.nav, exact: true }).click();
         await page.getByRole('heading', { name: s.ready }).first().waitFor();
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(300);
         const file = `kybase-${stage}-${phase}-${surface}-${device}-${theme}.png`;
         const bytes = await page.screenshot({ path: join(out, file), fullPage: true });
-        shots.push({ file, sha256: sha(bytes), surface, nav: s.nav, device, viewport, theme_source: `OS ${theme} (prefers-color-scheme), no saved choice` });
+        shots.push({ file, sha256: sha(bytes), surface, nav: s.nav ?? `Overview action: ${s.action}`, device, viewport, theme_source: `OS ${theme} (prefers-color-scheme), no saved choice` });
       }
       await ctx.close();
     }

@@ -7,10 +7,11 @@ React 19 + TypeScript + Vite PWA frontend using the shared ky-ui theme catalog (
 Owns user interface components, service worker caching, PWA installation manifests, and frontend theme switching.
 
 ## Local Contracts
+- Newly added suite palettes tint error/success text toward their ink for readable status text on light and dark surfaces; the five shipped base palettes retain their original status values. Browser regressions measure all six new light palettes against both page and panel surfaces.
 - Web themes default to the Busnes.app cream/light and charcoal/dark palettes with orange accents, following the OS until a browser-local choice is saved. Preserve existing named themes and saved choices.
 - A signed-in user with `must_change_password` sees only password replacement and sign-out. Replacement uses `secureFetch`, returns to login after session revocation, and never exposes the normal navigation before completion.
 - Strict TypeScript type safety without unused imports.
-- The authenticated shell uses a persistent sidebar; the selected page is marked by a quiet surface and slim accent rail, with a horizontal overflow navigation on small screens.
+- The authenticated shell uses a persistent sidebar; the selected page is marked by a quiet surface and slim accent rail, with a horizontal overflow navigation on small screens that keeps the current row in view on every page change (`scrollIntoView` nearest; the header is sticky, so the page does not move; focus stays put). `browser/nav.spec.mjs` covers it.
 - `src/theme.ts` adapts the shared catalog (`ky-ui/themes.js`): `Match system` plus every catalog theme, saved by catalog ID under `ky_theme`; older saved IDs (including base `patina`, distinct from suite `patina-ky`) resolve unchanged. It sets `data-theme` and, for named palettes, the colours inline through `applyThemeVariables`; Busnes clears them so the token aliases apply. Every theme control reads the one `useTheme()` store.
 - The Appearance page (`src/pages/Appearance.tsx`) is the theme picker for every signed-in role: shared native radio cards (`ky-ui/appearance.css`, previews from `appearance-themes.css`, imported after product CSS). The signed-in shell has no other theme selector; only the sign-in page keeps `ThemeSwitcher`, over the same store. The page uses the shared `ky-appearance-description` copy.
 - Authenticated state-changing requests use `secureFetch` so the `ky_csrf` cookie is mirrored into `X-CSRF-Token`.
