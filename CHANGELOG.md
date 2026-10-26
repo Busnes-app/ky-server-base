@@ -29,19 +29,18 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Add the historical image-release archive and require a fresh human change summary
-  and upgrade-impact note in CI before another image can be published.
-- Link these notes from installation/contribution guidance. Container identifiers,
-  application code, embedded web assets and stored formats are unchanged.
+- Add an Appearance page reachable by every signed-in role: native radio theme cards
+  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
+  replacing the sidebar theme selector; the sign-in page keeps its selector.
+- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
+  8px radius, 24px titles, visible focus); remove decorative accent icons from page
+  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
 
 ### Upgrade impact
 
-- Published-image users have no new application migration for this notes-only
-  change. Continue to verify and pin the selected image; apply the strong-key
-  migration below if upgrading from before `bd9b4e3`.
-- Source contributors need Python 3 for `make notes-check`/`make ci`, and every
-  proposed master update needs new Current source notes, including dependency,
-  workflow and documentation-only releases.
+- No migration, configuration or stored-format change; rebuild the image to pick up
+  the new embedded web assets. Saved browser theme choices (`ky_theme`) keep their
+  values, including base `patina`, which stays distinct from the suite Patina Ky.
 
 ## Maintaining notes
 
@@ -64,6 +63,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 77d4d63
+
+Source: [77d4d6337b854ba2ec7ba9c2b546c1aa87809242](https://github.com/Busnes-app/ky-server-base/commit/77d4d6337b854ba2ec7ba9c2b546c1aa87809242) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40309420264)
+
+- **Changes:** Add the historical image-release archive and require a fresh human change summary and upgrade-impact note in CI before another image can be published.
+- **Upgrade impact:** No application migration for this notes-only change; source contributors need Python 3 for `make notes-check`/`make ci`.
 
 ### 2026-10-26 — bd9b4e3
 
