@@ -1,5 +1,7 @@
 # ky_server_base
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15937/badge)](https://www.bestpractices.dev/projects/15937)
+
 The scaffold every Busnes.app server is built from: Go backend, embedded React PWA, SQLite or
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
 disaster recovery through the suite's KyRecovery.
