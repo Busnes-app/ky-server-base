@@ -14,8 +14,8 @@ to its source. A mutable `:latest` tag does not identify a historical release.
 
 The historical summaries below were reconstructed from source intervals and the
 public CI publish jobs on 2026-10-26. Dates are UTC CI run dates, which can differ
-from commit dates. They cover all 40 successful image publications found from the
-first publishing workflow through `77d4d63`. A successful publish is evidence of
+from commit dates. They cover all 41 successful image publications found from the
+first publishing workflow through `95a3f11`. A successful publish is evidence of
 publication at that time, not a claim that its old registry tag is still available
 or that its promote job moved `:latest`. Historical images predate later repairs;
 use the current trusted owner/image and the README's owner-move instructions.
@@ -29,20 +29,20 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing
-  and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks
-  the same modulus that the signature verifier uses, including mixed-case and
-  duplicate-member inputs.
-- Add real signed-token regressions for both OIDC adapters, rejecting undersized
-  RSA keys while retaining strong-key authentication. Keep the existing verifier,
-  claim checks, key rotation/cache and pinned dependency versions.
-
+- Pin the merged shared-library TOTP repair: authentication refuses secrets
+  shorter than 16 decoded bytes while retaining strong RFC 6238 codes. This
+  source also includes the library's capsule size-budget, Shamir sampling and
+  setup-refusal repairs; key/share/container formats remain unchanged.
+- Update the shared library's required x/crypto, x/sync and x/text dependencies.
 ### Upgrade impact
 
-- Rebuild or replace the image and restart the server to load the repaired check
-  and discard the previous process's verifier/key cache. Retire any IdP RSA keys
-  below 2048 bits before rollout; a newly fetched set containing one is refused
-  even when a strong key is also present. See the strong-key profile.
+- A stored short TOTP secret can no longer authenticate. Keep its sealed record
+  and the database; use an enrolled recovery method or an authorized administrator
+  reset and then re-enroll with the issuer. Do not pad the secret or regenerate
+  encryption/recovery keys. Existing generated 20-byte TOTP secrets remain usable.
+- Keep historical capsules and their original custodian shares. Verify a known
+  restore with the updated shared library before deploying the upgrade.
+- Rebuild or replace the image and restart the server to load the updated library.
 - No schema migration or new configuration is required. Preserve the database,
   session secret, encryption key, recovery pin/capsules and Compose overlay chain.
 
@@ -67,6 +67,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 95a3f11
+
+Source: [95a3f114712d43151a4a1bc14a1299cbdd8be0b8](https://github.com/Busnes-app/ky-server-base/commit/95a3f114712d43151a4a1bc14a1299cbdd8be0b8) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40313178303)
+
+- **Changes:** Align the OIDC key-strength check with go-oidc's envelope and go-jose's case-sensitive JWK member parsing, checking the verifier's actual RSA modulus. Real signed-token regressions cover both adapters and preserve strong-key authentication, claim checks and upstream caching.
+- **Upgrade impact:** Rebuild/replace the image and restart to replace the previous process's verifier/cache. Retire IdP RSA keys below 2048 bits before rollout, including weak keys alongside strong ones. No schema migration or new settings are required; preserve database/session/encryption/recovery material and overlay chains.
 
 ### 2026-10-26 — 77d4d63
 
