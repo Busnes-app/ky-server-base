@@ -7,15 +7,26 @@ Provides unified Single Sign-On federation for KySignOn, Generic OpenID Connect 
 Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 signed directory sync webhooks, and SAML metadata publication.
 
 ## Local Contracts
-- `KySignOnClient.HandleSyncWebhook` verifies HMAC-SHA256 signatures before modifying local user state.
+- `KySignOnClient.HandleSyncWebhook` refuses keys below `crypto.MinHMACKeyBytes`
+  and verifies HMAC-SHA256 signatures before modifying local user state.
 - PKCE with `S256` is enforced on all OAuth/OIDC authorization requests.
 - ID tokens require provider signature, issuer, audience, expiry, and one-time nonce verification before claims are trusted.
-- OAuth discovery, authorization URLs, PKCE parameters, code exchange, and token verification are delegated to `golang.org/x/oauth2` and `coreos/go-oidc`; application code only maps verified claims.
+- OAuth discovery, authorization URLs, PKCE parameters, code exchange, key
+  caching/rotation and token verification stay in `oauth2`/`coreos/go-oidc`.
+  `jwks_strength.go` bounds the verifier's private JWKS client, refuses redirects
+  and rejects RSA members below 2048 actual modulus bits before caching. The
+  provider/verifier pair is initialized once under the discovery mutex.
+- When `fips140.Enabled()`, issuer/authorization/token/JWKS endpoints require
+  HTTPS without URL credentials; discovery/token redirects are refused. Preserve
+  caller TLS trust roots and ordinary verification. This mode is process-wide.
 - SAML assertion parsing is not implemented locally; metadata XML uses `encoding/xml` and no ACS route is exposed until a maintained SAML service-provider library is configured.
 - Directory webhook timestamps are accepted only within five minutes; status or role changes revoke the user's sessions.
 
 ## Verification
 - `go test -v ./internal/sso/...`
+- Repeat with `GODEBUG=fips140=on`: RSA-1024/2047 refusal, strong token/cache/nonce
+  behavior, no short-key sync mutation, bounded/malformed/redirected JWKS, HTTPS
+  metadata policy and refusal of a trusted RSA-1024 TLS peer.
 
 ## Child DOX Index
 None.

@@ -332,7 +332,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly |
 | `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections |
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
-| `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret |
+| `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
 | `KY_COOKIE_SECURE` | true only in production | Secure flag and HSTS response header |
 | `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain |
@@ -341,7 +341,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
 | `KY_KYSIGNON_CLIENT_ID` | Empty | Registered KySignOn client ID |
 | `KY_KYSIGNON_SECRET` | Empty | Registered client secret |
-| `KY_KYSIGNON_HMAC_SECRET` | Empty | Directory-sync webhook HMAC secret; absent means sync refusal |
+| `KY_KYSIGNON_HMAC_SECRET` | Empty | Directory-sync webhook HMAC secret; absent means sync refusal; nonempty values below 16 bytes fail startup and use |
 | `KY_SSO_AUTO_PROVISION` | `true` | Allow a validated KySignOn login to create a local user |
 | `KY_OIDC_ISSUER`, `KY_OIDC_CLIENT_ID`, `KY_OIDC_SECRET` | Empty | Generic OIDC helper configuration; no public login/callback routes are wired |
 | `KY_SAML_ENTITY_ID`, `KY_SAML_METADATA_URL` | Empty | SAML helper configuration; only local metadata output is wired |
@@ -363,3 +363,9 @@ write deadline to 16 minutes. The [README](../README.md#disaster-recovery) descr
 stored schedule precedence, container DNS overrides and backup retention. Compose's
 `KY_IMAGE`, `KY_CONTAINER_IP`, `KY_NETWORK_SUBNET` and `KY_DNS` are deployment inputs,
 not additional environment-loader options in the binary.
+
+The optional [strong-key configuration](STRONG-CRYPTO.md) supplies the Go runtime
+setting `GODEBUG=fips140=on`. It is read by Go, not this environment loader.
+Selected mode requires HTTPS OIDC endpoints without redirects; the standard
+verifier still checks signatures, issuer, audience, expiry and nonce. In every
+mode, JWKS fetching refuses redirects and RSA members below 2048 bits.

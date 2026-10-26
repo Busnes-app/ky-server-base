@@ -33,7 +33,9 @@ jobs:
           # superpowers plans are historical records and may retain old coordinates.
           mapfile -t all < <(git ls-files 'docker-compose*.yml' '*.md' | grep -v '^docs/superpowers/')
           grep -qxF '## Upgrading after the Busnes-app owner move' README.md || { echo 'README upgrade warning is missing'; exit 1; }
+          # shellcheck disable=SC2016 # Match Markdown code spans and command text literally.
           grep -qxF 'The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/ky-server-base`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KY_IMAGE` still names the old namespace or image name, re-pinning is required, not optional: inspect `git remote -v` before any `git pull`, `make ci`, or `docker compose` command, and replace a retired-owner remote with `https://github.com/Busnes-app/ky-server-base.git` (prefer a fresh clone plus a known commit). Then remove `KY_IMAGE` to follow the compose default or verify and pin a digest using `docs/RESTORE.md` before pulling.' README.md || { echo 'README upgrade warning text is missing'; exit 1; }
+          # shellcheck disable=SC2016 # Match Markdown code spans and command text literally.
           bad=$(grep -in 'busness-app' README.md | grep -vE '^[0-9]+:(## Upgrading after the Busnes-app owner move|The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr\.io/busnes-app/ky-server-base`\.)' || true); [ -z "$bad" ] || { echo "retired owner outside the README warning lines:"; echo "$bad"; exit 1; }
           bad=$(grep -il 'busness-app' "${all[@]}" | grep -vx README.md | while read -r f; do grep -q '^> \*\*Retired owner:\*\*' "$f" || echo "$f"; done || true); [ -z "$bad" ] || { echo "retired owner named without the retirement annotation in:"; echo "$bad"; exit 1; }
           bad=$(grep -inE 'github\.com/busness-app|ghcr\.io/busness-app|go get.*busness-app|go mod edit -replace.*busness-app|^module.*busness-app|gh api orgs/busness-app' "${all[@]}" | grep -vE '^README.md:[0-9]+:(## Upgrading|The GitHub organisation was renamed)' | grep -vE 'gh api orgs/Busness-app.*returns 404' || true); [ -z "$bad" ] || { echo "fetchable coordinate under the retired owner:"; echo "$bad"; exit 1; }
@@ -51,7 +53,9 @@ jobs:
           # the pin block itself must carry both flags; a value elsewhere does not excuse it
           for f in docker-compose.yml $( [ -f docs/RESTORE.md ] && echo docs/RESTORE.md ); do
             if [ "$f" = docker-compose.yml ] || grep -qE -- '--(repo|cert-identity)[ =]' "$f"; then
-              grep -qE -- '--repo[ =]' "$f" && grep -qE -- '--cert-identity[ =]' "$f" || { echo "$f lacks --repo or --cert-identity"; exit 1; }
+              if ! grep -qE -- '--repo[ =]' "$f" || ! grep -qE -- '--cert-identity[ =]' "$f"; then
+                echo "$f lacks --repo or --cert-identity"; exit 1
+              fi
             fi
           done
           # every --repo and the whole of every --cert-identity (workflow file and ref included),
@@ -71,7 +75,8 @@ jobs:
 
       - name: gofmt
         run: |
-          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          mapfile -d '' -t go_files < <(git ls-files -z '*.go')
+          unformatted="$(gofmt -l "${go_files[@]}")"
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt:"; echo "$unformatted"; exit 1
           fi
@@ -87,6 +92,10 @@ jobs:
 
       - name: Tests with race detector and coverage
         run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Strong-key profile (SQLite)
+        env:
+          GODEBUG: fips140=on
+        run: go test -race -count=1 ./...
 
       # Bounded fuzz runs over parsers of untrusted input; together about a minute.
       - run: go test -fuzz=FuzzParseTrustedProxies -fuzztime=1000000x ./internal/config
@@ -129,6 +138,11 @@ jobs:
       # Same suite, real Postgres: each test gets its own schema (internal/testdb).
       - name: Tests against PostgreSQL
         env:
+          KY_TEST_POSTGRES_DSN: postgres://ci:ci@127.0.0.1:5432/ci_test?sslmode=disable
+        run: go test -race -count=1 ./...
+      - name: Strong-key profile (PostgreSQL)
+        env:
+          GODEBUG: fips140=on
           KY_TEST_POSTGRES_DSN: postgres://ci:ci@127.0.0.1:5432/ci_test?sslmode=disable
         run: go test -race -count=1 ./...
 
@@ -229,19 +243,53 @@ jobs:
       - name: Build image
         run: docker build -t ky_server_base:ci .
 
+      - name: Strong-key Compose overlay combinations
+        run: python3 scripts/check-strong-crypto-compose.py
+
       - name: Container serves the app
         run: |
-          docker run -d --name ky_ci -p 18080:8080 \
+          set -euo pipefail
+          docker run -d --name ky_ci -p 127.0.0.1::8080 \
+            -e KY_DB_DRIVER=sqlite \
             -e KY_ADMIN_PASSWORD='CiSmokeAdminPass123!' \
             -e KY_CAPTCHA_PROVIDER=none \
             ky_server_base:ci
-          trap 'docker logs ky_ci; docker rm -f ky_ci' EXIT
+          trap 'docker logs ky_ci; docker logs ky_strong_ci 2>/dev/null || true; docker rm -fv ky_strong_ci ky_ci 2>/dev/null || true' EXIT
 
-          curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors http://127.0.0.1:18080/
-          curl -sf -o /dev/null http://127.0.0.1:18080/api/settings
+          base="http://$(docker port ky_ci 8080/tcp)"
+          curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors "$base/"
+          curl -sf -o /dev/null "$base/api/settings"
           curl -sf -X POST -H 'Content-Type: application/json' \
             -d '{"username":"admin","password":"CiSmokeAdminPass123!"}' \
-            http://127.0.0.1:18080/api/auth/login | grep -q '"authenticated":true'
+            "$base/api/auth/login" | grep -q '"authenticated":true'
+
+          # Recreate against the same owned data, with no simultaneous writers.
+          before="$(docker exec ky_ci sha256sum /app/data/encryption.key)"
+          docker stop ky_ci
+          docker run -d --name ky_strong_ci --volumes-from ky_ci -p 127.0.0.1::8080 \
+            -e KY_DB_DRIVER=sqlite \
+            -e GODEBUG=fips140=on -e KY_ENV=production \
+            -e KY_SESSION_SECRET=synthetic-profile-session-secret-for-ci \
+            -e KY_APP_URL=https://profile.example.invalid -e KY_COOKIE_SECURE=true \
+            -e KY_ADMIN_PASSWORD='CiSmokeAdminPass123!' -e KY_CAPTCHA_PROVIDER=none \
+            ky_server_base:ci
+          base="http://$(docker port ky_strong_ci 8080/tcp)"
+          curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors "$base/"
+          test "$(docker exec ky_strong_ci sha256sum /app/data/encryption.key)" = "$before"
+          curl -sf -D profile-headers.txt -X POST -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"CiSmokeAdminPass123!"}' \
+            "$base/api/auth/login" | grep -q '"authenticated":true'
+          grep -iE '^Set-Cookie: ky_session=.*; Secure' profile-headers.txt
+          docker exec ky_strong_ci /app/ky_server_base backup-drill > profile-drill.txt
+          cat profile-drill.txt
+          grep -q 'Status: *PASSED' profile-drill.txt
+          test "$(docker exec ky_strong_ci sha256sum /app/data/encryption.key)" = "$before"
+
+          if docker run --rm -e GODEBUG=fips140=on -e KY_ENV=production \
+              -e KY_SESSION_SECRET=short ky_server_base:ci > profile-refusal.txt 2>&1; then
+            echo 'short-key container unexpectedly started'; exit 1
+          fi
+          grep -q 'KY_SESSION_SECRET must contain at least 16 bytes' profile-refusal.txt
 
       # Hand the exact image the checks above ran against to the publish job,
       # so what gets pushed is what was tested, never a second build.

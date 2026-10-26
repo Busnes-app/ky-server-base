@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/keyfile"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
 )
 
 // Config encapsulates all runtime configuration for ky_server_base.
@@ -132,6 +133,13 @@ func LoadFromEnv() (*Config, error) {
 	if sessionSecret == "" {
 		sessionSecret = generateRandomHex(32)
 	}
+	if len(sessionSecret) < crypto.MinHMACKeyBytes {
+		return nil, fmt.Errorf("KY_SESSION_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
+	}
+	kysignonHMAC := getEnv("KY_KYSIGNON_HMAC_SECRET", "")
+	if kysignonHMAC != "" && len(kysignonHMAC) < crypto.MinHMACKeyBytes {
+		return nil, fmt.Errorf("KY_KYSIGNON_HMAC_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
+	}
 
 	encryptionKey, ok, err := keyfile.FromEnv("KY_ENCRYPTION_KEY", 32)
 	if err != nil {
@@ -193,7 +201,7 @@ func LoadFromEnv() (*Config, error) {
 			KySignOnIssuer:      getEnv("KY_KYSIGNON_ISSUER", ""),
 			KySignOnClientID:    getEnv("KY_KYSIGNON_CLIENT_ID", ""),
 			KySignOnSecret:      getEnv("KY_KYSIGNON_SECRET", ""),
-			KySignOnHMACSecret:  getEnv("KY_KYSIGNON_HMAC_SECRET", ""),
+			KySignOnHMACSecret:  kysignonHMAC,
 			GenericOIDCIssuer:   getEnv("KY_OIDC_ISSUER", ""),
 			GenericOIDCClientID: getEnv("KY_OIDC_CLIENT_ID", ""),
 			GenericOIDCSecret:   getEnv("KY_OIDC_SECRET", ""),

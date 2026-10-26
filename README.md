@@ -50,6 +50,10 @@ response fields, authentication/CSRF, SCIM limitations, CLI commands and environ
 configuration. It describes the scaffold's implemented interfaces; derived products
 document their own additions.
 
+[Strong-key/TLS configuration](docs/STRONG-CRYPTO.md) describes the optional
+production profile, Compose overlay and migration for existing signing secrets
+and IdP keys. Encryption/recovery keys and stored records stay in place.
+
 ## Container IP address
 
 To assign the app a static IP on the Docker network, append

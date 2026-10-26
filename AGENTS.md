@@ -97,6 +97,9 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - On a push to `master` that passes every job, `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
 Run the same checks locally with `make ci` (`tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
+Run the full race suites with `GODEBUG=fips140=on` too; CI covers SQLite and
+PostgreSQL. `python3 scripts/check-strong-crypto-compose.py` verifies actual
+overlay merges with synthetic inputs and starts no containers.
 
 ## Child DOX Index
 
@@ -133,3 +136,8 @@ Contributor documents: `CONTRIBUTING.md` (process, test policy, coding standard 
 `docs/INTERFACES.md` owns the public HTTP, CLI and environment reference. Update it
 when externally observable inputs, outputs, permissions or configuration change;
 describe implemented scaffold behavior and explicitly identify unwired helpers.
+
+`docs/STRONG-CRYPTO.md` owns the supported key/TLS profile and migration. The
+opt-in Compose overlay preserves existing image/build, DNS, network and storage
+settings while replacing the public HTTP port with loopback. Never regenerate
+retained encryption/recovery keys to satisfy the profile.
