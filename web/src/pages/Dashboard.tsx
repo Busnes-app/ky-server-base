@@ -41,7 +41,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
       title: 'Pluggable Database Engine',
       desc: `Current storage backend: ${settings?.db_driver?.toUpperCase() || 'SQLITE'} (zero-CGO with WAL mode & foreign keys).`,
       status: `${settings?.db_driver || 'sqlite'} (active)`,
-      statusType: 'accent',
+      statusType: 'neutral',
       icon: Database,
       action: () => onNavigate('settings'),
       actionLabel: 'Database Config',

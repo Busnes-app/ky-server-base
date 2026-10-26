@@ -1,0 +1,138 @@
+{
+  "product": "ky_server_base",
+  "stage": "01",
+  "phase": "after",
+  "captured_at": "2026-10-26T16:43:35.820Z",
+  "source_commit": "b2c773345c875ca1d844b01114689a558f9824e8",
+  "uncommitted_source_sha256": null,
+  "os": "Linux 7.2.10-1-cachyos",
+  "driver": "Playwright 1.64.1 Chromium 156.0.8078.4, device scale 1, service workers blocked",
+  "fonts": "self-hosted Space Grotesk bundled in web/dist; Space Grotesk loaded: true",
+  "server": "disposable .browser/server (built from this tree, embedding web/dist) on loopback with temporary SQLite data, removed after capture",
+  "fixture": "synthetic: fresh install with the bootstrap admin only (password changed by the script); no SCIM, devices or backups configured",
+  "shots": [
+    {
+      "file": "kybase-01-after-overview-desktop-light.png",
+      "sha256": "0b8e0b793a445652043c68301547a25c940d42b38eab4597889b783bd571ad48",
+      "surface": "overview",
+      "nav": "Overview",
+      "device": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme_source": "OS light (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-settings-via-overview-desktop-light.png",
+      "sha256": "8ca7231eada788c7609b790b19c7240eab56be1f1d7e65e4fd1ce5d46bd3c16f",
+      "surface": "settings-via-overview",
+      "nav": "Overview action: Database Config",
+      "device": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme_source": "OS light (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-overview-mobile-light.png",
+      "sha256": "3ce70c88b79d6aa79551ae27546b6f0ca1e2fb231ac793d1cdcdb5600ff7dea9",
+      "surface": "overview",
+      "nav": "Overview",
+      "device": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme_source": "OS light (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-settings-via-overview-mobile-light.png",
+      "sha256": "8f03701c40e159c9b77cea6b33ff102915139d00fd6b19957c52a32c27e986f5",
+      "surface": "settings-via-overview",
+      "nav": "Overview action: Database Config",
+      "device": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme_source": "OS light (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-overview-desktop-dark.png",
+      "sha256": "8c8b469e38b2fae4c3b4ff376a9a3fbc41e2299ecd6895596be53f2e2f071fc8",
+      "surface": "overview",
+      "nav": "Overview",
+      "device": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme_source": "OS dark (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-settings-via-overview-desktop-dark.png",
+      "sha256": "3a3184fcc557a6db2a76823512edca6f0bc5de8ce000a0bbca34e724d246e59e",
+      "surface": "settings-via-overview",
+      "nav": "Overview action: Database Config",
+      "device": "desktop",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme_source": "OS dark (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-overview-mobile-dark.png",
+      "sha256": "22d92f1e9ca58a0c3bb12170a7948c3a28a280f182eaebdff6bcfa8521f68baf",
+      "surface": "overview",
+      "nav": "Overview",
+      "device": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme_source": "OS dark (prefers-color-scheme), no saved choice"
+    },
+    {
+      "file": "kybase-01-after-settings-via-overview-mobile-dark.png",
+      "sha256": "223fdc9f69de6e0e4fc4de6dceea3da38dfc0ca607dd24273a451826d3bc2dda",
+      "surface": "settings-via-overview",
+      "nav": "Overview action: Database Config",
+      "device": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme_source": "OS dark (prefers-color-scheme), no saved choice"
+    }
+  ],
+  "checks": [
+    {
+      "name": "overview: title to introduction gap",
+      "pass": true,
+      "detail": "8px"
+    },
+    {
+      "name": "settings-via-overview: title to introduction gap",
+      "pass": true,
+      "detail": "8px"
+    },
+    {
+      "name": "settings: no tinted box inside the database card",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "name": "settings: the card uses no accent colour",
+      "pass": true,
+      "detail": "none"
+    },
+    {
+      "name": "no console errors or CSP violations",
+      "pass": true,
+      "detail": "none"
+    }
+  ]
+}
