@@ -31,6 +31,9 @@ These are human summaries, not a raw version-control log.
 
 - Keep error and success text readable on the six newly available light themes;
   preserve the five original base theme palettes.
+- Keep the filled danger button label readable on the 15 suite themes (it takes the
+  page colour); Busnes and the five base themes are unchanged. Base renders no danger
+  button, so this protects products built from it.
 - On phones, bring the current page into view when an Overview action changes page,
   without moving focus or scrolling the page.
 - Sync the ky-ui 0.4.1 catalog and generated classic-script export. Existing browser

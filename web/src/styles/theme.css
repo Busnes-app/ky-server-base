@@ -107,6 +107,11 @@
   --danger: color-mix(in srgb, var(--ky-danger) 50%, var(--ink-strong));
   --success: color-mix(in srgb, var(--ky-success) 50%, var(--ink-strong));
 }
+/* That tint darkens the danger fill on light palettes, whose --button-text is dark too: label
+   the filled danger button with the page colour, which reads on it in every suite palette. */
+:root[data-theme]:not([data-theme^="busnes-"], [data-theme="patina"], [data-theme="cyber"], [data-theme="nord"], [data-theme="paper"], [data-theme="oled"]) .btn-danger {
+  color: var(--bg);
+}
 
 /* ---------- Global Layout ---------- */
 
