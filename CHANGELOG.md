@@ -29,6 +29,8 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Keep error and success text readable on the six newly available light themes; preserve the five original base theme palettes.
+
 - Add an Appearance page reachable by every signed-in role: native radio theme cards
   over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
   replacing the sidebar theme selector; the sign-in page keeps its selector.
