@@ -14,8 +14,8 @@ to its source. A mutable `:latest` tag does not identify a historical release.
 
 The historical summaries below were reconstructed from source intervals and the
 public CI publish jobs on 2026-10-26. Dates are UTC CI run dates, which can differ
-from commit dates. They cover all 40 successful image publications found from the
-first publishing workflow through `77d4d63`. A successful publish is evidence of
+from commit dates. They cover all 42 successful image publications found from the
+first publishing workflow through `6c296a2`. A successful publish is evidence of
 publication at that time, not a claim that its old registry tag is still available
 or that its promote job moved `:latest`. Historical images predate later repairs;
 use the current trusted owner/image and the README's owner-move instructions.
@@ -29,21 +29,31 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Keep error and success text readable on the six newly available light themes; preserve the five original base theme palettes.
-- On phones, the horizontal navigation brings the current page into view when an Overview action changes page.
-
-- Add an Appearance page reachable by every signed-in role: native radio theme cards
-  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
-  replacing the sidebar theme selector; the sign-in page keeps its selector.
-- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
-  8px radius, 24px titles, visible focus); remove decorative accent icons from page
-  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
+- Keep error and success text readable on the six newly available light themes;
+  preserve the five original base theme palettes.
+- On phones, bring the current page into view when an Overview action changes page,
+  without moving focus or scrolling the page.
+- Sync the ky-ui 0.4.1 catalog and generated classic-script export. Existing browser
+  storage IDs and named palette values stay unchanged.
+- Pin the merged shared-library TOTP repair: authentication refuses secrets
+  shorter than 16 decoded bytes while retaining strong RFC 6238 codes. This
+  source also includes the library's capsule size-budget, Shamir sampling and
+  setup-refusal repairs; key/share/container formats remain unchanged.
+- Update the shared library's required x/crypto, x/sync and x/text dependencies.
 
 ### Upgrade impact
 
-- No migration, configuration or stored-format change; rebuild the image to pick up
-  the new embedded web assets. Saved browser theme choices (`ky_theme`) keep their
+- A stored short TOTP secret can no longer authenticate. Keep its sealed record
+  and the database; use an enrolled recovery method or an authorized administrator
+  reset and then re-enroll with the issuer. Do not pad the secret or regenerate
+  encryption/recovery keys. Existing generated 20-byte TOTP secrets remain usable.
+- Keep historical capsules and their original custodian shares. Verify a known
+  restore with the updated shared library before deploying the upgrade.
+- Rebuild or replace the image and restart the server to load the updated library
+  and embedded web assets. Saved browser theme choices (`ky_theme`) keep their
   values, including base `patina`, which stays distinct from the suite Patina Ky.
+- No schema migration or new configuration is required. Preserve the database,
+  session secret, encryption key, recovery pin/capsules and Compose overlay chain.
 
 ## Maintaining notes
 
@@ -67,12 +77,19 @@ the actual change. The required Go job gates publish, and publish gates promotio
 
 ## Historical image publications
 
+### 2026-10-26 — 6c296a2
+
+Source: [6c296a2ca7f33238857a499f8aa1e5444aec6089](https://github.com/Busnes-app/ky-server-base/commit/6c296a2ca7f33238857a499f8aa1e5444aec6089) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40325239762)
+
+- **Changes:** Add an Appearance page for every signed-in role over the shared ky-ui 0.4.0 catalog, replacing the sidebar theme selector while retaining the sign-in selector. Use shared shell geometry/type and remove decorative title icons and the unverified "Verified Ready" backup badge.
+- **Upgrade impact:** Rebuild or replace the image for the embedded web assets. No schema, configuration or stored-format migration is required; saved `ky_theme` choices remain valid, including base `patina`, distinct from suite Patina Ky.
+
 ### 2026-10-26 — 95a3f11
 
 Source: [95a3f114712d43151a4a1bc14a1299cbdd8be0b8](https://github.com/Busnes-app/ky-server-base/commit/95a3f114712d43151a4a1bc14a1299cbdd8be0b8) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40313178303)
 
-- **Changes:** Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks the modulus the verifier uses; add signed-token regressions for both OIDC adapters.
-- **Upgrade impact:** Rebuild or replace the image and restart to load the repaired check and drop the old verifier/key cache; retire IdP RSA keys below 2048 bits first. No schema migration or new configuration.
+- **Changes:** Align the OIDC key-strength check with go-oidc's envelope and go-jose's case-sensitive JWK member parsing, checking the verifier's actual RSA modulus. Real signed-token regressions cover both adapters and preserve strong-key authentication, claim checks and upstream caching.
+- **Upgrade impact:** Rebuild/replace the image and restart to replace the previous process's verifier/cache. Retire IdP RSA keys below 2048 bits before rollout, including weak keys alongside strong ones. No schema migration or new settings are required; preserve database/session/encryption/recovery material and overlay chains.
 
 ### 2026-10-26 — 77d4d63
 

@@ -30,6 +30,13 @@ instance or every derived product has been verified, or a FIPS certification.
   The floor parses the envelope and case-sensitive JWK members with the same
   rules as the signature verifier, checking the actual modulus it will use.
 
+TOTP secrets are generated as 20 random decoded bytes. The pinned shared library
+now refuses authentication with fewer than 16 decoded bytes, including an old
+short secret already stored in a sealed record. Keep that record and the database;
+do not pad its secret or replace the encryption key. Use a previously enrolled
+recovery method or an authorized administrator MFA reset, then enroll a fresh
+issuer-generated secret. This rule applies in every process mode.
+
 An undersized configured signing secret can no longer start the server after
 this update, even outside the optional TLS profile. Rotate it deliberately;
 the application does not pad it, regenerate it or rewrite stored encryption keys.
