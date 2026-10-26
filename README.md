@@ -32,6 +32,9 @@ make run       # build and start on :8080; first start prints the bootstrap admi
 docker compose up -d
 ```
 
+Read the [release notes](CHANGELOG.md) for the selected source revision and every
+intervening release before upgrading; they describe migrations and upgrade impact.
+
 Update a published-image install on the rolling tag:
 
 ```bash

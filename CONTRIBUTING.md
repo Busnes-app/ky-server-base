@@ -41,7 +41,7 @@ every purpose, regardless of how it was produced.
 
 ## Pull requests
 
-Branch off `main` with a focused name, and use a Conventional Commit subject
+Branch off `master` with a focused name, and use a Conventional Commit subject
 (`fix:`, `feat:`, `docs:`, `refactor:`, `test:`, or `chore:`). The pull request
 explains why the change exists, the verification performed, the security impact,
 and any known limitations.
@@ -49,6 +49,20 @@ and any known limitations.
 Every pull request gets an adversarial review pass; see
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md#hostile-reviews-are-about-code-never-people)
 for what that is and the boundary it keeps.
+
+## Release notes
+
+Every successful image publication is a commit-identified release, including
+dependency, workflow and documentation-only changes. Before merging, replace
+`CHANGELOG.md`'s Current source summary with the major changes and upgrade
+impact; include known advisory IDs and explicit migration or no-migration guidance.
+Archive the preceding shipped summary under its known source commit.
+
+Run `make notes-check` (Python 3) and review the prose against the actual diff.
+CI checks presence/freshness against the tested commit's first parent before
+publication; the check does not establish that the prose is accurate or complete.
+See [the release-note process](CHANGELOG.md#maintaining-notes) for local base
+selection and how an image digest maps to its notes.
 
 ## Licence
 

@@ -1,4 +1,4 @@
-.PHONY: all build build-web test test-race test-postgres test-web tidy-check lint smoke ci run clean docker-build
+.PHONY: all build build-web test test-race test-postgres test-web tidy-check lint smoke ci run clean docker-build notes-check
 
 all: build-web build
 
@@ -42,7 +42,11 @@ lint:
 smoke: build
 	@./scripts/smoke-test.sh
 
-ci: tidy-check lint test-race test-web smoke
+notes-check:
+	@python3 -B -m unittest discover -s scripts -p test_release_notes.py
+	@python3 scripts/check-release-notes.py
+
+ci: notes-check tidy-check lint test-race test-web smoke
 	@echo "==> Local CI checks passed"
 
 run: build

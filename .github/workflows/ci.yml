@@ -24,6 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Release summary and upgrade impact
+        run: make notes-check
       - name: image and attestation coordinates match this repository
         run: |
           set -euo pipefail
