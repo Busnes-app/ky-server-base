@@ -13,6 +13,8 @@ Claude Opus 5.5 council; this record claims no score.
 | `02-after` | final tree, hash in `manifest-02-after.json` | confirmation batch after the owner corrections and shared `4f83f34` |
 | `03-after` | `30776fc` with the new `nav.spec.mjs` untracked | fleet review F6 baseline. Adds `settings-via-overview`, Settings reached from the Overview "Database Config" action rather than a nav click. At 390px its nav row is off-screen |
 | `04-after` | F6 fix, hash in `manifest-04-after.json` | the current row scrolls into view. Only the two phone `settings-via-overview` captures change; every other capture is pixel-identical to 03, apart from a sub-visible difference in the dark phone Overview nav row that shows identical text and colours |
+| `05-after` | `63b3b4c` (PR #72 head; same tree as master `925bfe3`), pre-F7 build | fleet review F7 diagnostic baseline. Adds `diagnostic-danger-sky` and `diagnostic-danger-forest`: a labelled diagnostic `.btn-danger` added to the real Overview (Base renders none) under a saved Sky or Forest palette. On Sky the label is dark on dark red |
+| `06-after` | F7 fix, hash in `manifest-06-after.json` | the Sky label is light. Only the diagnostic label strip changes; the other 12 captures are pixel-identical to stage 05, apart from the sub-visible dark phone Overview nav row noted at stage 04 |
 
 Each batch is light and dark (OS `prefers-color-scheme`, no saved choice) × 1280×900
 and 390×844 CSS px, device scale 1, full-page PNGs named

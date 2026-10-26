@@ -57,6 +57,12 @@ const surfaces = {
   appearance: { nav: phase === 'before' ? 'Settings & DB' : 'Appearance', ready: phase === 'before' ? 'System Settings & Architecture' : 'Appearance' },
   // Fleet review F6: a page change from an Overview action, not a nav click (which scrolls the nav itself).
   ...(stage >= '03' && { 'settings-via-overview': { action: 'Database Config', ready: 'System Settings & Architecture' } }),
+  // Fleet review F7: Base renders no .btn-danger, so a labelled diagnostic button is added to the
+  // real Overview under a saved light (Sky) or dark (Forest) suite palette.
+  ...(stage >= '05' && {
+    'diagnostic-danger-sky': { nav: 'Overview', ready: /Welcome/, saved: 'sky', diagnostic: true },
+    'diagnostic-danger-forest': { nav: 'Overview', ready: /Welcome/, saved: 'forest', diagnostic: true },
+  }),
 };
 
 try {
@@ -81,16 +87,24 @@ try {
       const page = await ctx.newPage();
       for (const [surface, s] of Object.entries(surfaces)) {
         await page.goto('/');
+        await page.evaluate(v => v ? localStorage.setItem('ky_theme', v) : localStorage.removeItem('ky_theme'), s.saved ?? null);
+        await page.reload();
         if (s.action) {
           await page.getByRole('heading', { name: /Welcome/ }).waitFor();
           await page.getByRole('button', { name: s.action }).click();
         } else await page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: s.nav, exact: true }).click();
         await page.getByRole('heading', { name: s.ready }).first().waitFor();
+        if (s.diagnostic) await page.locator('main').evaluate(main => {
+          const button = main.insertBefore(document.createElement('button'), main.firstChild);
+          button.type = 'button';
+          button.className = 'btn-danger';
+          button.textContent = 'F7 diagnostic: .btn-danger (class unused in Base)';
+        });
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(300);
         const file = `kybase-${stage}-${phase}-${surface}-${device}-${theme}.png`;
         const bytes = await page.screenshot({ path: join(out, file), fullPage: true });
-        shots.push({ file, sha256: sha(bytes), surface, nav: s.nav ?? `Overview action: ${s.action}`, device, viewport, theme_source: `OS ${theme} (prefers-color-scheme), no saved choice` });
+        shots.push({ file, sha256: sha(bytes), surface, nav: s.nav ?? `Overview action: ${s.action}`, device, viewport, ...(s.diagnostic && { diagnostic: 'injected labelled .btn-danger; not a Base control' }), theme_source: s.saved ? `saved choice ${s.saved}; OS ${theme} (prefers-color-scheme)` : `OS ${theme} (prefers-color-scheme), no saved choice` });
       }
       await ctx.close();
     }
