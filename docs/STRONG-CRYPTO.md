@@ -27,6 +27,8 @@ instance or every derived product has been verified, or a FIPS certification.
   key retained beside a strong key. Replace/retire weak signing keys at the IdP;
   do not silently accept one or drop trust verification. Existing cached valid
   keys keep the upstream cache's normal lifecycle.
+  The floor parses the envelope and case-sensitive JWK members with the same
+  rules as the signature verifier, checking the actual modulus it will use.
 
 An undersized configured signing secret can no longer start the server after
 this update, even outside the optional TLS profile. Rotate it deliberately;
@@ -125,7 +127,9 @@ TLS clients, imported keys, SAML/mail/SSH code or custom transports themselves.
 ## Evidence and rollout
 
 Tests demonstrate RSA-1024/2047 ID-token refusal in both OIDC adapters, RSA-2048
-acceptance, retained JWKS caching and nonce checks; signing-secret boundaries at
+acceptance, retained JWKS caching and nonce checks; matching the verifier's
+case-sensitive JWK members, including differently cased members before and
+after the canonical fields; signing-secret boundaries at
 15/16 bytes; weak directory-sync refusal before user creation; bounded/malformed
 JWKS and redirect refusal; and configured-mode refusal of plaintext OIDC
 metadata, discovery redirects and a trusted RSA-1024 TLS peer. Full race suites
