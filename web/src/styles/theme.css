@@ -460,7 +460,15 @@ textarea { border-radius: var(--ky-control-radius); }
 .btn-secondary { background: transparent; border-color: var(--ky-field-border); }
 .theme-selector { min-height: var(--ky-control-size); border-color: var(--ky-field-border); border-radius: var(--ky-control-radius); }
 :is(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.page-intro { max-width: 65ch; margin: -8px 0 24px; color: var(--ink); }
+.page-intro { max-width: 65ch; margin: -12px 0 24px; color: var(--ink); }
+/* Settings cards: a title, one line of context and label/value rows on the card surface. */
+.settings-card { max-width: 720px; }
+.settings-card h2 { font-size: var(--ky-type-section); font-weight: 600; line-height: 1.3; }
+.settings-card-desc { margin: 8px 0 16px; color: var(--ink); font-size: 14px; }
+.settings-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 24px; margin: 0; border-top: 1px solid var(--line); }
+.settings-facts dt, .settings-facts dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.settings-facts dt { color: var(--ink); font-size: var(--ky-type-meta); }
+.settings-facts dd { color: var(--ink-strong); overflow-wrap: anywhere; }
 .app-pair { justify-content: flex-start; }
 .app-logout { justify-content: center; width: var(--ky-control-size); padding: 0; }
 @media (max-width: 720px) {
