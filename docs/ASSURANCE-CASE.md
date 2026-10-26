@@ -77,6 +77,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 | Broken access control | Admin wrapper on every privileged route; per-role tests for each | `internal/api/server.go`, `internal/api/authz_test.go` |
 | Forged federated identity | ID token signature, issuer, audience, expiry and one-time nonce verified; PKCE S256 | `internal/sso/oauth.go` |
 | Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; configured HMAC keys require 16 bytes and sync checks again before mutation | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
+| Undersized TOTP secrets | Generate 20 decoded bytes and refuse authentication below 16 through the pinned shared library; retain existing sealed records for deliberate MFA recovery | `internal/auth/totp.go`, `internal/auth/totp_strength_test.go` |
 | Weak TLS peers or HTTP IdP downgrade | Supported process profile enables Go's verified-chain key policy, requires HTTPS OIDC endpoints and refuses redirects; normal trust/hostname verification remains required | [Strong profile](STRONG-CRYPTO.md), `internal/sso/oauth.go`, `TestOIDCStrongModeRejectsWeakTLSPeer` |
 | Forged directory webhook | HMAC-SHA256 checked in constant time before any change; five-minute window | `internal/sso/kysignon.go`, `internal/crypto/crypto.go` |
 | SQL injection | Parameterised statements throughout (`?`, rebound per driver); the only `Sprintf` builds the SQLite DSN | `internal/store` |
