@@ -1,0 +1,596 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2488089..68d11fd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -29,22 +29,18 @@ These are human summaries, not a raw version-control log.
+ 
+ ### Changes
+ 
+-- Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing
+-  and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks
+-  the same modulus that the signature verifier uses, including mixed-case and
+-  duplicate-member inputs.
+-- Add real signed-token regressions for both OIDC adapters, rejecting undersized
+-  RSA keys while retaining strong-key authentication. Keep the existing verifier,
+-  claim checks, key rotation/cache and pinned dependency versions.
++- Add an Appearance page reachable by every signed-in role: native radio theme cards
++  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
++  replacing the sidebar theme selector; the sign-in page keeps its selector.
++- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
++  8px radius, 24px titles, visible focus); remove decorative accent icons from page
++  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
+ 
+ ### Upgrade impact
+ 
+-- Rebuild or replace the image and restart the server to load the repaired check
+-  and discard the previous process's verifier/key cache. Retire any IdP RSA keys
+-  below 2048 bits before rollout; a newly fetched set containing one is refused
+-  even when a strong key is also present. See the strong-key profile.
+-- No schema migration or new configuration is required. Preserve the database,
+-  session secret, encryption key, recovery pin/capsules and Compose overlay chain.
++- No migration, configuration or stored-format change; rebuild the image to pick up
++  the new embedded web assets. Saved browser theme choices (`ky_theme`) keep their
++  values, including base `patina`, which stays distinct from the suite Patina Ky.
+ 
+ ## Maintaining notes
+ 
+@@ -68,6 +64,13 @@ the actual change. The required Go job gates publish, and publish gates promotio
+ 
+ ## Historical image publications
+ 
++### 2026-10-26 — 95a3f11
++
++Source: [95a3f114712d43151a4a1bc14a1299cbdd8be0b8](https://github.com/Busnes-app/ky-server-base/commit/95a3f114712d43151a4a1bc14a1299cbdd8be0b8) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40313178303)
++
++- **Changes:** Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks the modulus the verifier uses; add signed-token regressions for both OIDC adapters.
++- **Upgrade impact:** Rebuild or replace the image and restart to load the repaired check and drop the old verifier/key cache; retire IdP RSA keys below 2048 bits first. No schema migration or new configuration.
++
+ ### 2026-10-26 — 77d4d63
+ 
+ Source: [77d4d6337b854ba2ec7ba9c2b546c1aa87809242](https://github.com/Busnes-app/ky-server-base/commit/77d4d6337b854ba2ec7ba9c2b546c1aa87809242) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40309420264)
+diff --git a/UI-VERIFICATION.md b/UI-VERIFICATION.md
+index 8b9bbb0..12cd777 100644
+--- a/UI-VERIFICATION.md
++++ b/UI-VERIFICATION.md
+@@ -42,3 +42,7 @@ Build the frontend, then run `go build -o .browser/server ./cmd/server` from the
+ ### Manual inspection
+ 
+ Run npm ci, npm test (where configured), and npm run build in web/, then start the product with isolated local preview data following its README. Use System theme, emulate OS light/dark, and inspect both viewport sizes. Do not point preview instances at production data. For KyVault, use a configured development KyIdentity or explicitly labeled read-only browser fixtures; never bypass backend authentication.
++
++## 2026-10-26 fleet Appearance
++
++ky-ui 0.4.0 (shared source `4f83f34`): the Appearance theme-card picker over the shared catalog, plus shell geometry from shared tokens. Before/after screenshots, capture conditions, hashes, real-browser behaviour checks and the results spreadsheet are in [docs/ui-fleet-2026-10-26](docs/ui-fleet-2026-10-26/README.md). Ratings are set by the independent council, not this record.
+diff --git a/web/AGENTS.md b/web/AGENTS.md
+index 1100e8c..8c32072 100644
+--- a/web/AGENTS.md
++++ b/web/AGENTS.md
+@@ -1,7 +1,7 @@
+ # Web
+ 
+ ## Purpose
+-React 19 + TypeScript + Vite PWA frontend embedding KySecurity color tokens (Busnes light/dark defaults plus `Patina Ky`, `Cyber`, `Nord`, `Paper`, `OLED`), 90-second ephemeral QR device pairing modals, client-side WebCrypto PoW CAPTCHA, and administrative management panels.
++React 19 + TypeScript + Vite PWA frontend using the shared ky-ui theme catalog (Busnes light/dark defaults, the suite palettes and the base-family `patina`, `cyber`, `nord`, `paper`, `oled`), 90-second ephemeral QR device pairing modals, client-side WebCrypto PoW CAPTCHA, and administrative management panels.
+ 
+ ## Ownership
+ Owns user interface components, service worker caching, PWA installation manifests, and frontend theme switching.
+@@ -11,7 +11,8 @@ Owns user interface components, service worker caching, PWA installation manifes
+ - A signed-in user with `must_change_password` sees only password replacement and sign-out. Replacement uses `secureFetch`, returns to login after session revocation, and never exposes the normal navigation before completion.
+ - Strict TypeScript type safety without unused imports.
+ - The authenticated shell uses a persistent sidebar; the selected page is marked by a quiet surface and slim accent rail, with a horizontal overflow navigation on small screens.
+-- Dynamic theme selection applies `data-theme` attribute to the root HTML document and persists to `localStorage`.
++- `src/theme.ts` adapts the shared catalog (`ky-ui/themes.js`): `Match system` plus every catalog theme, saved by catalog ID under `ky_theme`; older saved IDs (including base `patina`, distinct from suite `patina-ky`) resolve unchanged. It sets `data-theme` and, for named palettes, the colours inline through `applyThemeVariables`; Busnes clears them so the token aliases apply. Every theme control reads the one `useTheme()` store.
++- The Appearance page (`src/pages/Appearance.tsx`) is the theme picker for every signed-in role: shared native radio cards (`ky-ui/appearance.css`, previews from `appearance-themes.css`, imported after product CSS). The signed-in shell has no other theme selector; only the sign-in page keeps `ThemeSwitcher`, over the same store. The page uses the shared `ky-appearance-description` copy.
+ - Authenticated state-changing requests use `secureFetch` so the `ky_csrf` cookie is mirrored into `X-CSRF-Token`.
+ - Register the service worker from the production JS bundle; keep `script-src 'self'` intact. Pairing uses a native modal dialog for focus containment, Escape and focus restoration. It shows only the QR code (no typed PIN) and treats poll status `consumed` as linked.
+ - Worker caching is limited to the same-origin public shell, manifest and assets. HTML is network-first with offline fallback so deployments refresh; dynamic/auth routes stay uncached.
+@@ -24,8 +25,9 @@ Owns user interface components, service worker caching, PWA installation manifes
+ ## Shared browser UI
+ 
+ - `src/ky-ui/` is generated from Busnes-app/ky-ui, pinned by `VERSION` file hashes. Change shared colors, navigation states and storage helpers upstream, then run its consumer sync with an explicit worktree map; do not hand-edit vendored files.
+-- Products own layout, routes, saved choice keys and named palettes. Busnes aliases consume shared tokens; mark primary navigation with `ky-nav-item` while preserving current-page semantics.
+-- Verify vendored files with `node src/ky-ui/check-vendor.mjs` from this document's directory. Builds/CI run that check. Rendered evidence and capture limitations are recorded in the repository-root `UI-VERIFICATION.md`.
++- Shell geometry (sidebar width, 40px navigation and control rows, 8px radius, title/body type) reads ky-ui tokens in the suite-shell block at the end of `src/styles/theme.css`.
++- Shared files include `appearance.css`, `appearance-themes.css` and `themes.js`; the catalog and palette values come only from there. Products own layout, routes and saved choice keys. Busnes aliases consume shared tokens; mark primary navigation with `ky-nav-item` while preserving current-page semantics.
++- Verify vendored files with `node src/ky-ui/check-vendor.mjs` from this document's directory. Builds/CI run that check. Rendered evidence and capture limitations are recorded in the repository-root `UI-VERIFICATION.md`; the fleet Appearance stages (screenshots, manifests with hashes and behaviour checks, results CSV, reproducible `capture.mjs`) live in `docs/ui-fleet-2026-10-26/`.
+ 
+ ## Child DOX Index
+ - [browser/AGENTS.md](./browser/AGENTS.md): Production-server browser regression harness and disposable test data.
+diff --git a/web/browser/ui.spec.mjs b/web/browser/ui.spec.mjs
+index 8139127..78f2a8d 100644
+--- a/web/browser/ui.spec.mjs
++++ b/web/browser/ui.spec.mjs
+@@ -1,4 +1,12 @@
+ import { test, expect } from '@playwright/test';
++import { THEME_CATALOG } from '../src/ky-ui/themes.js';
++
++// Relative luminance of a computed colour: rgb() channels are 0-255, color(srgb …) 0-1.
++const luminance = color => {
++  const scale = color.startsWith('color(') ? 1 : 255;
++  const [r, g, b] = color.match(/[\d.]+/g).slice(0, 3).map(v => Number(v) / scale).map(c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
++  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
++};
+ 
+ async function fits(page) {
+   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+@@ -32,18 +40,27 @@ test('production CSP, worker, themes, keyboard, dialog and responsive shell', as
+   await expect(nav).toBeVisible();
+   await expect(page.getByRole('heading', { name: /Welcome/ })).toBeVisible();
+   await fits(page);
+-  const theme = page.getByLabel('Color theme');
+-  await theme.selectOption('paper');
++  // The Appearance page is the only theme control in the signed-in shell.
++  await expect(page.locator('select[aria-label="Color theme"]')).toHaveCount(0);
++  const openAppearance = async p => {
++    await p.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Appearance' }).click();
++    await p.getByRole('group', { name: 'Theme' }).waitFor();
++  };
++  const theme = (p, id) => p.getByRole('group', { name: 'Theme' }).locator(`input[value="${id}"]`);
++  await openAppearance(page);
++  await theme(page, 'paper').check();
+   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 250, 252)');
+-  await theme.selectOption('busnes-dark');
++  await theme(page, 'busnes-dark').check();
+   await page.reload();
+   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(24, 35, 38)');
+   const other = await context.newPage();
+   await other.goto('/');
+-  await other.getByLabel('Color theme').selectOption('busnes-light');
++  await openAppearance(other);
++  await theme(other, 'busnes-light').check();
+   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 246, 240)');
+   await other.close();
+-  await theme.selectOption('system');
++  await openAppearance(page);
++  await theme(page, 'system').check();
+   await page.emulateMedia({ colorScheme: 'dark' });
+   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(24, 35, 38)');
+   await page.emulateMedia({ colorScheme: 'light' });
+@@ -57,6 +74,38 @@ test('production CSP, worker, themes, keyboard, dialog and responsive shell', as
+   await expect(nav.getByRole('button', { name: 'Settings & DB' })).toHaveAttribute('aria-current', 'page');
+   await expect(page.getByRole('heading', { name: 'System Settings & Architecture' })).toBeVisible();
+   await fits(page);
++  // Appearance: native radio cards for every catalog theme, chosen by keyboard.
++  await nav.getByRole('button', { name: 'Appearance' }).click();
++  const picker = page.getByRole('group', { name: 'Theme' });
++  await expect(picker.getByRole('radio')).toHaveCount(THEME_CATALOG.length + 1);
++  await expect(picker.getByRole('radio', { name: /Match system/ })).toBeChecked();
++  await picker.getByRole('radio', { name: /Coffee/ }).check();
++  await page.keyboard.press('ArrowLeft');
++  await expect(picker.getByRole('radio', { name: /Ocean/ })).toBeChecked();
++  await expect(picker.getByRole('radio', { name: /Ocean/ })).toBeFocused();
++  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(15, 27, 36)');
++  await fits(page);
++  // A new light named theme has no product CSS block: hover, selection and focus must
++  // come from its own palette, not the dark base :root values.
++  await picker.getByRole('radio', { name: /^Sky Light$/ }).check();
++  const idle = nav.getByRole('button').first();
++  await idle.hover();
++  const hovered = await idle.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color]);
++  expect(luminance(hovered[0])).toBeGreaterThan(0.6);
++  expect(luminance(hovered[1])).toBeLessThan(0.2);
++  const current = nav.locator('[aria-current="page"]');
++  expect(luminance(await current.evaluate(el => getComputedStyle(el).backgroundColor))).toBeGreaterThan(0.5);
++  // Keyboard round trip so the radio has :focus-visible, ending back on Sky.
++  await picker.getByRole('radio', { name: /^Sky Light$/ }).focus();
++  await page.keyboard.press('ArrowRight');
++  await page.keyboard.press('ArrowLeft');
++  await expect(picker.getByRole('radio', { name: /^Sky Light$/ })).toBeChecked();
++  await expect(picker.locator('label', { hasText: 'Sky' })).toHaveCSS('outline-style', 'solid');
++  await picker.getByRole('radio', { name: /^Busnes Light Light$/ }).check();
++  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 246, 240)');
++  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--panel-hover'))).toBe('');
++  await picker.getByRole('radio', { name: /Match system/ }).check();
++  await expect(page.locator('body')).toHaveCSS('background-color', testInfo.project.use.colorScheme === 'dark' ? 'rgb(24, 35, 38)' : 'rgb(248, 246, 240)');
+   const pair = page.getByRole('button', { name: 'Pair Device' });
+   await pair.click();
+   const dialog = page.getByRole('dialog', { name: 'Link Mobile Device' });
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 783044d..ce344df 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -6,9 +6,12 @@ import { ChangePassword } from './pages/ChangePassword';
+ import { Backup } from './pages/Backup';
+ import { SCIMAdmin } from './pages/SCIMAdmin';
+ import { Settings } from './pages/Settings';
++import { Appearance } from './pages/Appearance';
+ import './styles/theme.css';
+ import './ky-ui/tokens.css';
+ import './ky-ui/navigation.css';
++import './ky-ui/appearance.css';
++import './ky-ui/appearance-themes.css';
+ import { secureFetch } from './api';
+ 
+ export const App: React.FC = () => {
+@@ -107,6 +110,7 @@ export const App: React.FC = () => {
+         {activeTab === 'scim' && <SCIMAdmin />}
+         {activeTab === 'backup' && <Backup />}
+         {activeTab === 'settings' && <Settings settings={settings} />}
++        {activeTab === 'appearance' && <Appearance />}
+       </main>
+     </div>
+   );
+diff --git a/web/src/components/AppHeader.tsx b/web/src/components/AppHeader.tsx
+index 1980dac..18c47d5 100644
+--- a/web/src/components/AppHeader.tsx
++++ b/web/src/components/AppHeader.tsx
+@@ -1,6 +1,5 @@
+ import React, { useState } from 'react';
+-import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive } from 'lucide-react';
+-import { ThemeSwitcher } from './ThemeSwitcher';
++import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
+ import { QRPairingModal } from './QRPairingModal';
+ 
+ interface AppHeaderProps {
+@@ -19,6 +18,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
+     { id: 'scim', label: 'Directory & SCIM', icon: Users },
+     { id: 'backup', label: 'KyBackup (Feature 0)', icon: Archive },
+     { id: 'settings', label: 'Settings & DB', icon: SettingsIcon },
++    { id: 'appearance', label: 'Appearance', icon: Palette },
+   ];
+ 
+   return (
+@@ -52,7 +52,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
+             <span>Pair Device</span>
+           </button>
+ 
+-          <ThemeSwitcher />
+ 
+           {user && (
+             <div className="app-user">
+diff --git a/web/src/components/ThemeSwitcher.tsx b/web/src/components/ThemeSwitcher.tsx
+index 2832c3e..b2d2ddf 100644
+--- a/web/src/components/ThemeSwitcher.tsx
++++ b/web/src/components/ThemeSwitcher.tsx
+@@ -1,15 +1,8 @@
+-import { useEffect, useState } from 'react';
+-import { THEME_OPTIONS, applyTheme, storedTheme } from '../theme';
++import { THEME_OPTIONS, applyTheme, useTheme } from '../theme';
+ 
+ export function ThemeSwitcher() {
+-  const [theme, setTheme] = useState(storedTheme);
+-  useEffect(() => {
+-    const sync = () => setTheme(storedTheme());
+-    window.addEventListener('storage', sync);
+-    return () => window.removeEventListener('storage', sync);
+-  }, []);
+-  return <select className="theme-selector" aria-label="Color theme" value={theme} onChange={event => {
+-    setTheme(event.target.value);
+-    applyTheme(event.target.value, true);
+-  }}>{THEME_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select>;
++  const theme = useTheme();
++  return <select className="theme-selector" aria-label="Color theme" value={theme} onChange={event => applyTheme(event.target.value, true)}>
++    {THEME_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
++  </select>;
+ }
+diff --git a/web/src/pages/Appearance.test.tsx b/web/src/pages/Appearance.test.tsx
+new file mode 100644
+index 0000000..93d61ec
+--- /dev/null
++++ b/web/src/pages/Appearance.test.tsx
+@@ -0,0 +1,56 @@
++import { afterEach, describe, expect, it } from 'vitest';
++import { cleanup, fireEvent, render, screen } from '@testing-library/react';
++import { Appearance } from './Appearance';
++import { ThemeSwitcher } from '../components/ThemeSwitcher';
++import { THEME_CATALOG } from '../ky-ui/themes';
++
++const root = document.documentElement;
++
++describe('Appearance', () => {
++  afterEach(() => {
++    cleanup();
++    localStorage.clear();
++    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
++  });
++
++  it('lists every suite theme as a native radio card, keeping a saved legacy choice', () => {
++    localStorage.setItem('ky_theme', 'paper');
++    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
++    render(<Appearance />);
++    const radios = screen.getAllByRole('radio');
++    expect(radios).toHaveLength(THEME_CATALOG.length + 1);
++    expect(screen.getByRole('group', { name: 'Theme' })).toBeTruthy();
++    expect(screen.getByRole('radio', { name: /Paper Clean/ })).toHaveProperty('checked', true);
++    expect(screen.getByRole('radio', { name: /Match system/ })).toHaveProperty('checked', false);
++    expect(document.querySelector('[data-ky-preview="ocean"]')).not.toBeNull();
++  });
++
++  it('keeps the base Patina palette for a saved patina choice, distinct from suite Patina Ky', () => {
++    localStorage.setItem('ky_theme', 'patina');
++    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
++    render(<Appearance />);
++    expect(screen.getByRole('radio', { name: /Patina Ky \(base\)/ })).toHaveProperty('checked', true);
++    expect(root.style.getPropertyValue('--ink-strong')).toBe('#f1f5f9');
++    expect(root.style.getPropertyValue('--panel-hover')).toBe('#1c222c');
++    fireEvent.click(document.querySelector('input[value="patina-ky"]')!);
++    expect(localStorage.getItem('ky_theme')).toBe('patina-ky');
++    expect(root.style.getPropertyValue('--ink-strong')).toBe('#e2e8f0');
++  });
++
++  it('applies a named palette inline and clears it again for Busnes', () => {
++    render(<><ThemeSwitcher /><Appearance /></>);
++    expect(screen.getByRole('radio', { name: /Match system/ })).toHaveProperty('checked', true);
++    fireEvent.click(screen.getByRole('radio', { name: /Ocean/ }));
++    expect(screen.getByLabelText('Color theme')).toHaveProperty('value', 'ocean');
++    expect(localStorage.getItem('ky_theme')).toBe('ocean');
++    expect(root.dataset.theme).toBe('ocean');
++    expect(root.style.getPropertyValue('--bg')).toBe('#0f1b24');
++    expect(root.style.colorScheme).toBe('dark');
++    fireEvent.change(screen.getByLabelText('Color theme'), { target: { value: 'busnes-light' } });
++    expect(screen.getByRole('radio', { name: /Busnes Light/ })).toHaveProperty('checked', true);
++    expect(localStorage.getItem('ky_theme')).toBe('busnes-light');
++    expect(root.dataset.theme).toBe('busnes-light');
++    expect(root.style.getPropertyValue('--bg')).toBe('');
++    expect(root.style.colorScheme).toBe('light');
++  });
++});
+diff --git a/web/src/pages/Appearance.tsx b/web/src/pages/Appearance.tsx
+new file mode 100644
+index 0000000..7cc651f
+--- /dev/null
++++ b/web/src/pages/Appearance.tsx
+@@ -0,0 +1,24 @@
++import { THEME_OPTIONS, applyTheme, themeMode, useTheme } from '../theme';
++
++export function Appearance() {
++  const theme = useTheme();
++  return (
++    <div className="dr-page">
++      <div className="dr-header"><h1>Appearance</h1></div>
++      <p className="ky-appearance-description">Pick a theme. It applies straight away and is saved in this browser only. Match system follows your device’s light or dark setting.</p>
++      <fieldset className="ky-appearance">
++        <legend className="ky-appearance-legend">Theme</legend>
++        <div className="ky-appearance-grid">
++          {THEME_OPTIONS.map(option => (
++            <label key={option.id} className="ky-appearance-option">
++              <input className="ky-appearance-radio" type="radio" name="kybase-theme" value={option.id} checked={theme === option.id} onChange={() => applyTheme(option.id, true)} />
++              <span className="ky-appearance-preview" aria-hidden="true" data-ky-preview={option.id} />
++              <span className="ky-appearance-name">{option.name}</span>
++              <small className="ky-appearance-mode">{themeMode(option.id)}</small>
++            </label>
++          ))}
++        </div>
++      </fieldset>
++    </div>
++  );
++}
+diff --git a/web/src/pages/Dashboard.tsx b/web/src/pages/Dashboard.tsx
+index 4ea41cf..13e5e5c 100644
+--- a/web/src/pages/Dashboard.tsx
++++ b/web/src/pages/Dashboard.tsx
+@@ -12,8 +12,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
+     {
+       title: 'Feature 0: KyBackup & Recovery',
+       desc: 'Encrypted capsule container generation and automated sandboxed restore drills.',
+-      status: 'Verified Ready',
+-      statusType: 'success',
++      // Backup readiness lives on the backup page; no status is claimed here.
++      status: '',
++      statusType: 'neutral',
+       icon: Archive,
+       action: () => onNavigate('backup'),
+       actionLabel: 'Run Restore Drill',
+@@ -48,15 +49,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
+   ];
+ 
+   return (
+-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
+-      <div style={{ marginBottom: '32px' }}>
+-        <h1 style={{ fontSize: '26px', fontWeight: 'bold', marginBottom: '6px' }}>
+-          Welcome, {user?.display_name || user?.username}!
+-        </h1>
+-        <p style={{ color: 'var(--ink)', fontSize: '15px' }}>
+-          {settings?.app_name || 'Busnes.app'} is initialized on the Ky Server Base platform.
+-        </p>
+-      </div>
++    <div className="dr-page">
++      <div className="dr-header"><h1>Welcome, {user?.display_name || user?.username}!</h1></div>
++      <p className="page-intro">{settings?.app_name || 'Busnes.app'} is initialized on the Ky Server Base platform.</p>
+ 
+       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+         {cards.map((c, i) => {
+@@ -65,13 +60,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ settings, user, onNavigate
+             <div key={i} className="panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+               <div>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+-                  <div style={{ padding: '8px', background: 'var(--accent-soft)', borderRadius: '6px', color: 'var(--accent)' }}>
++                  <div style={{ padding: '8px', background: 'var(--panel-hover)', borderRadius: '8px', color: 'var(--ink-strong)' }}>
+                     <Icon size={20} />
+                   </div>
+-                  <span className={`badge badge-${c.statusType === 'success' ? 'success' : c.statusType === 'accent' ? 'accent' : 'secondary'}`}>
++                  {c.status && <span className={`badge badge-${c.statusType === 'success' ? 'success' : c.statusType === 'accent' ? 'accent' : 'secondary'}`}>
+                     {c.statusType === 'success' && <CheckCircle2 size={12} />}
+                     {c.status}
+-                  </span>
++                  </span>}
+                 </div>
+                 <h3 style={{ fontSize: '16px', marginBottom: '6px' }}>{c.title}</h3>
+                 <p style={{ color: 'var(--ink)', fontSize: '13px', lineHeight: 1.5 }}>{c.desc}</p>
+diff --git a/web/src/pages/SCIMAdmin.tsx b/web/src/pages/SCIMAdmin.tsx
+index e35f28d..1b2d51d 100644
+--- a/web/src/pages/SCIMAdmin.tsx
++++ b/web/src/pages/SCIMAdmin.tsx
+@@ -1,5 +1,5 @@
+ import React, { useEffect, useState } from 'react';
+-import { Users, Copy, Check } from 'lucide-react';
++import { Copy, Check } from 'lucide-react';
+ 
+ export const SCIMAdmin: React.FC = () => {
+   const [users, setUsers] = useState<any[]>([]);
+@@ -37,16 +37,9 @@ export const SCIMAdmin: React.FC = () => {
+   };
+ 
+   return (
+-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
+-      <div style={{ marginBottom: '24px' }}>
+-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+-          <Users size={24} style={{ color: 'var(--accent)' }} />
+-          <span>SCIM 2.0 Directory & Inbound Provisioning</span>
+-        </h1>
+-        <p style={{ color: 'var(--ink)', fontSize: '14px', marginTop: '4px' }}>
+-          RFC 7643 and RFC 7644 inbound automated provisioning for Okta, Microsoft Entra ID (Azure AD), and KySignOn.
+-        </p>
+-      </div>
++    <div className="dr-page">
++      <div className="dr-header"><h1>SCIM 2.0 Directory & Inbound Provisioning</h1></div>
++      <p className="page-intro">RFC 7643 and RFC 7644 inbound automated provisioning for Okta, Microsoft Entra ID (Azure AD), and KySignOn.</p>
+ 
+       <div className="panel" style={{ marginBottom: '24px' }}>
+         <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>SCIM 2.0 Connection Details</h3>
+diff --git a/web/src/pages/Settings.tsx b/web/src/pages/Settings.tsx
+index 3ea84d8..f23d690 100644
+--- a/web/src/pages/Settings.tsx
++++ b/web/src/pages/Settings.tsx
+@@ -1,6 +1,5 @@
+ import React from 'react';
+-import { Settings as SettingsIcon, Database, Palette } from 'lucide-react';
+-import { ThemeSwitcher } from '../components/ThemeSwitcher';
++import { Database } from 'lucide-react';
+ 
+ interface SettingsProps {
+   settings: any;
+@@ -8,16 +7,9 @@ interface SettingsProps {
+ 
+ export const Settings: React.FC<SettingsProps> = ({ settings }) => {
+   return (
+-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
+-      <div style={{ marginBottom: '24px' }}>
+-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+-          <SettingsIcon size={24} style={{ color: 'var(--accent)' }} />
+-          <span>System Settings & Architecture</span>
+-        </h1>
+-        <p style={{ color: 'var(--ink)', fontSize: '14px', marginTop: '4px' }}>
+-          Pluggable database drivers, color theme defaults, and instance configuration.
+-        </p>
+-      </div>
++    <div className="dr-page">
++      <div className="dr-header"><h1>System Settings & Architecture</h1></div>
++      <p className="page-intro">Pluggable database drivers and instance configuration. Themes are under Appearance.</p>
+ 
+       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 480px), 1fr))', gap: '20px' }}>
+         {/* Pluggable Database Card */}
+@@ -42,21 +34,6 @@ export const Settings: React.FC<SettingsProps> = ({ settings }) => {
+           </div>
+         </div>
+ 
+-        {/* KySecurity Theme Card */}
+-        <div className="panel">
+-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+-            <Palette size={20} style={{ color: 'var(--accent)' }} />
+-            <h3 style={{ fontSize: '16px' }}>KySecurity Design System</h3>
+-          </div>
+-          <p style={{ color: 'var(--ink)', fontSize: '13px', marginBottom: '16px' }}>
+-            Color tokens: Patina Ky (`#0d0f14`/`#4deeea`), Cyber, Nord, Paper, OLED with Space Grotesk and IBM Plex Mono fonts.
+-          </p>
+-
+-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+-            <span style={{ fontSize: '13px', color: 'var(--ink)' }}>Active Color Palette:</span>
+-            <ThemeSwitcher />
+-          </div>
+-        </div>
+       </div>
+     </div>
+   );
+diff --git a/web/src/styles/theme.css b/web/src/styles/theme.css
+index 7a96134..457c400 100644
+--- a/web/src/styles/theme.css
++++ b/web/src/styles/theme.css
+@@ -286,9 +286,9 @@ dialog.modal-window::backdrop {
+ }
+ .animate-spin { animation: dr-spin 1s linear infinite; }
+ 
+-.dr-page { max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
++.dr-page { max-width: 1080px; padding: 32px; }
+ .dr-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+-.dr-header h1 { font-size: 24px; font-weight: 700; }
++.dr-header h1 { font-size: var(--ky-type-title); font-weight: 600; line-height: 1.25; }
+ .dr-section { margin-bottom: 20px; }
+ .dr-section h3 { font-size: 16px; display: inline-flex; align-items: center; gap: 8px; }
+ .dr-mono { font-family: var(--font-mono); }
+@@ -433,3 +433,29 @@ dialog.modal-window::backdrop {
+ }
+ .theme-selector:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+ .auth-theme { padding: 12px; text-align: right; }
++
++/* ---------- Suite shell: ky-ui type, control and sidebar geometry ---------- */
++
++body { font-size: var(--ky-type-body); line-height: 1.5; }
++.app-shell { grid-template-columns: var(--ky-sidebar-size) minmax(0, 1fr); }
++.app-header { gap: 16px; padding: 16px; }
++.app-brand { gap: 8px; padding: 4px 8px 8px; font-size: var(--ky-type-section); font-weight: 600; }
++.app-nav { gap: 4px; }
++.app-nav a, .app-nav button { min-height: var(--ky-control-size); padding: 0 12px; border-left: 0; border-radius: var(--ky-control-radius); font-size: var(--ky-type-nav); font-weight: 500; gap: 8px; }
++button, .btn, select, input:not([type="checkbox"]):not([type="radio"]) { min-height: var(--ky-control-size); border-radius: var(--ky-control-radius); }
++input, select, textarea { border-color: var(--ky-field-border); }
++textarea { border-radius: var(--ky-control-radius); }
++.btn-secondary { background: transparent; border-color: var(--ky-field-border); }
++.theme-selector { min-height: var(--ky-control-size); border-color: var(--ky-field-border); border-radius: var(--ky-control-radius); }
++:is(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.page-intro { max-width: 65ch; margin: -8px 0 24px; color: var(--ink); }
++.app-pair { justify-content: flex-start; }
++.app-logout { justify-content: center; width: var(--ky-control-size); padding: 0; }
++@media (max-width: 720px) {
++  /* Brand and account actions share the top row; navigation scrolls below them. */
++  .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
++  .app-nav { grid-column: 1 / -1; grid-row: 2; }
++  .app-header-actions > .app-user:first-child { border-left: 0; padding-left: 0; }
++  .dr-page { padding: 24px 16px; }
++  .app-nav a, .app-nav button { padding: 0 12px; }
++}
+diff --git a/web/src/theme.ts b/web/src/theme.ts
+index 8016924..da06e2a 100644
+--- a/web/src/theme.ts
++++ b/web/src/theme.ts
+@@ -1,19 +1,34 @@
++import { useSyncExternalStore } from 'react';
+ import { readChoice, saveChoice, watchChoice } from './ky-ui/theme';
+-// Busnes.app defaults; explicit choices are local to this browser.
+-export const THEME_OPTIONS = [{"id": "system", "label": "System (Busnes)"}, {"id": "busnes-light", "label": "Busnes Light"}, {"id": "busnes-dark", "label": "Busnes Dark"}, {"id": "patina", "label": "Patina Ky"}, {"id": "cyber", "label": "Cyber Dark"}, {"id": "nord", "label": "Nord Slate"}, {"id": "paper", "label": "Paper Clean"}, {"id": "oled", "label": "OLED Black"}];
++import { SYSTEM_THEME, THEME_CATALOG, applyThemeVariables, findTheme } from './ky-ui/themes';
++// The shared suite catalog; explicit choices are local to this browser under the same key.
++export const THEME_OPTIONS = [SYSTEM_THEME, ...THEME_CATALOG];
++export function themeMode(theme: string): string {
++  const scheme = findTheme(theme)?.scheme;
++  return scheme === 'light' ? 'Light' : scheme === 'dark' ? 'Dark' : 'Follows device';
++}
+ export function storedTheme(): string {
+-  try { const value = readChoice('ky_theme'); return THEME_OPTIONS.find(t => t.id === value)?.id ?? 'system'; }
+-  catch { return 'system'; }
++  return findTheme(readChoice('ky_theme'))?.id ?? 'system';
+ }
+ let current = storedTheme();
++// Every theme control on the page reads one store, so they never disagree.
++const listeners = new Set<() => void>();
++function subscribe(listener: () => void) {
++  listeners.add(listener);
++  return () => { listeners.delete(listener); };
++}
++export const useTheme = () => useSyncExternalStore(subscribe, () => current);
+ const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+ export function applyTheme(theme: string, persist = false) {
+-  if (!THEME_OPTIONS.some(t => t.id === theme)) return;
+-  current = theme;
+-  const resolved = theme === 'system' ? (media?.matches ? 'busnes-dark' : 'busnes-light') : theme;
++  const id = findTheme(theme)?.id;
++  if (!id) return;
++  current = id;
++  const resolved = id === 'system' ? (media?.matches ? 'busnes-dark' : 'busnes-light') : id;
+   document.documentElement.dataset.theme = resolved;
+-  document.documentElement.style.colorScheme = ['busnes-light', 'paper'].includes(resolved) ? 'light' : 'dark';
+-  if (persist) try { saveChoice('ky_theme', theme); } catch { /* Storage is optional. */ }
++  // Named palettes set their colors inline; Busnes clears them so the token aliases apply.
++  document.documentElement.style.colorScheme = applyThemeVariables(resolved) ?? (resolved === 'busnes-dark' ? 'dark' : 'light');
++  if (persist) saveChoice('ky_theme', id);
++  listeners.forEach(listener => listener());
+ }
+ applyTheme(current);
+ watchChoice('ky_theme', () => applyTheme(storedTheme()), () => current !== 'system');
+diff --git a/web/tsconfig.tsbuildinfo b/web/tsconfig.tsbuildinfo
+index 506b91e..032bd85 100644
+--- a/web/tsconfig.tsbuildinfo
++++ b/web/tsconfig.tsbuildinfo
+@@ -1 +1 @@
+-{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/theme.ts","./src/vite-env.d.ts","./src/components/AppHeader.tsx","./src/components/CaptchaWidget.tsx","./src/components/QRPairingModal.tsx","./src/components/ThemeSwitcher.tsx","./src/ky-ui/palettes.ts","./src/ky-ui/theme.d.ts","./src/pages/Backup.test.tsx","./src/pages/Backup.tsx","./src/pages/ChangePassword.test.tsx","./src/pages/ChangePassword.tsx","./src/pages/Dashboard.tsx","./src/pages/Login.tsx","./src/pages/SCIMAdmin.tsx","./src/pages/Settings.tsx"],"version":"5.7.3"}
+\ No newline at end of file
++{"version":"7.0.2","root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/theme.ts","./src/vite-env.d.ts","./src/components/AppHeader.tsx","./src/components/CaptchaWidget.tsx","./src/components/QRPairingModal.tsx","./src/components/ThemeSwitcher.tsx","./src/ky-ui/palettes.ts","./src/ky-ui/theme.d.ts","./src/ky-ui/themes.d.ts","./src/pages/Appearance.test.tsx","./src/pages/Appearance.tsx","./src/pages/Backup.test.tsx","./src/pages/Backup.tsx","./src/pages/ChangePassword.test.tsx","./src/pages/ChangePassword.tsx","./src/pages/Dashboard.tsx","./src/pages/Login.tsx","./src/pages/SCIMAdmin.tsx","./src/pages/Settings.tsx"],"packageJsons":["./node_modules/@testing-library/dom/package.json","./node_modules/@testing-library/react/package.json","./node_modules/@types/aria-query/package.json","./node_modules/@types/chai/package.json","./node_modules/@types/deep-eql/package.json","./node_modules/@types/node/package.json","./node_modules/@types/qrcode/package.json","./node_modules/@types/react-dom/package.json","./node_modules/@types/react/package.json","./node_modules/@vitest/mocker/package.json","./node_modules/aria-query/package.json","./node_modules/assertion-error/package.json","./node_modules/chai/package.json","./node_modules/csstype/package.json","./node_modules/expect-type/package.json","./node_modules/jsdom/package.json","./node_modules/lucide-react/package.json","./node_modules/pretty-format/package.json","./node_modules/punycode/package.json","./node_modules/qrcode/package.json","./node_modules/react-dom/package.json","./node_modules/react/package.json","./node_modules/tinybench/package.json","./node_modules/undici-types/package.json","./node_modules/vite/package.json","./node_modules/vitest/package.json","./package.json"],"missingPackageJsons":["./node_modules/@edge-runtime/vm/package.json","./node_modules/@opentelemetry/api/package.json","./node_modules/@testing-library/dom/types/package.json","./node_modules/@testing-library/react/types/package.json","./node_modules/@types/assert/package.json","./node_modules/@types/assert/strict/package.json","./node_modules/@types/async_hooks/package.json","./node_modules/@types/buffer/package.json","./node_modules/@types/child_process/package.json","./node_modules/@types/cluster/package.json","./node_modules/@types/console/package.json","./node_modules/@types/constants/package.json","./node_modules/@types/crypto/package.json","./node_modules/@types/dgram/package.json","./node_modules/@types/diagnostics_channel/package.json","./node_modules/@types/dns/package.json","./node_modules/@types/dns/promises/package.json","./node_modules/@types/domain/package.json","./node_modules/@types/events/package.json","./node_modules/@types/fs/package.json","./node_modules/@types/fs/promises/package.json","./node_modules/@types/http/package.json","./node_modules/@types/http2/package.json","./node_modules/@types/https/package.json","./node_modules/@types/inspector/package.json","./node_modules/@types/inspector/promises/package.json","./node_modules/@types/module/package.json","./node_modules/@types/net/package.json","./node_modules/@types/node/assert/package.json","./node_modules/@types/node/dns/package.json","./node_modules/@types/node/fs/package.json","./node_modules/@types/node/inspector/package.json","./node_modules/@types/node/path/package.json","./node_modules/@types/node/readline/package.json","./node_modules/@types/node/stream/package.json","./node_modules/@types/node/test/package.json","./node_modules/@types/node/timers/package.json","./node_modules/@types/node/util/package.json","./node_modules/@types/node/web-globals/package.json","./node_modules/@types/node/zlib/package.json","./node_modules/@types/os/package.json","./node_modules/@types/path/package.json","./node_modules/@types/path/posix/package.json","./node_modules/@types/path/win32/package.json","./node_modules/@types/perf_hooks/package.json","./node_modules/@types/process/package.json","./node_modules/@types/punycode/package.json","./node_modules/@types/querystring/package.json","./node_modules/@types/react-dom/client/package.json","./node_modules/@types/react-dom/test-utils/package.json","./node_modules/@types/react/jsx-runtime/package.json","./node_modules/@types/readline/package.json","./node_modules/@types/readline/promises/package.json","./node_modules/@types/repl/package.json","./node_modules/@types/stream/consumers/package.json","./node_modules/@types/stream/iter/package.json","./node_modules/@types/stream/package.json","./node_modules/@types/stream/promises/package.json","./node_modules/@types/stream/web/package.json","./node_modules/@types/string_decoder/package.json","./node_modules/@types/timers/package.json","./node_modules/@types/timers/promises/package.json","./node_modules/@types/tls/package.json","./node_modules/@types/trace_events/package.json","./node_modules/@types/tty/package.json","./node_modules/@types/url/package.json","./node_modules/@types/util/package.json","./node_modules/@types/util/types/package.json","./node_modules/@types/v8/package.json","./node_modules/@types/vite/client/package.json","./node_modules/@types/vm/package.json","./node_modules/@types/wasi/package.json","./node_modules/@types/worker_threads/package.json","./node_modules/@types/zlib/package.json","./node_modules/@vitejs/devtools/package.json","./node_modules/@vitest/browser-playwright/package.json","./node_modules/@vitest/browser-preview/package.json","./node_modules/@vitest/browser-webdriverio/package.json","./node_modules/@vitest/coverage-istanbul/package.json","./node_modules/@vitest/coverage-v8/package.json","./node_modules/@vitest/mocker/dist/package.json","./node_modules/@vitest/ui/package.json","./node_modules/assert/package.json","./node_modules/assert/strict/package.json","./node_modules/async_hooks/package.json","./node_modules/buffer/package.json","./node_modules/child_process/package.json","./node_modules/cluster/package.json","./node_modules/console/package.json","./node_modules/constants/package.json","./node_modules/crypto/package.json","./node_modules/deep-eql/package.json","./node_modules/dgram/package.json","./node_modules/diagnostics_channel/package.json","./node_modules/dns/package.json","./node_modules/dns/promises/package.json","./node_modules/domain/package.json","./node_modules/esbuild/package.json","./node_modules/events/package.json","./node_modules/expect-type/dist/package.json","./node_modules/fs/package.json","./node_modules/fs/promises/package.json","./node_modules/happy-dom/package.json","./node_modules/http/package.json","./node_modules/http2/package.json","./node_modules/https/package.json","./node_modules/inspector/package.json","./node_modules/inspector/promises/package.json","./node_modules/jiti/package.json","./node_modules/less/package.json","./node_modules/lucide-react/dist/package.json","./node_modules/module/package.json","./node_modules/msw/package.json","./node_modules/net/package.json","./node_modules/os/package.json","./node_modules/path/package.json","./node_modules/path/posix/package.json","./node_modules/path/win32/package.json","./node_modules/perf_hooks/package.json","./node_modules/pretty-format/build/package.json","./node_modules/process/package.json","./node_modules/querystring/package.json","./node_modules/react-dom/client/package.json","./node_modules/react-dom/test-utils/package.json","./node_modules/react/jsx-runtime/package.json","./node_modules/readline/package.json","./node_modules/readline/promises/package.json","./node_modules/repl/package.json","./node_modules/sass-embedded/package.json","./node_modules/sass/package.json","./node_modules/stream/consumers/package.json","./node_modules/stream/iter/package.json","./node_modules/stream/package.json","./node_modules/stream/promises/package.json","./node_modules/stream/web/package.json","./node_modules/string_decoder/package.json","./node_modules/stylus/package.json","./node_modules/sugarss/package.json","./node_modules/terser/package.json","./node_modules/timers/package.json","./node_modules/timers/promises/package.json","./node_modules/tinybench/dist/package.json","./node_modules/tls/package.json","./node_modules/trace_events/package.json","./node_modules/tsx/package.json","./node_modules/tty/package.json","./node_modules/url/package.json","./node_modules/util/package.json","./node_modules/util/types/package.json","./node_modules/v8/package.json","./node_modules/vite/client/package.json","./node_modules/vite/dist/node/chunks/package.json","./node_modules/vite/dist/node/package.json","./node_modules/vite/dist/package.json","./node_modules/vite/module-runner/package.json","./node_modules/vite/types/package.json","./node_modules/vitest/dist/chunks/package.json","./node_modules/vitest/dist/package.json","./node_modules/vm/package.json","./node_modules/wasi/package.json","./node_modules/worker_threads/package.json","./node_modules/yaml/package.json","./node_modules/zlib/package.json"]}
+\ No newline at end of file

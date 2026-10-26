@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Copy, Check } from 'lucide-react';
+import { Copy, Check } from 'lucide-react';
 
 export const SCIMAdmin: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -37,16 +37,9 @@ export const SCIMAdmin: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '32px 20px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Users size={24} style={{ color: 'var(--accent)' }} />
-          <span>SCIM 2.0 Directory & Inbound Provisioning</span>
-        </h1>
-        <p style={{ color: 'var(--ink)', fontSize: '14px', marginTop: '4px' }}>
-          RFC 7643 and RFC 7644 inbound automated provisioning for Okta, Microsoft Entra ID (Azure AD), and KySignOn.
-        </p>
-      </div>
+    <div className="dr-page">
+      <div className="dr-header"><h1>SCIM 2.0 Directory & Inbound Provisioning</h1></div>
+      <p className="page-intro">RFC 7643 and RFC 7644 inbound automated provisioning for Okta, Microsoft Entra ID (Azure AD), and KySignOn.</p>
 
       <div className="panel" style={{ marginBottom: '24px' }}>
         <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>SCIM 2.0 Connection Details</h3>

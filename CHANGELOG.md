@@ -29,22 +29,18 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing
-  and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks
-  the same modulus that the signature verifier uses, including mixed-case and
-  duplicate-member inputs.
-- Add real signed-token regressions for both OIDC adapters, rejecting undersized
-  RSA keys while retaining strong-key authentication. Keep the existing verifier,
-  claim checks, key rotation/cache and pinned dependency versions.
+- Add an Appearance page reachable by every signed-in role: native radio theme cards
+  over the shared ky-ui 0.4.0 catalog (Match system plus every suite and base theme),
+  replacing the sidebar theme selector; the sign-in page keeps its selector.
+- Move shell geometry and type to ky-ui tokens (240px sidebar, 40px rows and controls,
+  8px radius, 24px titles, visible focus); remove decorative accent icons from page
+  titles; drop the unverified "Verified Ready" badge from the Overview backup card.
 
 ### Upgrade impact
 
-- Rebuild or replace the image and restart the server to load the repaired check
-  and discard the previous process's verifier/key cache. Retire any IdP RSA keys
-  below 2048 bits before rollout; a newly fetched set containing one is refused
-  even when a strong key is also present. See the strong-key profile.
-- No schema migration or new configuration is required. Preserve the database,
-  session secret, encryption key, recovery pin/capsules and Compose overlay chain.
+- No migration, configuration or stored-format change; rebuild the image to pick up
+  the new embedded web assets. Saved browser theme choices (`ky_theme`) keep their
+  values, including base `patina`, which stays distinct from the suite Patina Ky.
 
 ## Maintaining notes
 
@@ -67,6 +63,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 95a3f11
+
+Source: [95a3f114712d43151a4a1bc14a1299cbdd8be0b8](https://github.com/Busnes-app/ky-server-base/commit/95a3f114712d43151a4a1bc14a1299cbdd8be0b8) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40313178303)
+
+- **Changes:** Align the OIDC signing-key strength check with go-oidc's JWKS envelope parsing and go-jose's case-sensitive JWK member parsing, so the RSA-2048 floor checks the modulus the verifier uses; add signed-token regressions for both OIDC adapters.
+- **Upgrade impact:** Rebuild or replace the image and restart to load the repaired check and drop the old verifier/key cache; retire IdP RSA keys below 2048 bits first. No schema migration or new configuration.
 
 ### 2026-10-26 — 77d4d63
 
