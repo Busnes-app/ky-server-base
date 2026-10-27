@@ -22,10 +22,14 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   HTTPS without URL credentials; discovery/token redirects are refused. Preserve
   caller TLS trust roots and ordinary verification. This mode is process-wide.
 - SAML assertion parsing is not implemented locally; metadata XML uses `encoding/xml` and no ACS route is exposed until a maintained SAML service-provider library is configured.
+- `VerifyLogoutToken` (`backchannel.go`) reuses the ID-token verifier, then requires
+  `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
+  a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
+  `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
 - Directory webhook timestamps are accepted only within five minutes; status or role changes revoke the user's sessions.
 
 ## Verification
-- `go test -v ./internal/sso/...`
+- `go test -v ./internal/sso/...` (`TestVerifyLogoutToken` holds one rejection case per logout-token rule)
 - Repeat with `GODEBUG=fips140=on`: RSA-1024/2047 refusal, strong token/cache/nonce
   behavior, no short-key sync mutation, bounded/malformed/redirected JWKS, HTTPS
   metadata policy and refusal of a trusted RSA-1024 TLS peer.

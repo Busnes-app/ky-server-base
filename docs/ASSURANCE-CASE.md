@@ -43,7 +43,9 @@ Out of scope: an attacker who runs code on the host or holds both the database a
    (`internal/config/config.go`).
 2. **Server → identity providers.** OIDC goes through `golang.org/x/oauth2` and `coreos/go-oidc`
    with PKCE S256 and a nonce (`internal/sso/oauth.go`). KySignOn directory webhooks are
-   HMAC-SHA256 signed with at least 16 key bytes and accepted only within five minutes (`internal/sso/kysignon.go`). No SAML
+   HMAC-SHA256 signed with at least 16 key bytes and accepted only within five minutes (`internal/sso/kysignon.go`). KySignOn
+   back-channel logout tokens are verified like ID tokens plus the logout-token claims
+   (`internal/sso/backchannel.go`). No SAML
    assertion route is exposed.
 3. **SCIM clients → server.** A bearer token compared in constant time (`internal/scim/handler.go`).
 4. **Server → its database.** TOTP secrets are AES-256-GCM sealed; sessions and recovery codes are
@@ -76,6 +78,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 | CSRF | Credentialed writes need the CSRF cookie echoed in a header, compared in constant time; CORS admits only the exact `KY_APP_URL` origin | `internal/auth/session.go`, `internal/api/server.go`, `TestCookieAuthenticatedWriteRequiresCSRF` |
 | Broken access control | Admin wrapper on every privileged route; per-role tests for each | `internal/api/server.go`, `internal/api/authz_test.go` |
 | Forged federated identity | ID token signature, issuer, audience, expiry and one-time nonce verified; PKCE S256 | `internal/sso/oauth.go` |
+| Session outliving its identity-provider login | Back-channel logout token verified (signature, issuer, audience, expiry, logout event, no nonce) before ending every session of its `sid`, or of its subject issued before it; the `sid` or the subject's cutoff is fenced so an in-flight callback cannot revive it | `internal/sso/backchannel.go`, `internal/store/sqlstore.go`, `TestVerifyLogoutToken`, `TestBackchannelLogoutEndsTheSSOLogin` |
 | Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; configured HMAC keys require 16 bytes and sync checks again before mutation | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
 | Undersized TOTP secrets | Generate 20 decoded bytes and refuse authentication below 16 through the pinned shared library; retain existing sealed records for deliberate MFA recovery | `internal/auth/totp.go`, `internal/auth/totp_strength_test.go` |
 | Weak TLS peers or HTTP IdP downgrade | Supported process profile enables Go's verified-chain key policy, requires HTTPS OIDC endpoints and refuses redirects; normal trust/hostname verification remains required | [Strong profile](STRONG-CRYPTO.md), `internal/sso/oauth.go`, `TestOIDCStrongModeRejectsWeakTLSPeer` |

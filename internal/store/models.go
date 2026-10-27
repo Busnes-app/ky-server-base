@@ -36,6 +36,8 @@ type Session struct {
 	// by pairing carries its parent's time, never a fresh one.
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// SSOSID is the identity provider's sid for an SSO login; empty for local sign-in.
+	SSOSID string `json:"-"`
 }
 
 type MFAChallenge struct {

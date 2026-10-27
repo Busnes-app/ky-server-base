@@ -42,6 +42,17 @@ func (sm *SessionManager) IssueSession(ctx context.Context, w http.ResponseWrite
 // IssueDerivedSession issues a session whose credentials were verified at authenticatedAt,
 // for a session minted from another one (device pairing) without a fresh sign-in.
 func (sm *SessionManager) IssueDerivedSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, authenticatedAt time.Time) (*store.Session, string, error) {
+	return sm.issue(ctx, w, r, user, authenticatedAt, "")
+}
+
+// IssueSSOSession issues a session for an SSO login the provider names by sid and dates
+// it by the ID token's issuedAt, so a back-channel logout for that sid or subject ends it.
+// It fails with store.ErrSSOSessionEnded when the provider already ended that login.
+func (sm *SessionManager) IssueSSOSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, sid string, issuedAt time.Time) (*store.Session, string, error) {
+	return sm.issue(ctx, w, r, user, issuedAt.UTC(), sid)
+}
+
+func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, authenticatedAt time.Time, sid string) (*store.Session, string, error) {
 	rawToken := crypto.RandomHex(32)
 	tokenHash := crypto.SHA256Hex([]byte(rawToken))
 
@@ -57,6 +68,7 @@ func (sm *SessionManager) IssueDerivedSession(ctx context.Context, w http.Respon
 		IPAddress: ClientIP(r, sm.config.TrustedProxies),
 		CreatedAt: authenticatedAt,
 		ExpiresAt: time.Now().UTC().Add(ttl),
+		SSOSID:    sid,
 	}
 
 	if err := sm.store.Sessions().CreateSession(ctx, sess, user.PasswordHash); err != nil {

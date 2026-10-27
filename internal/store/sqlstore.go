@@ -379,10 +379,54 @@ func (s *SQLStore) withPassword(ctx context.Context, userID, expectedHash string
 }
 
 func (s *sessionStore) CreateSession(ctx context.Context, sess *Session, expectedPasswordHash string) error {
-	return s.store.withPassword(ctx, sess.UserID, expectedPasswordHash, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, s.store.rebind(`INSERT INTO sessions (token_hash, user_id, user_agent, ip_address, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`), sess.TokenHash, sess.UserID, sess.UserAgent, sess.IPAddress, sess.CreatedAt, sess.ExpiresAt)
+	err := s.store.withPassword(ctx, sess.UserID, expectedPasswordHash, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, s.store.rebind(`INSERT INTO sessions (token_hash, user_id, user_agent, ip_address, created_at, expires_at, sso_sid) VALUES (?, ?, ?, ?, ?, ?, ?)`), sess.TokenHash, sess.UserID, sess.UserAgent, sess.IPAddress, sess.CreatedAt, sess.ExpiresAt, sess.SSOSID)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	// Check the fences only after the session committed: EndSSOSession and EndSSOSubject
+	// commit their fence before deleting, so under read committed one of the two always
+	// sees the other.
+	now := time.Now().UTC()
+	var fenced int
+	if err := s.store.db.QueryRowContext(ctx, s.store.rebind(`SELECT
+ (SELECT COUNT(1) FROM sso_logouts WHERE sid = ? AND sid <> '' AND expires_at > ?) +
+ (SELECT COUNT(1) FROM sso_subject_logouts f JOIN users u ON u.sso_provider = f.provider AND u.sso_subject = f.subject
+  WHERE u.id = ? AND f.cutoff > ? AND f.expires_at > ?)`), sess.SSOSID, now, sess.UserID, sess.CreatedAt.UTC(), now).Scan(&fenced); err != nil || fenced > 0 {
+		_ = s.DeleteSession(ctx, sess.TokenHash)
+		if err != nil {
+			return err
+		}
+		return ErrSSOSessionEnded
+	}
+	return nil
+}
+
+func (s *sessionStore) EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error {
+	now := time.Now().UTC()
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sso_logouts WHERE expires_at <= ?`), now); err != nil {
+		return err
+	}
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`INSERT INTO sso_logouts (sid, expires_at) VALUES (?, ?) ON CONFLICT (sid) DO UPDATE SET expires_at = excluded.expires_at`), sid, fenceUntil.UTC()); err != nil {
+		return err
+	}
+	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sessions WHERE sso_sid = ?`), sid)
+	return err
+}
+
+func (s *sessionStore) EndSSOSubject(ctx context.Context, provider, subject string, cutoff, fenceUntil time.Time) error {
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sso_subject_logouts WHERE expires_at <= ?`), time.Now().UTC()); err != nil {
+		return err
+	}
+	// Keyed by subject, not user, so it also fences a first login that is still provisioning.
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`INSERT INTO sso_subject_logouts (provider, subject, cutoff, expires_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (provider, subject) DO UPDATE SET cutoff = excluded.cutoff, expires_at = excluded.expires_at WHERE sso_subject_logouts.cutoff < excluded.cutoff`), provider, subject, cutoff.UTC(), fenceUntil.UTC()); err != nil {
+		return err
+	}
+	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sessions WHERE created_at < ? AND user_id IN (SELECT id FROM users WHERE sso_provider = ? AND sso_subject = ?)`), cutoff.UTC(), provider, subject)
+	return err
 }
 
 func (u *userStore) CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error {

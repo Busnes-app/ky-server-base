@@ -146,6 +146,7 @@ Sources: [SSO handlers](../internal/api/sso_handlers.go),
 |---|---|---|
 | GET `/api/sso/kysignon/login` | Browser; no body | 302 to provider authorization URL; five-minute HttpOnly PKCE/nonce cookies |
 | GET `/api/sso/kysignon/callback` | Provider query `code`, `state`; matching PKCE/nonce cookies | 302 to `/` and session/CSRF cookies |
+| POST `/api/sso/kysignon/backchannel-logout` | Provider server; form body `logout_token` (≤16 KiB) | 200, `Cache-Control: no-store`; 400 `{"error":"invalid_request"}` for any token that fails verification |
 | POST `/api/sso/kysignon/sync` | Signed raw JSON body and `X-KySignOn-Signature` (fallback `X-Signature-SHA256`) | 200 `{"synced":true}` |
 | GET `/saml/metadata` | Anonymous; no body | 200 XML service-provider metadata |
 
@@ -155,6 +156,23 @@ is off. Automatic provisioning creates role `user`; sign-in does not itself gran
 administration. The scaffold constructs generic OIDC and SAML helpers, but registers
 no generic OIDC login/callback or SAML assertion-consumer handler. In particular,
 the `/saml/acs` URL named in the metadata is not an implemented login route here.
+
+Back-channel logout follows OpenID Connect Back-Channel Logout 1.0. The token must
+carry KySignOn's signature, this client as audience, an unexpired `exp`, an `iat`, a
+`sub` or `sid`, the `http://schemas.openid.net/event/backchannel-logout` event as a
+JSON object and no `nonce`; a `typ` header, when present, must be `logout+jwt`. A
+`sid` ends every session issued for that login and fences the `sid` for ten minutes,
+so a callback still in flight for it answers 401 instead of signing in. A token with
+only `sub` ends the subject's logins whose ID token was issued before the second
+after its `iat`, and fences that cutoff for ten minutes by provider and subject, so
+it also stops a callback in flight, including a first login still provisioning. SSO
+sessions are dated by their ID token's `iat`, not by when the callback finished. A
+replay is harmless and acknowledged; an unknown subject is acknowledged. The route is
+anonymous by design: the signature is its authority, and no session cookie means no
+CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
+client's back-channel logout URI in KyIdentity. A `sid` logout does not end
+device-pairing sessions, which are separate credentials; a subject-wide logout ends
+those dated before its cutoff.
 
 The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
 under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,
