@@ -42,6 +42,11 @@ func (k *KySignOnClient) ExchangeCode(ctx context.Context, code, verifier, redir
 	return claims, nil
 }
 
+// VerifyLogoutToken verifies a back-channel logout token signed by KySignOn for this client.
+func (k *KySignOnClient) VerifyLogoutToken(ctx context.Context, raw string) (*LogoutClaims, error) {
+	return k.flow.verifyLogout(ctx, raw)
+}
+
 // KySignOnSyncPayload defines the schema received during automatic directory replication webhooks.
 type KySignOnSyncPayload struct {
 	Event       string `json:"event"` // "user.created", "user.updated", "user.deactivated", "user.deleted"

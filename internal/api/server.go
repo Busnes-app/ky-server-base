@@ -216,6 +216,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/sso/kysignon/login", s.handleKySignOnLogin)
 	s.mux.HandleFunc("/api/sso/kysignon/callback", s.handleKySignOnCallback)
 	s.mux.HandleFunc("/api/sso/kysignon/sync", s.handleKySignOnSyncWebhook)
+	s.mux.HandleFunc("POST /api/sso/kysignon/backchannel-logout", s.handleKySignOnBackchannelLogout)
 	s.mux.HandleFunc("/saml/metadata", s.handleSAMLMetadata)
 
 	// Devices & Ephemeral QR Pairing

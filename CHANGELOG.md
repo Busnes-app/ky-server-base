@@ -29,14 +29,23 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- CI skips the release-notes check on Dependabot pull requests and on the master
-  push that merges one, identified by the pull request's author. Every other
-  change still needs a changed Current source summary.
+- KySignOn sign-in now honours OpenID Connect Back-Channel Logout. `POST
+  /api/sso/kysignon/backchannel-logout` accepts a provider-signed `logout_token` and
+  ends every local session of that login (`sid`), or every session of the subject
+  issued by the token's time when it names no `sid`. A logout that arrives while the
+  browser is still finishing that login stops the login from completing. Each
+  accepted logout is audited as `auth.sso_backchannel_logout`. Before this, signing
+  out of KyIdentity, or an administrator ending the login there, left the session
+  here active until it expired.
 
 ### Upgrade impact
 
-- CI-only change; the image and its behavior are unchanged. No restart, schema,
-  configuration or stored-format migration is needed.
+- Schema migration 6 adds `sessions.sso_sid` and the `sso_logouts` table; it runs
+  automatically on start. Sessions issued before the upgrade carry no `sid`, so only
+  a subject-wide logout reaches them; they end on their own schedule otherwise.
+- Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as this client's
+  back-channel logout URI in KyIdentity. Without it KyIdentity never sends a logout.
+  No new configuration variable.
 
 ## Maintaining notes
 
@@ -59,6 +68,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-27 — 90b3c3d
+
+Source: [90b3c3dc9e9f6ef3f4b78615e4d57d37d041b629](https://github.com/Busnes-app/ky-server-base/commit/90b3c3dc9e9f6ef3f4b78615e4d57d37d041b629) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40499112226)
+
+- **Changes:** CI skips the release-notes check on Dependabot pull requests and on the master push that merges one, identified by the pull request's author. Every other change still needs a changed Current source summary.
+- **Upgrade impact:** CI-only change; the image and its behavior are unchanged. No restart, schema, configuration or stored-format migration is needed.
 
 ### 2026-10-26 — 6ee7c1a
 

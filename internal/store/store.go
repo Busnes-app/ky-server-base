@@ -3,13 +3,16 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
 	ErrNotFound       = errors.New("record not found")
 	ErrAlreadyExists  = errors.New("record already exists")
 	ErrSessionExpired = errors.New("session expired")
-	ErrPairingExpired = errors.New("pairing session expired")
+	// ErrSSOSessionEnded means the identity provider already ended the login being signed in.
+	ErrSSOSessionEnded = errors.New("SSO session already ended")
+	ErrPairingExpired  = errors.New("pairing session expired")
 )
 
 // Store defines the unified storage contract implemented across SQLite, PostgreSQL, and MySQL.
@@ -51,6 +54,10 @@ type SessionStore interface {
 	GetSession(ctx context.Context, tokenHash string) (*Session, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
+	// DeleteUserSessionsBefore ends a user's sessions whose credentials were verified before t.
+	DeleteUserSessionsBefore(ctx context.Context, userID string, t time.Time) error
+	// EndSSOSession ends every session of an SSO login and fences its sid until fenceUntil.
+	EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error
 	CleanExpiredSessions(ctx context.Context) error
 	CreateMFAChallenge(ctx context.Context, challenge *MFAChallenge, expectedPasswordHash string) error
 	ConsumeMFAChallenge(ctx context.Context, tokenHash string) (userID, passwordHash string, err error)

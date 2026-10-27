@@ -379,10 +379,41 @@ func (s *SQLStore) withPassword(ctx context.Context, userID, expectedHash string
 }
 
 func (s *sessionStore) CreateSession(ctx context.Context, sess *Session, expectedPasswordHash string) error {
-	return s.store.withPassword(ctx, sess.UserID, expectedPasswordHash, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, s.store.rebind(`INSERT INTO sessions (token_hash, user_id, user_agent, ip_address, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`), sess.TokenHash, sess.UserID, sess.UserAgent, sess.IPAddress, sess.CreatedAt, sess.ExpiresAt)
+	err := s.store.withPassword(ctx, sess.UserID, expectedPasswordHash, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, s.store.rebind(`INSERT INTO sessions (token_hash, user_id, user_agent, ip_address, created_at, expires_at, sso_sid) VALUES (?, ?, ?, ?, ?, ?, ?)`), sess.TokenHash, sess.UserID, sess.UserAgent, sess.IPAddress, sess.CreatedAt, sess.ExpiresAt, sess.SSOSID)
 		return err
 	})
+	if err != nil || sess.SSOSID == "" {
+		return err
+	}
+	// Check the fence only after the session committed: EndSSOSession commits the fence
+	// before deleting, so one of the two always sees the other under read committed.
+	var fenced int
+	if err := s.store.db.QueryRowContext(ctx, s.store.rebind(`SELECT COUNT(1) FROM sso_logouts WHERE sid = ? AND expires_at > ?`), sess.SSOSID, time.Now().UTC()).Scan(&fenced); err != nil || fenced > 0 {
+		_ = s.DeleteSession(ctx, sess.TokenHash)
+		if err != nil {
+			return err
+		}
+		return ErrSSOSessionEnded
+	}
+	return nil
+}
+
+func (s *sessionStore) EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error {
+	now := time.Now().UTC()
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sso_logouts WHERE expires_at <= ?`), now); err != nil {
+		return err
+	}
+	if _, err := s.store.db.ExecContext(ctx, s.store.rebind(`INSERT INTO sso_logouts (sid, expires_at) VALUES (?, ?) ON CONFLICT (sid) DO UPDATE SET expires_at = excluded.expires_at`), sid, fenceUntil.UTC()); err != nil {
+		return err
+	}
+	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sessions WHERE sso_sid = ?`), sid)
+	return err
+}
+
+func (s *sessionStore) DeleteUserSessionsBefore(ctx context.Context, userID string, t time.Time) error {
+	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM sessions WHERE user_id = ? AND created_at < ?`), userID, t.UTC())
+	return err
 }
 
 func (u *userStore) CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error {
