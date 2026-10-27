@@ -54,8 +54,9 @@ type SessionStore interface {
 	GetSession(ctx context.Context, tokenHash string) (*Session, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
-	// DeleteUserSessionsBefore ends a user's sessions whose credentials were verified before t.
-	DeleteUserSessionsBefore(ctx context.Context, userID string, t time.Time) error
+	// EndSSOSubject ends the provider subject's sessions whose credentials were verified
+	// before cutoff and fences that subject's earlier logins until fenceUntil.
+	EndSSOSubject(ctx context.Context, provider, subject string, cutoff, fenceUntil time.Time) error
 	// EndSSOSession ends every session of an SSO login and fences its sid until fenceUntil.
 	EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error
 	CleanExpiredSessions(ctx context.Context) error

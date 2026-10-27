@@ -163,12 +163,16 @@ carry KySignOn's signature, this client as audience, an unexpired `exp`, an `iat
 JSON object and no `nonce`; a `typ` header, when present, must be `logout+jwt`. A
 `sid` ends every session issued for that login and fences the `sid` for ten minutes,
 so a callback still in flight for it answers 401 instead of signing in. A token with
-only `sub` ends that user's sessions issued before the second after `iat`. A replay
-is harmless and acknowledged; an unknown subject is acknowledged. The route is
+only `sub` ends the subject's logins whose ID token was issued before the second
+after its `iat`, and fences that cutoff for ten minutes by provider and subject, so
+it also stops a callback in flight, including a first login still provisioning. SSO
+sessions are dated by their ID token's `iat`, not by when the callback finished. A
+replay is harmless and acknowledged; an unknown subject is acknowledged. The route is
 anonymous by design: the signature is its authority, and no session cookie means no
 CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
-client's back-channel logout URI in KyIdentity. Device-pairing sessions are separate
-credentials and are not ended by it.
+client's back-channel logout URI in KyIdentity. A `sid` logout does not end
+device-pairing sessions, which are separate credentials; a subject-wide logout ends
+those dated before its cutoff.
 
 The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
 under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,

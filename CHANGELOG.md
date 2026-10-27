@@ -31,16 +31,18 @@ These are human summaries, not a raw version-control log.
 
 - KySignOn sign-in now honours OpenID Connect Back-Channel Logout. `POST
   /api/sso/kysignon/backchannel-logout` accepts a provider-signed `logout_token` and
-  ends every local session of that login (`sid`), or every session of the subject
-  issued by the token's time when it names no `sid`. A logout that arrives while the
-  browser is still finishing that login stops the login from completing. Each
+  ends every local session of that login (`sid`), or every login of the subject
+  whose ID token predates the logout when it names no `sid`. A logout that arrives
+  while the browser is still finishing that login, including a first login, stops
+  the login from completing. SSO sessions are dated by the ID token's `iat`. Each
   accepted logout is audited as `auth.sso_backchannel_logout`. Before this, signing
   out of KyIdentity, or an administrator ending the login there, left the session
   here active until it expired.
 
 ### Upgrade impact
 
-- Schema migration 6 adds `sessions.sso_sid` and the `sso_logouts` table; it runs
+- Schema migration 6 adds `sessions.sso_sid` and the `sso_logouts` and
+  `sso_subject_logouts` tables; it runs
   automatically on start. Sessions issued before the upgrade carry no `sid`, so only
   a subject-wide logout reaches them; they end on their own schedule otherwise.
 - Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as this client's

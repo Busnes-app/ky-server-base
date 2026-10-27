@@ -10,7 +10,7 @@ Owns session issuance and verification, TOTP token generation/validation, recove
 - Sessions for `must_change_password` users authenticate only GET `/api/auth/me` and POST `/api/auth/change-password` or `/api/auth/logout`; private settings and product actions fail closed. Session issuance is bound to the verified password hash and serialized with replacement.
 - Passwords require at least 12 characters (`ValidatePassword`).
 - `Session.CreatedAt` is the credential time. `IssueSession` stamps now; `IssueDerivedSession` takes the parent's time for a session minted without a fresh sign-in (device pairing).
-- `IssueSSOSession` stores the provider's `sid` on the session so back-channel logout can end it, and fails with `store.ErrSSOSessionEnded` when that login was already ended.
+- `IssueSSOSession` stores the provider's `sid` and dates the session by the ID token's `iat`, so back-channel logout by `sid` or by subject can end it; it fails with `store.ErrSSOSessionEnded` when that login was already ended.
 - Active sessions are stored with SHA-256 hashed tokens and verified against secure HttpOnly / SameSite cookies or Bearer headers.
 - Session authentication rejects inactive accounts and deletes their presented session.
 - PoW solutions must carry unexpired server-signed challenge metadata.

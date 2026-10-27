@@ -65,7 +65,10 @@ func newFakeKySignOn(t *testing.T) *fakeKySignOn {
 func (f *fakeKySignOn) sign(t *testing.T, typ string, claims map[string]any) string {
 	t.Helper()
 	claims["iss"], claims["aud"] = f.issuer, "client"
-	claims["iat"], claims["exp"] = time.Now().Unix(), time.Now().Add(2*time.Minute).Unix()
+	claims["exp"] = time.Now().Add(2 * time.Minute).Unix()
+	if _, ok := claims["iat"]; !ok {
+		claims["iat"] = time.Now().Unix()
+	}
 	header := map[string]string{"alg": "RS256", "kid": "k"}
 	if typ != "" {
 		header["typ"] = typ
@@ -91,6 +94,11 @@ func (f *fakeKySignOn) logoutToken(t *testing.T, sub, sid string) string {
 
 // ssoLogin runs the KySignOn login and callback for sub/sid and returns the callback response.
 func ssoLogin(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string) *httptest.ResponseRecorder {
+	return ssoLoginAt(t, srv, f, sub, sid, time.Now())
+}
+
+// ssoLoginAt is ssoLogin with an ID token the provider issued at iat.
+func ssoLoginAt(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string, iat time.Time) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/sso/kysignon/login", nil))
@@ -99,7 +107,7 @@ func ssoLogin(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string) *
 		t.Fatalf("login redirect: %d %s", w.Code, w.Body.String())
 	}
 	q := loc.Query()
-	f.idToken = f.sign(t, "", map[string]any{"sub": sub, "sid": sid, "nonce": q.Get("nonce"), "preferred_username": sub})
+	f.idToken = f.sign(t, "", map[string]any{"sub": sub, "sid": sid, "nonce": q.Get("nonce"), "preferred_username": sub, "iat": iat.Unix()})
 	req := httptest.NewRequest(http.MethodGet, "/api/sso/kysignon/callback?code=c&state="+q.Get("state"), nil)
 	for _, c := range w.Result().Cookies() {
 		req.AddCookie(c)
@@ -184,6 +192,20 @@ func TestBackchannelLogoutEndsTheSSOLogin(t *testing.T) {
 	}
 	if w := postLogout(srv, f.logoutToken(t, "nobody", "")); w.Code != http.StatusOK {
 		t.Fatalf("logout for an unknown subject: got %d", w.Code)
+	}
+
+	// A subject-wide logout fences a callback already holding an ID token issued before
+	// it, even for a subject not yet provisioned here; a later login still works.
+	carolLogout := f.sign(t, "logout+jwt", map[string]any{"sub": "carol", "jti": "carol", "iat": time.Now().Add(-30 * time.Second).Unix(),
+		"events": map[string]any{"http://schemas.openid.net/event/backchannel-logout": map[string]any{}}})
+	if w := postLogout(srv, carolLogout); w.Code != http.StatusOK {
+		t.Fatalf("subject-wide logout of an unprovisioned subject: got %d", w.Code)
+	}
+	if w := ssoLoginAt(t, srv, f, "carol", "sid-c1", time.Now().Add(-time.Minute)); w.Code != http.StatusUnauthorized || sessionCookie(w) != nil {
+		t.Fatalf("pending callback survived a subject-wide logout: %d", w.Code)
+	}
+	if w := ssoLoginAt(t, srv, f, "carol", "sid-c2", time.Now().Add(5*time.Second)); w.Code != http.StatusFound || !signedIn(srv, sessionCookie(w)) {
+		t.Fatalf("login issued after the subject-wide logout was refused: %d", w.Code)
 	}
 
 	var audits int

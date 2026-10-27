@@ -250,8 +250,9 @@ CREATE TABLE device_pairings (
 CREATE INDEX idx_pairings_expires ON device_pairings(expires_at);`,
 	},
 	{
-		// sso_sid ties a session to the identity provider's login; sso_logouts fences a sid
-		// that back-channel logout ended, so a callback still in flight cannot revive it.
+		// sso_sid ties a session to the identity provider's login. sso_logouts fences a sid,
+		// and sso_subject_logouts a subject's logins issued before cutoff, that back-channel
+		// logout ended, so a callback still in flight cannot revive them.
 		Version: 6,
 		Name:    "backchannel_logout",
 		SQLite: `ALTER TABLE sessions ADD COLUMN sso_sid TEXT NOT NULL DEFAULT '';
@@ -259,12 +260,26 @@ CREATE INDEX idx_sessions_sso_sid ON sessions(sso_sid) WHERE sso_sid <> '';
 CREATE TABLE sso_logouts (
     sid TEXT PRIMARY KEY,
     expires_at DATETIME NOT NULL
+);
+CREATE TABLE sso_subject_logouts (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    cutoff DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    PRIMARY KEY (provider, subject)
 );`,
 		Postgres: `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS sso_sid TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_sessions_sso_sid ON sessions(sso_sid) WHERE sso_sid <> '';
 CREATE TABLE IF NOT EXISTS sso_logouts (
     sid TEXT PRIMARY KEY,
     expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sso_subject_logouts (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    cutoff TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (provider, subject)
 );`,
 	},
 }

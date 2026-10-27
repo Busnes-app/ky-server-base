@@ -25,7 +25,7 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
 - `VerifyLogoutToken` (`backchannel.go`) reuses the ID-token verifier, then requires
   `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
   a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
-  `IdentityClaims.SessionID` carries the ID token `sid` so sessions can be ended by it.
+  `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
 - Directory webhook timestamps are accepted only within five minutes; status or role changes revoke the user's sessions.
 
 ## Verification

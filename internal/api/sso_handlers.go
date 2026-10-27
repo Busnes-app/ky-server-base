@@ -94,7 +94,7 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	_, _, err = s.sessions.IssueSSOSession(r.Context(), w, r, user, claims.SessionID)
+	_, _, err = s.sessions.IssueSSOSession(r.Context(), w, r, user, claims.SessionID, claims.IssuedAt)
 	if errors.Is(err, store.ErrSSOSessionEnded) {
 		s.writeError(w, http.StatusUnauthorized, "SSO session already ended")
 		return
@@ -146,19 +146,12 @@ func (s *Server) handleKySignOnBackchannelLogout(w http.ResponseWriter, r *http.
 		s.writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	fenceUntil := time.Now().Add(ssoLogoutFence)
 	if claims.SessionID != "" {
-		err = s.store.Sessions().EndSSOSession(r.Context(), claims.SessionID, time.Now().Add(ssoLogoutFence))
+		err = s.store.Sessions().EndSSOSession(r.Context(), claims.SessionID, fenceUntil)
 	} else {
-		var user *store.User
-		user, err = s.store.Users().GetUserBySSO(r.Context(), "kysignon", claims.Subject)
-		if errors.Is(err, store.ErrNotFound) {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if err == nil {
-			// iat has whole-second precision: round up so a login from that same second ends too.
-			err = s.store.Sessions().DeleteUserSessionsBefore(r.Context(), user.ID, claims.IssuedAt.Add(time.Second))
-		}
+		// iat has whole-second precision: round up so a login from that same second ends too.
+		err = s.store.Sessions().EndSSOSubject(r.Context(), "kysignon", claims.Subject, claims.IssuedAt.Add(time.Second), fenceUntil)
 	}
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "logout failed")
