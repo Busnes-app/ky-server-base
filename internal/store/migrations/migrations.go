@@ -282,6 +282,14 @@ CREATE TABLE IF NOT EXISTS sso_subject_logouts (
     PRIMARY KEY (provider, subject)
 );`,
 	},
+	{
+		// A session from before migration 6 has no sid, so no back-channel logout can reach
+		// it. Sign out every SSO session once; local password sessions stay.
+		Version:  7,
+		Name:     "drop_unreachable_sso_sessions",
+		SQLite:   `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');`,
+		Postgres: `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');`,
+	},
 }
 
 // Run executes all pending migrations for the specified database driver.
