@@ -43,8 +43,9 @@ These are human summaries, not a raw version-control log.
 
 - Schema migration 6 adds `sessions.sso_sid` and the `sso_logouts` and
   `sso_subject_logouts` tables; it runs
-  automatically on start. Sessions issued before the upgrade carry no `sid`, so only
-  a subject-wide logout reaches them; they end on their own schedule otherwise.
+  automatically on start. It signs out every existing KySignOn session, because a
+  session from before the upgrade carries no `sid` and no logout could reach it; those
+  users sign in once more. Local password sessions are kept.
 - Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as this client's
   back-channel logout URI in KyIdentity. Without it KyIdentity never sends a logout.
   No new configuration variable.
