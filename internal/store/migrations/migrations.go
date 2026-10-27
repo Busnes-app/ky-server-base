@@ -284,11 +284,16 @@ CREATE TABLE IF NOT EXISTS sso_subject_logouts (
 	},
 	{
 		// A session from before migration 6 has no sid, so no back-channel logout can reach
-		// it. Sign out every SSO session once; local password sessions stay.
-		Version:  7,
-		Name:     "drop_unreachable_sso_sessions",
-		SQLite:   `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');`,
-		Postgres: `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');`,
+		// it. Sign out every SSO session once; local password sessions stay. Pairings now
+		// carry their parent's sid; SSO pairings from before cannot, so they are dropped too.
+		Version: 7,
+		Name:    "drop_unreachable_sso_sessions",
+		SQLite: `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');
+DELETE FROM device_pairings WHERE user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');
+ALTER TABLE device_pairings ADD COLUMN sso_sid TEXT NOT NULL DEFAULT '';`,
+		Postgres: `DELETE FROM sessions WHERE sso_sid = '' AND user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');
+DELETE FROM device_pairings WHERE user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');
+ALTER TABLE device_pairings ADD COLUMN IF NOT EXISTS sso_sid TEXT NOT NULL DEFAULT '';`,
 	},
 }
 

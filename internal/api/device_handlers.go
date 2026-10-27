@@ -33,7 +33,7 @@ func (s *Server) handlePairInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.pairing.InitPairing(r.Context(), user.ID, sess.CreatedAt)
+	res, err := s.pairing.InitPairing(r.Context(), user.ID, sess.CreatedAt, sess.SSOSID)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to initialize pairing")
 		return
@@ -83,8 +83,9 @@ func (s *Server) handlePairVerify(w http.ResponseWriter, r *http.Request) {
 	// Issue session token for the mobile device if pairing had user
 	var sessionToken string
 	if pairing.UserID != "" {
-		// Pairing verifies no credentials, so the new session is only as fresh as its parent.
-		_, rawToken, err := s.sessions.IssueDerivedSession(r.Context(), w, r, user, pairing.AuthenticatedAt)
+		// Pairing verifies no credentials, so the new session is only as fresh as its parent
+		// and ends with the parent's provider login.
+		_, rawToken, err := s.sessions.IssueDerivedSession(r.Context(), w, r, user, pairing.AuthenticatedAt, pairing.SSOSID)
 		if err == nil {
 			sessionToken = rawToken
 		}

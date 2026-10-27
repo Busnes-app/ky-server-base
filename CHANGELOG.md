@@ -32,12 +32,18 @@ These are human summaries, not a raw version-control log.
 - Sign out every KySignOn session issued before the back-channel logout release. Those
   sessions carry no `sid`, so a KyIdentity sign-out naming the login could never end
   them; they stayed valid until they expired. Local password sessions and SSO
-  sessions issued since that release are kept.
+  sessions issued since that release are kept. Pending device pairings of SSO users
+  are dropped the same way.
+- A device paired from a KySignOn session now inherits that login: a back-channel
+  logout of it ends the paired device's session, and a pairing still pending when the
+  login ends no longer issues one. Before, a paired device stayed signed in.
 
 ### Upgrade impact
 
 - Schema migration 7 runs automatically on start and deletes SSO sessions without a
-  `sid`. Affected KySignOn users sign in once more. No configuration change.
+  `sid` and SSO users' device pairings, and adds `device_pairings.sso_sid`. Affected
+  KySignOn users sign in once more; devices paired from a KySignOn session pair again
+  after a provider sign-out. No configuration change.
 
 ## Maintaining notes
 

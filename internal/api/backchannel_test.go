@@ -222,3 +222,47 @@ func TestBackchannelLogoutEndsTheSSOLogin(t *testing.T) {
 		t.Fatal("back-channel logout was not audited")
 	}
 }
+
+// A paired device inherits its parent's provider login: a logout of that login refuses a
+// pairing still pending and ends a device already paired from it.
+func TestBackchannelLogoutReachesPairedDevices(t *testing.T) {
+	srv, st, cfg := setupTestServer(t)
+	f := newFakeKySignOn(t)
+	cfg.SSO.KySignOnIssuer, cfg.SSO.KySignOnClientID, cfg.SSO.AutoProvision = f.issuer, "client", true
+	srv = api.NewServer(cfg, st)
+
+	parent := sessionCookie(ssoLogin(t, srv, f, "erin", "sid-e1"))
+	pairSecret := func() string {
+		t.Helper()
+		w := do(t, srv, "POST", "/api/devices/pair/init", parent)
+		var res struct{ Secret string }
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Secret == "" {
+			t.Fatalf("pair init: %d %s", w.Code, w.Body.String())
+		}
+		return res.Secret
+	}
+	redeem := func(secret string) string {
+		t.Helper()
+		w := pairVerify(t, srv, map[string]string{"secret": secret, "platform": "pwa"})
+		var res struct {
+			Token string `json:"session_token"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		return res.Token
+	}
+
+	paired := redeem(pairSecret())
+	pending := pairSecret()
+	if paired == "" || !signedIn(srv, &http.Cookie{Name: auth.SessionCookieName, Value: paired}) {
+		t.Fatal("pairing from an SSO session did not sign the device in")
+	}
+	if w := postLogout(srv, f.logoutToken(t, "erin", "sid-e1")); w.Code != http.StatusOK {
+		t.Fatalf("logout: got %d", w.Code)
+	}
+	if signedIn(srv, &http.Cookie{Name: auth.SessionCookieName, Value: paired}) {
+		t.Fatal("a device paired from the ended login stayed signed in")
+	}
+	if token := redeem(pending); token != "" {
+		t.Fatal("a pairing started from the ended login still minted a session")
+	}
+}

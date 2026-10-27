@@ -15,7 +15,8 @@ import (
 
 // Sessions from before migration 6 carry no sid, so no back-channel logout could end
 // them: migration 7 drops those SSO sessions, keeps local sign-ins, and keeps SSO
-// sessions issued with a sid after migration 6.
+// sessions issued with a sid after migration 6. Pending SSO pairings, which would mint
+// a session without a sid, go too.
 func TestMigration7DropsUnreachableSSOSessions(t *testing.T) {
 	cfg := testdb.Config(t)
 	driverName := "sqlite"
@@ -65,7 +66,19 @@ func TestMigration7DropsUnreachableSSOSessions(t *testing.T) {
 	}
 	runThrough(6)
 	exec(`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, sso_sid) VALUES (?, ?, ?, ?, ?)`, "with_sid", "usr_sso", now, now.Add(time.Hour), "sid-1")
+	for _, user := range []string{"usr_local", "usr_sso"} {
+		exec(`INSERT INTO device_pairings (secret, user_id, status, created_at, expires_at, authenticated_at) VALUES (?, ?, 'pending', ?, ?, ?)`, "pair_"+user, user, now, now.Add(90*time.Second), now)
+	}
 	runThrough(7)
+	for secret, want := range map[string]int{"pair_usr_local": 1, "pair_usr_sso": 0} {
+		var got int
+		if err := db.QueryRowContext(ctx, q(`SELECT COUNT(1) FROM device_pairings WHERE secret = ?`), secret).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("after migration 7, pairing %s: got %d rows, want %d", secret, got, want)
+		}
+	}
 
 	for token, want := range map[string]int{"legacy_usr_local": 1, "legacy_usr_sso": 0, "with_sid": 1} {
 		var got int

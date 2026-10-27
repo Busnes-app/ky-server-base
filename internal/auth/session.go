@@ -36,13 +36,15 @@ func NewSessionManager(st store.Store, cfg config.SecurityConfig) *SessionManage
 // IssueSession creates an active session for credentials verified just now and writes the
 // HttpOnly cookie + CSRF token.
 func (sm *SessionManager) IssueSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User) (*store.Session, string, error) {
-	return sm.IssueDerivedSession(ctx, w, r, user, time.Now().UTC())
+	return sm.issue(ctx, w, r, user, time.Now().UTC(), "")
 }
 
 // IssueDerivedSession issues a session whose credentials were verified at authenticatedAt,
-// for a session minted from another one (device pairing) without a fresh sign-in.
-func (sm *SessionManager) IssueDerivedSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, authenticatedAt time.Time) (*store.Session, string, error) {
-	return sm.issue(ctx, w, r, user, authenticatedAt, "")
+// for a session minted from another one (device pairing) without a fresh sign-in. It
+// inherits the parent's provider sid, so it fails with store.ErrSSOSessionEnded once the
+// provider ended that login, and a later logout of it ends this session too.
+func (sm *SessionManager) IssueDerivedSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, authenticatedAt time.Time, sid string) (*store.Session, string, error) {
+	return sm.issue(ctx, w, r, user, authenticatedAt, sid)
 }
 
 // IssueSSOSession issues a session for an SSO login the provider names by sid and dates
