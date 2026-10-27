@@ -9,7 +9,7 @@ Owns QR pairing secret generation, QR payload creation, device verification, and
 ## Local Contracts
 - Verification rejects inactive or password-restricted accounts and returns the pre-consumption user snapshot; session issuance checks that snapshot against concurrent password replacement.
 - Pairings are carried only by a 24-byte QR secret with a strict 90-second TTL (`InitPairing`). Never add a short typed code: the anonymous verify route issues a full session, so anything guessable inside the window is an account takeover. Unknown, expired and consumed secrets return the same `ErrPairingNotFound`.
-- A pairing records the initiating session's credential time (`authenticated_at`); the paired session inherits it and is never fresher than its parent.
+- A pairing records the initiating session's credential time (`authenticated_at`) and provider `sso_sid`; the paired session inherits both, so it is never fresher than its parent and a back-channel logout of the parent's login ends it (or refuses the pairing while still pending).
 - Pairing requires an authenticated initiating account; successful verification atomically consumes the pending pairing and cannot be replayed.
 
 ## Verification

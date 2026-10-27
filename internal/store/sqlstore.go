@@ -484,13 +484,13 @@ func (u *userStore) revokePasswordGrants(ctx context.Context, tx *sql.Tx, userID
 
 func (s *sessionStore) GetSession(ctx context.Context, tokenHash string) (*Session, error) {
 	q := s.store.rebind(`
-SELECT token_hash, user_id, user_agent, ip_address, created_at, expires_at
+SELECT token_hash, user_id, user_agent, ip_address, created_at, expires_at, sso_sid
 FROM sessions WHERE token_hash = ?
 `)
 	var sess Session
 	err := s.store.db.QueryRowContext(ctx, q, tokenHash).Scan(
 		&sess.TokenHash, &sess.UserID, &sess.UserAgent, &sess.IPAddress,
-		&sess.CreatedAt, &sess.ExpiresAt,
+		&sess.CreatedAt, &sess.ExpiresAt, &sess.SSOSID,
 	)
 	if err != nil {
 		if errorsIs(err, sql.ErrNoRows) {
@@ -581,19 +581,19 @@ func (d *deviceStore) CreatePairing(ctx context.Context, p *DevicePairing) error
 	}
 
 	q := d.store.rebind(`
-INSERT INTO device_pairings (secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO device_pairings (secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at, sso_sid)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 	_, err := d.store.db.ExecContext(ctx, q,
 		p.Secret, p.UserID, p.DeviceName, p.Platform, p.PushToken,
-		p.Status, p.CreatedAt, p.ExpiresAt, p.AuthenticatedAt,
+		p.Status, p.CreatedAt, p.ExpiresAt, p.AuthenticatedAt, p.SSOSID,
 	)
 	return err
 }
 
 func (d *deviceStore) GetPairingBySecret(ctx context.Context, secret string) (*DevicePairing, error) {
 	q := d.store.rebind(`
-SELECT secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at
+SELECT secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at, sso_sid
 FROM device_pairings WHERE secret = ?
 `)
 	return d.scanPairing(d.store.db.QueryRowContext(ctx, q, secret))
@@ -603,7 +603,7 @@ func (d *deviceStore) scanPairing(row interface{ Scan(...any) error }) (*DeviceP
 	var p DevicePairing
 	err := row.Scan(
 		&p.Secret, &p.UserID, &p.DeviceName, &p.Platform,
-		&p.PushToken, &p.Status, &p.CreatedAt, &p.ExpiresAt, &p.AuthenticatedAt,
+		&p.PushToken, &p.Status, &p.CreatedAt, &p.ExpiresAt, &p.AuthenticatedAt, &p.SSOSID,
 	)
 	if err != nil {
 		if errorsIs(err, sql.ErrNoRows) {

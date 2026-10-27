@@ -60,6 +60,9 @@ type DevicePairing struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 	// AuthenticatedAt is the initiating session's credential time, inherited by the paired session.
 	AuthenticatedAt time.Time `json:"-"`
+	// SSOSID is the initiating session's provider sid, inherited too, so the provider's
+	// logout of that login ends the paired session and refuses a pairing still pending.
+	SSOSID string `json:"-"`
 }
 
 // Group represents a SCIM/RBAC user group.

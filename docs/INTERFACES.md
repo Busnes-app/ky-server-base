@@ -170,9 +170,9 @@ sessions are dated by their ID token's `iat`, not by when the callback finished.
 replay is harmless and acknowledged; an unknown subject is acknowledged. The route is
 anonymous by design: the signature is its authority, and no session cookie means no
 CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
-client's back-channel logout URI in KyIdentity. A `sid` logout does not end
-device-pairing sessions, which are separate credentials; a subject-wide logout ends
-those dated before its cutoff.
+client's back-channel logout URI in KyIdentity. A device paired from an SSO session
+inherits that login's `sid` and credential time, so either kind of logout ends it,
+and a pairing still pending when its login ends returns no `session_token`.
 
 The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
 under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,
