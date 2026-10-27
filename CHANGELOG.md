@@ -29,15 +29,14 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Show Settings & DB facts as plain label and value rows on the card: no tinted
-  inner box, accent icon or accent driver chip. The overview's database state uses
-  the neutral badge. Page introductions sit 8px under their title.
+- CI skips the release-notes check on Dependabot pull requests and on the master
+  push that merges one, identified by the pull request's author. Every other
+  change still needs a changed Current source summary.
 
 ### Upgrade impact
 
-- Rebuild or replace the image and restart to load the embedded web assets. No
-  schema, configuration or stored-format migration; saved `ky_theme` choices and
-  all database, session, encryption and recovery material stay as they are.
+- CI-only change; the image and its behavior are unchanged. No restart, schema,
+  configuration or stored-format migration is needed.
 
 ## Maintaining notes
 
@@ -60,6 +59,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-26 — 6ee7c1a
+
+Source: [6ee7c1aaf214616580b8bbf9908be3d504d74c8f](https://github.com/Busnes-app/ky-server-base/commit/6ee7c1aaf214616580b8bbf9908be3d504d74c8f) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40370959524)
+
+- **Changes:** Show Settings & DB facts as plain label and value rows on the card: no tinted inner box, accent icon or accent driver chip. The overview's database state uses the neutral badge. Page introductions sit 8px under their title.
+- **Upgrade impact:** Rebuild or replace the image and restart to load the embedded web assets. No schema, configuration or stored-format migration; saved `ky_theme` choices and all database, session, encryption and recovery material stay as they are.
 
 ### 2026-10-26 — 3bc0780
 
