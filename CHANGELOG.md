@@ -37,10 +37,14 @@ These are human summaries, not a raw version-control log.
   the four bounded fuzz runs move from the SQLite Go job to the PostgreSQL job so
   the two run in parallel, and the vulnerability scan no longer saves the Go cache
   the test jobs need.
+- The login page's single sign-on link reads "Continue with Single Sign On"
+  (was "KySignOn Identity"), and the "Or continue with Single Sign-On" caption
+  above it is gone so the phrase appears once.
 
 ### Upgrade impact
 
-- None. Documentation and CI only; the binary and image behave the same.
+- None. The only user-visible change is the login link's text; its address and
+  behavior are unchanged and nothing needs migrating.
 
 ## Maintaining notes
 

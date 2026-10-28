@@ -215,16 +215,13 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
               </button>
 
               <div style={{ marginTop: '20px', borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--ink)', textAlign: 'center', marginBottom: '12px' }}>
-                  Or continue with Single Sign-On
-                </div>
                 <a
                   href="/api/sso/kysignon/login"
                   className="btn btn-secondary"
                   style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}
                 >
                   <Key size={16} style={{ color: 'var(--accent)' }} />
-                  <span>KySignOn Identity</span>
+                  <span>Continue with Single Sign On</span>
                 </a>
               </div>
             </form>
