@@ -30,7 +30,8 @@ These are human summaries, not a raw version-control log.
 ### Changes
 
 - The README has a License section with an [OctoCounts](https://octocounts.com)
-  badge showing the repository's line counts.
+  badge showing the repository's line counts, followed by a Documentation section
+  listing the operator and contributor documents.
 
 ### Upgrade impact
 

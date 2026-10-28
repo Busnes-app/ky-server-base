@@ -202,3 +202,13 @@ The GitHub organisation was renamed on 2026-09-16 and the image now lives at `gh
 ky_server_base is released under the [MIT License](LICENSE.txt).
 
 [![OctoCounts](https://api.octocounts.com/badge/Busnes-app/ky-server-base/branch/master)](https://octocounts.com/github/Busnes-app/ky-server-base/tree/master)
+
+## Documentation
+
+- [Interfaces](docs/INTERFACES.md) — the HTTP, command-line and environment reference.
+- [Restore](docs/RESTORE.md) — bring a server back from a recovery capsule.
+- [Strong keys](docs/STRONG-CRYPTO.md) — the supported strong-key configuration.
+- [Assurance case](docs/ASSURANCE-CASE.md) — threat model, trust boundaries, and why the security requirements are met.
+- [Contributing](CONTRIBUTING.md) — how to propose a change and what it must pass.
+- [Security policy](SECURITY.md) — how to report a vulnerability privately.
+- [Release notes](CHANGELOG.md) — what changed in each release, and its upgrade impact.
