@@ -29,8 +29,8 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- The README shows an [OctoCounts](https://octocounts.com) badge with the
-  repository's line counts, beside the OpenSSF badges.
+- The README has a License section with an [OctoCounts](https://octocounts.com)
+  badge showing the repository's line counts.
 
 ### Upgrade impact
 

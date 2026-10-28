@@ -2,7 +2,6 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15937/badge)](https://www.bestpractices.dev/projects/15937)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Busnes-app/ky-server-base/badge)](https://scorecard.dev/viewer/?uri=github.com/Busnes-app/ky-server-base)
-[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/ky-server-base/branch/master)](https://octocounts.com/github/Busnes-app/ky-server-base/tree/master)
 
 The scaffold every Busnes.app server is built from: Go backend, embedded React PWA, SQLite or
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
@@ -197,3 +196,9 @@ result in service, and what to distrust afterwards. Drill it once a quarter with
 ## Upgrading after the Busnes-app owner move
 
 The GitHub organisation was renamed on 2026-09-16 and the image now lives at `ghcr.io/busnes-app/ky-server-base`. The project no longer controls `ghcr.io/busness-app`; GHCR does not redirect it, and anything served under that name must be treated as untrusted. If `KY_IMAGE` still names the old namespace or image name, re-pinning is required, not optional: inspect `git remote -v` before any `git pull`, `make ci`, or `docker compose` command, and replace a retired-owner remote with `https://github.com/Busnes-app/ky-server-base.git` (prefer a fresh clone plus a known commit). Then remove `KY_IMAGE` to follow the compose default or verify and pin a digest using `docs/RESTORE.md` before pulling.
+
+## License
+
+ky_server_base is released under the [MIT License](LICENSE.txt).
+
+[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/ky-server-base/branch/master)](https://octocounts.com/github/Busnes-app/ky-server-base/tree/master)
