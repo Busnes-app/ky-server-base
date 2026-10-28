@@ -29,16 +29,13 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Every file now states its license and copyright in machine-readable form, following
-  the [REUSE](https://reuse.software/) specification 3.3. `REUSE.toml` labels the
-  project's own files MIT; the vendored IBM Plex Mono and Space Grotesk fonts keep the
-  SIL Open Font License 1.1 with their own copyright, and the built `web/dist` bundle
-  names React, lucide-react and qrcode under MIT and ISC. `LICENSES/` holds each text,
-  and a new CI job runs `reuse lint`.
+- The README has a License section with an [OctoCounts](https://octocounts.com)
+  badge showing the repository's line counts, followed by a Documentation section
+  listing the operator and contributor documents.
 
 ### Upgrade impact
 
-- None. Repository metadata and CI only; the binary and image behave the same.
+- None. Documentation only; the binary and image behave the same.
 
 ## Maintaining notes
 
@@ -61,6 +58,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-28 — c81a19b
+
+Source: [c81a19b34f3bec481f6bd852213428e034c582d9](https://github.com/Busnes-app/ky-server-base/commit/c81a19b34f3bec481f6bd852213428e034c582d9) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40646793340)
+
+- **Changes:** Every file now states its license and copyright in machine-readable form, following the [REUSE](https://reuse.software/) specification 3.3. `REUSE.toml` labels the project's own files MIT; the vendored IBM Plex Mono and Space Grotesk fonts keep the SIL Open Font License 1.1 with their own copyright, and the built `web/dist` bundle names React, lucide-react and qrcode under MIT and ISC. `LICENSES/` holds each text, and a new CI job runs `reuse lint`.
+- **Upgrade impact:** None. Repository metadata and CI only; the binary and image behave the same.
 
 ### 2026-10-28 — a9dfb16
 
