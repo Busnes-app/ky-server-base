@@ -68,3 +68,9 @@ selection and how an image digest maps to its notes.
 
 ky_server_base is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt).
 
+The repository follows the [REUSE](https://reuse.software/) specification: `REUSE.toml`
+names the license and copyright of every file, and `LICENSES/` holds each license text.
+Vendored third-party files (fonts, the built `web/dist` bundle) keep their own license and
+copyright in `REUSE.toml`; update it when a new production dependency changes the
+bundle's licenses. CI runs `reuse lint`.
+

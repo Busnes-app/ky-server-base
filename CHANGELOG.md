@@ -29,13 +29,16 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- The web UI takes ky-ui 0.4.3's contrast fixes: form-field borders are darker, and
-  named palettes pick light or dark danger, success and warning colours by their own
-  scheme rather than the OS setting, so status text stays readable in every theme.
+- Every file now states its license and copyright in machine-readable form, following
+  the [REUSE](https://reuse.software/) specification 3.3. `REUSE.toml` labels the
+  project's own files MIT; the vendored IBM Plex Mono and Space Grotesk fonts keep the
+  SIL Open Font License 1.1 with their own copyright, and the built `web/dist` bundle
+  names React, lucide-react and qrcode under MIT and ISC. `LICENSES/` holds each text,
+  and a new CI job runs `reuse lint`.
 
 ### Upgrade impact
 
-- None. Restart onto the new image; no migration or configuration change.
+- None. Repository metadata and CI only; the binary and image behave the same.
 
 ## Maintaining notes
 
@@ -58,6 +61,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-28 — a9dfb16
+
+Source: [a9dfb16ba194cbff07a57778956da6385e622cdb](https://github.com/Busnes-app/ky-server-base/commit/a9dfb16ba194cbff07a57778956da6385e622cdb) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40618370065)
+
+- **Changes:** The web UI takes ky-ui 0.4.3's contrast fixes: form-field borders are darker, and named palettes pick light or dark danger, success and warning colours by their own scheme rather than the OS setting, so status text stays readable in every theme.
+- **Upgrade impact:** None. Restart onto the new image; no migration or configuration change.
 
 ### 2026-10-27 — b02bb81
 

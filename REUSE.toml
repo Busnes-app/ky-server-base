@@ -1,0 +1,35 @@
+version = 1
+
+# Everything Busnes.app wrote: code, tests, docs, screenshots and icons.
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Busnes.app"
+SPDX-License-Identifier = "MIT"
+
+# IBM Plex Mono, vendored with its OFL.txt; web/ holds identical copies.
+[[annotations]]
+path = ["fonts/IBM_Plex_Mono/**", "web/public/fonts/IBM_Plex_Mono/**", "web/dist/fonts/IBM_Plex_Mono/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2017 IBM Corp."
+SPDX-License-Identifier = "OFL-1.1"
+
+# Space Grotesk, vendored with its OFL.txt; web/ holds identical copies.
+[[annotations]]
+path = ["fonts/Space_Grotesk/**", "web/public/fonts/Space_Grotesk/**", "web/dist/fonts/Space_Grotesk/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2020 The Space Grotesk Project Authors"
+SPDX-License-Identifier = "OFL-1.1"
+
+# The built bundle includes React, react-dom, lucide-react and qrcode (see web/package-lock.json).
+[[annotations]]
+path = "web/dist/assets/*.js"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Busnes.app",
+  "Meta Platforms, Inc. and affiliates",
+  "2022 Lucide Contributors",
+  "2013-2022 Cole Bemis",
+  "2012 Ryan Day",
+]
+SPDX-License-Identifier = "MIT AND ISC"
