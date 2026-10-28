@@ -40,6 +40,9 @@ These are human summaries, not a raw version-control log.
 - The login page's single sign-on link reads "Continue with Single Sign On"
   (was "KySignOn Identity"), and the "Or continue with Single Sign-On" caption
   above it is gone so the phrase appears once.
+- CI only: pushes to `master` each get their own concurrency group, so a push run
+  queued behind another is no longer dropped. Superseded pull-request runs are
+  still cancelled.
 
 ### Upgrade impact
 
