@@ -32,10 +32,15 @@ These are human summaries, not a raw version-control log.
 - The README has a License section with an [OctoCounts](https://octocounts.com)
   badge showing the repository's line counts, followed by a Documentation section
   listing the operator and contributor documents.
+- CI only, same checks: the browser regressions run in the pinned Playwright
+  container instead of installing Chromium and its system packages on every run,
+  the four bounded fuzz runs move from the SQLite Go job to the PostgreSQL job so
+  the two run in parallel, and the vulnerability scan no longer saves the Go cache
+  the test jobs need.
 
 ### Upgrade impact
 
-- None. Documentation only; the binary and image behave the same.
+- None. Documentation and CI only; the binary and image behave the same.
 
 ## Maintaining notes
 
