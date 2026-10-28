@@ -29,21 +29,13 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Sign out every KySignOn session issued before the back-channel logout release. Those
-  sessions carry no `sid`, so a KyIdentity sign-out naming the login could never end
-  them; they stayed valid until they expired. Local password sessions and SSO
-  sessions issued since that release are kept. Pending device pairings of SSO users
-  are dropped the same way.
-- A device paired from a KySignOn session now inherits that login: a back-channel
-  logout of it ends the paired device's session, and a pairing still pending when the
-  login ends no longer issues one. Before, a paired device stayed signed in.
+- The web UI takes ky-ui 0.4.3's contrast fixes: form-field borders are darker, and
+  named palettes pick light or dark danger, success and warning colours by their own
+  scheme rather than the OS setting, so status text stays readable in every theme.
 
 ### Upgrade impact
 
-- Schema migration 7 runs automatically on start and deletes SSO sessions without a
-  `sid` and SSO users' device pairings, and adds `device_pairings.sso_sid`. Affected
-  KySignOn users sign in once more; devices paired from a KySignOn session pair again
-  after a provider sign-out. No configuration change.
+- None. Restart onto the new image; no migration or configuration change.
 
 ## Maintaining notes
 
@@ -66,6 +58,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-10-27 — b02bb81
+
+Source: [b02bb812c1aa7eb389fc1438f5b4f61ad05eb163](https://github.com/Busnes-app/ky-server-base/commit/b02bb812c1aa7eb389fc1438f5b4f61ad05eb163) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/40528604354)
+
+- **Changes:** Sign out every KySignOn session issued before the back-channel logout release; those sessions carry no `sid`, so a KyIdentity sign-out naming the login could never end them. Local password sessions and SSO sessions issued since that release are kept; pending device pairings of SSO users are dropped the same way. A device paired from a KySignOn session now inherits that login: a back-channel logout of it ends the paired device's session, and a pairing still pending when the login ends no longer issues one.
+- **Upgrade impact:** Schema migration 7 runs automatically on start, deletes SSO sessions without a `sid` and SSO users' device pairings, and adds `device_pairings.sso_sid`. Affected KySignOn users sign in once more; devices paired from a KySignOn session pair again after a provider sign-out. No configuration change.
 
 ### 2026-10-27 — bed0552
 
