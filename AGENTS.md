@@ -80,6 +80,11 @@ Default section order:
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
+- REUSE: `REUSE.toml` labels every file; `LICENSES/` holds the texts. Vendored fonts keep
+  OFL-1.1 with their own copyright, and `web/dist/assets/*.js` names the bundled
+  dependencies' licenses (MIT AND ISC today); re-check it against `web/package-lock.json`
+  when production dependencies change. CI runs `reuse lint`.
+
 - Container network IP configuration belongs to Compose: the optional
   `docker-compose.static-ip.yml` overlay requires `KY_CONTAINER_IP` and `KY_NETWORK_SUBNET`.
   Preserve existing overlays when updating `COMPOSE_FILE`; the base keeps automatic addressing.
