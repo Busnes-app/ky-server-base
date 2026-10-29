@@ -1,0 +1,7 @@
+# Same query suite default setup ran ("extended").
+queries:
+  - uses: security-extended
+
+# Screenshot tooling, not shipped. Has no effect on traced Go builds.
+paths-ignore:
+  - docs/**
