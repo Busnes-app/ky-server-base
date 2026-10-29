@@ -29,6 +29,10 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Documentation only: the README's Container IP address and Disaster recovery
+  sections moved verbatim to [docs/CONTAINER-IP.md](docs/CONTAINER-IP.md) and
+  [docs/DISASTER-RECOVERY.md](docs/DISASTER-RECOVERY.md). Links to the old
+  README sections land on its Documentation list, which links the new pages.
 - The README has a License section with an [OctoCounts](https://octocounts.com)
   badge showing the repository's line counts, followed by a Documentation section
   listing the operator and contributor documents.

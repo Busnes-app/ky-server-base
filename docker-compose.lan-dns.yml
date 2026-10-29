@@ -8,7 +8,7 @@
 # KY_DNS (`export KY_DNS=<addr>`; fish `set -x KY_DNS <addr>`) or, when that is unset, from the KY_DNS line
 # already in .env; there is no default, the block refuses to guess. An exported value overrides
 # .env, so re-running is a no-op only while KY_DNS is unset in your shell; the flag is set to true.
-# The flag persists in .env on its own: undo with the README's revert, not by editing this line.
+# The flag persists in .env on its own: undo with the revert in docs/DISASTER-RECOVERY.md, not by editing this line.
 #   (umask 077; touch .env \
 #     && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
 #     && dns=${KY_DNS:-$({ grep '^KY_DNS=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-)} \

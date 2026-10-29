@@ -52,7 +52,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
    stored only as SHA-256 hashes; passwords as Argon2id hashes from `ky-primitives/password`.
 5. **Server → KyRecovery.** Capsules are sealed to the suite recovery key before they leave
    (`ky-primitives/recoveryclient`); the key is pinned write-once, and pairing over plain HTTP is
-   refused ([README](../README.md#why-tls-matters-here)).
+   refused ([Disaster recovery](DISASTER-RECOVERY.md#why-tls-matters-here)).
 
 ## Secure design principles applied
 
@@ -96,7 +96,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 - **Rate limits are per process** and per address; a distributed guesser is slowed by Argon2id,
   not stopped.
 - **Postgres deployments have no sealed backup**; their `pg_dump` is plaintext and their own to
-  protect ([README](../README.md#disaster-recovery)).
+  protect ([Disaster recovery](DISASTER-RECOVERY.md#disaster-recovery)).
 - **Pairing with KyRecovery is trust on first use** unless the operator compares the key ID or
   pins the key by hand.
 - **No step-up re-authentication** for destructive admin actions; admin-only is the scaffold's

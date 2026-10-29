@@ -390,7 +390,7 @@ func TestRunRefusesAPrivateDestination(t *testing.T) {
 
 // Only SQLite can be snapshotted into a capsule, so on Postgres "Back up now" can never
 // succeed. It must say why -- the driver, in the body -- not answer a bare 500, which is what
-// the README and the screen's standing warning promise.
+// docs/DISASTER-RECOVERY.md and the screen's standing warning promise.
 func TestRunRefusesWithoutADatabaseSnapshot(t *testing.T) {
 	srv, st, cfg := setupSQLiteServer(t)
 	ctx := context.Background()
