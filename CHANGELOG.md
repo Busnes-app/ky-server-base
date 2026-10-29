@@ -47,6 +47,8 @@ These are human summaries, not a raw version-control log.
 - CI only: pushes to `master` each get their own concurrency group, so a push run
   queued behind another is no longer dropped. Superseded pull-request runs are
   still cancelled.
+- CI only: CodeQL moved from default setup to an advanced workflow with the same
+  languages and query suite, so the docs/ screenshot tooling is excluded.
 
 ### Upgrade impact
 
