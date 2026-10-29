@@ -3,7 +3,7 @@
 This describes the HTTP, command-line and environment interfaces of this scaffold.
 Derived products can add routes and settings; consult their own references as well.
 HTTP routing lives in [server.go](../internal/api/server.go), with handlers linked
-below. [README.md](../README.md) covers installation and backup configuration;
+below. [README.md](../README.md) covers installation, [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md) backup configuration;
 [RESTORE.md](RESTORE.md) covers recovery operations.
 
 ## HTTP conventions
@@ -270,7 +270,7 @@ of band. Manual pinning uses standard Base64 of the 1216-byte suite public key a
 the ceremony's topology (`2 <= threshold <= total_shares <= 255`). A different
 existing pin is 409. Pairing/pinning are write-once; unpair deletes only the URL and
 sealed token, leaving the pin, receipts and local copies. A KyRecovery administrator
-must separately revoke the remote token. See the [operational guide](../README.md#disaster-recovery).
+must separately revoke the remote token. See the [operational guide](DISASTER-RECOVERY.md#disaster-recovery).
 
 Schedule seconds must be zero (off) or at least 900; invalid values return 400.
 The stored setting overrides the environment default. A drill's HTTP 200 describes
@@ -377,7 +377,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 Loading configuration can create the encryption-key file. The fixed read/write
 timeouts are 15 seconds, session lifetime seven days and database connection lifetime
 15 minutes; these are not environment options. Backup deposit extends its response
-write deadline to 16 minutes. The [README](../README.md#disaster-recovery) describes
+write deadline to 16 minutes. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
 stored schedule precedence, container DNS overrides and backup retention. Compose's
 `KY_IMAGE`, `KY_CONTAINER_IP`, `KY_NETWORK_SUBNET` and `KY_DNS` are deployment inputs,
 not additional environment-loader options in the binary.
