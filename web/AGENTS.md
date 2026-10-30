@@ -1,7 +1,7 @@
 # Web
 
 ## Purpose
-React 19 + TypeScript + Vite PWA frontend using the shared ky-ui theme catalog (Busnes light/dark defaults, the suite palettes and the base-family `patina`, `cyber`, `nord`, `paper`, `oled`), 90-second ephemeral QR device pairing modals, client-side WebCrypto PoW CAPTCHA, and administrative management panels.
+React 19 + TypeScript + Vite PWA frontend using the shared ky-ui theme catalog (Busnes light/dark defaults, the suite palettes and the base-family `patina`, `cyber`, `nord`, `paper`, `oled`), client-side WebCrypto PoW CAPTCHA, and administrative management panels.
 
 ## Ownership
 Owns user interface components, service worker caching, PWA installation manifests, and frontend theme switching.
@@ -16,7 +16,7 @@ Owns user interface components, service worker caching, PWA installation manifes
 - `src/theme.ts` adapts the shared catalog (`ky-ui/themes.js`): `Match system` plus every catalog theme, saved by catalog ID under `ky_theme`; older saved IDs (including base `patina`, distinct from suite `patina-ky`) resolve unchanged. It sets `data-theme` and, for named palettes, the colours inline through `applyThemeVariables`; Busnes clears them so the token aliases apply. Every theme control reads the one `useTheme()` store.
 - The Appearance page (`src/pages/Appearance.tsx`) is the theme picker for every signed-in role: shared native radio cards (`ky-ui/appearance.css`, previews from `appearance-themes.css`, imported after product CSS). The signed-in shell has no other theme selector; only the sign-in page keeps `ThemeSwitcher`, over the same store. The page uses the shared `ky-appearance-description` copy.
 - Authenticated state-changing requests use `secureFetch` so the `ky_csrf` cookie is mirrored into `X-CSRF-Token`.
-- Register the service worker from the production JS bundle; keep `script-src 'self'` intact. Pairing uses a native modal dialog for focus containment, Escape and focus restoration. It shows only the QR code (no typed PIN) and treats poll status `consumed` as linked.
+- Register the service worker from the production JS bundle; keep `script-src 'self'` intact.
 - Worker caching is limited to the same-origin public shell, manifest and assets. HTML is network-first with offline fallback so deployments refresh; dynamic/auth routes stay uncached.
 - `Backup.tsx` warns for as long as `database_driver` from `/api/backup/status` is not `sqlite`: only the SQLite path can snapshot a database into a capsule, so a Postgres deployment makes no capsules at all.
 

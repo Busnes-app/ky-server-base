@@ -295,6 +295,13 @@ ALTER TABLE device_pairings ADD COLUMN sso_sid TEXT NOT NULL DEFAULT '';`,
 DELETE FROM device_pairings WHERE user_id IN (SELECT id FROM users WHERE sso_provider <> 'local');
 ALTER TABLE device_pairings ADD COLUMN IF NOT EXISTS sso_sid TEXT NOT NULL DEFAULT '';`,
 	},
+	{
+		// QR device pairing had no client. Drop its rows: they held push tokens and secrets.
+		Version:  8,
+		Name:     "drop_device_pairings",
+		SQLite:   `DROP TABLE IF EXISTS device_pairings;`,
+		Postgres: `DROP TABLE IF EXISTS device_pairings;`,
+	},
 }
 
 // Run executes all pending migrations for the specified database driver.

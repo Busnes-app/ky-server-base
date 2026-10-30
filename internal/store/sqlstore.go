@@ -17,7 +17,6 @@ type SQLStore struct {
 	driver   string
 	users    *userStore
 	sessions *sessionStore
-	devices  *deviceStore
 	groups   *groupStore
 	audit    *auditStore
 	settings *settingsStore
@@ -41,7 +40,6 @@ func newSQLStore(ctx context.Context, db *sql.DB, driver string) (*SQLStore, err
 
 	s.users = &userStore{store: s}
 	s.sessions = &sessionStore{store: s}
-	s.devices = &deviceStore{store: s}
 	s.groups = &groupStore{store: s}
 	s.audit = &auditStore{store: s}
 	s.settings = &settingsStore{store: s}
@@ -51,7 +49,6 @@ func newSQLStore(ctx context.Context, db *sql.DB, driver string) (*SQLStore, err
 
 func (s *SQLStore) Users() UserStore        { return s.users }
 func (s *SQLStore) Sessions() SessionStore  { return s.sessions }
-func (s *SQLStore) Devices() DeviceStore    { return s.devices }
 func (s *SQLStore) Groups() GroupStore      { return s.groups }
 func (s *SQLStore) Audit() AuditStore       { return s.audit }
 func (s *SQLStore) Settings() SettingsStore { return s.settings }
@@ -473,7 +470,7 @@ func (u *userStore) ResetAdminPassword(ctx context.Context, userID, newHash stri
 }
 
 func (u *userStore) revokePasswordGrants(ctx context.Context, tx *sql.Tx, userID, details, ip string, now time.Time) error {
-	for _, table := range []string{"sessions", "mfa_challenges", "device_pairings"} {
+	for _, table := range []string{"sessions", "mfa_challenges"} {
 		if _, err := tx.ExecContext(ctx, u.store.rebind("DELETE FROM "+table+" WHERE user_id = ?"), userID); err != nil {
 			return err
 		}
@@ -561,82 +558,6 @@ func (s *sessionStore) ConsumeMFAChallenge(ctx context.Context, tokenHash string
 		return "", "", err
 	}
 	return userID, passwordHash, nil
-}
-
-// ---------------------------------------------------------------------
-// Device Pairing Store
-// ---------------------------------------------------------------------
-
-type deviceStore struct {
-	store *SQLStore
-}
-
-func (d *deviceStore) CreatePairing(ctx context.Context, p *DevicePairing) error {
-	now := time.Now().UTC()
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = now
-	}
-	if p.ExpiresAt.IsZero() {
-		p.ExpiresAt = now.Add(90 * time.Second) // 90-second ephemeral pairing standard
-	}
-
-	q := d.store.rebind(`
-INSERT INTO device_pairings (secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at, sso_sid)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`)
-	_, err := d.store.db.ExecContext(ctx, q,
-		p.Secret, p.UserID, p.DeviceName, p.Platform, p.PushToken,
-		p.Status, p.CreatedAt, p.ExpiresAt, p.AuthenticatedAt, p.SSOSID,
-	)
-	return err
-}
-
-func (d *deviceStore) GetPairingBySecret(ctx context.Context, secret string) (*DevicePairing, error) {
-	q := d.store.rebind(`
-SELECT secret, user_id, device_name, platform, push_token, status, created_at, expires_at, authenticated_at, sso_sid
-FROM device_pairings WHERE secret = ?
-`)
-	return d.scanPairing(d.store.db.QueryRowContext(ctx, q, secret))
-}
-
-func (d *deviceStore) scanPairing(row interface{ Scan(...any) error }) (*DevicePairing, error) {
-	var p DevicePairing
-	err := row.Scan(
-		&p.Secret, &p.UserID, &p.DeviceName, &p.Platform,
-		&p.PushToken, &p.Status, &p.CreatedAt, &p.ExpiresAt, &p.AuthenticatedAt, &p.SSOSID,
-	)
-	if err != nil {
-		if errorsIs(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	if time.Now().UTC().After(p.ExpiresAt) {
-		return nil, ErrPairingExpired
-	}
-	return &p, nil
-}
-
-func (d *deviceStore) ConsumePairing(ctx context.Context, secret, deviceName, platform, pushToken string) error {
-	q := d.store.rebind(`
-UPDATE device_pairings SET status = 'consumed', device_name = ?, platform = ?, push_token = ?
-WHERE secret = ? AND status = 'pending' AND expires_at > ?
-`)
-	res, err := d.store.db.ExecContext(ctx, q, deviceName, platform, pushToken, secret, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (d *deviceStore) CleanExpiredPairings(ctx context.Context) error {
-	q := d.store.rebind("DELETE FROM device_pairings WHERE expires_at < ?")
-	_, err := d.store.db.ExecContext(ctx, q, time.Now().UTC())
-	return err
 }
 
 // ---------------------------------------------------------------------

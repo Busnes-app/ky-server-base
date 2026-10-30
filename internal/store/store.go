@@ -12,14 +12,12 @@ var (
 	ErrSessionExpired = errors.New("session expired")
 	// ErrSSOSessionEnded means the identity provider already ended the login being signed in.
 	ErrSSOSessionEnded = errors.New("SSO session already ended")
-	ErrPairingExpired  = errors.New("pairing session expired")
 )
 
 // Store defines the unified storage contract implemented across SQLite, PostgreSQL, and MySQL.
 type Store interface {
 	Users() UserStore
 	Sessions() SessionStore
-	Devices() DeviceStore
 	Groups() GroupStore
 	Audit() AuditStore
 	Settings() SettingsStore
@@ -62,14 +60,6 @@ type SessionStore interface {
 	CleanExpiredSessions(ctx context.Context) error
 	CreateMFAChallenge(ctx context.Context, challenge *MFAChallenge, expectedPasswordHash string) error
 	ConsumeMFAChallenge(ctx context.Context, tokenHash string) (userID, passwordHash string, err error)
-}
-
-// DeviceStore handles 90s ephemeral QR pairing sessions and paired push clients.
-type DeviceStore interface {
-	CreatePairing(ctx context.Context, p *DevicePairing) error
-	GetPairingBySecret(ctx context.Context, secret string) (*DevicePairing, error)
-	ConsumePairing(ctx context.Context, secret, deviceName, platform, pushToken string) error
-	CleanExpiredPairings(ctx context.Context) error
 }
 
 // GroupStore defines repository operations for SCIM and RBAC groups.

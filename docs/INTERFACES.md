@@ -93,33 +93,6 @@ the current policy (at least 12 bytes after trimming surrounding whitespace).
 The current password must verify. Limits are ten attempts per IP and five per
 account per minute. Success requires signing in again with the replacement.
 
-## Device pairing
-
-Sources: [handlers](../internal/api/device_handlers.go),
-[pairing service](../internal/devices/devices.go).
-
-| Method and path | Input and authority | Successful output |
-|---|---|---|
-| POST `/api/devices/pair/init` | Active unrestricted session; no body; cookie CSRF applies | 200 `{secret, expires_at, qr_payload}` |
-| POST `/api/devices/pair/verify` | Anonymous JSON: `secret`, `device_name`, `platform`, optional `push_token`; cookie CSRF applies if a session cookie is sent | 200 `{paired:true, session_token, device_name}` and session/CSRF cookies when session issuance succeeds |
-| GET `/api/devices/pair/poll` | Anonymous query parameter `secret`; no body | 200 `{status, expires_at, device_name}` |
-
-The QR secret is 24 random bytes represented by 48 hex characters, expires after
-90 seconds and is single-use. It is not a six-digit code. `qr_payload` is a JSON
-string with `action:"ky_pair"`, `app_name`, `app_url`, `secret` and `expires`.
-Expiry numbers use Unix seconds. Device name, platform and push token are limited
-to 255, 32 and 4096 bytes respectively. Pair-init allows ten requests per account
-per minute; verification allows ten per IP per minute.
-
-Unknown, expired or consumed secrets are uniformly 400 `pairing not found or expired`
-on verification. Poll without a secret is 400; a lookup miss is 404. Poll exposes
-neither the secret, user ID nor push token. Statuses are drawn from `pending`,
-`approved`, `consumed` and `expired`; this verifier moves a pending record directly
-to consumed. The derived session retains the initiating session's authentication
-time. The current handler can return `paired:true` with an empty `session_token`
-if session issuance fails; require a nonempty token and verify `/api/auth/me`
-before considering the device signed in.
-
 ## Settings
 
 Source: [settings handlers](../internal/api/settings_handlers.go).

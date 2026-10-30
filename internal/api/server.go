@@ -13,7 +13,6 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
 	"github.com/Busnes-app/ky_server_base/internal/config"
-	"github.com/Busnes-app/ky_server_base/internal/devices"
 	"github.com/Busnes-app/ky_server_base/internal/scim"
 	"github.com/Busnes-app/ky_server_base/internal/sso"
 	"github.com/Busnes-app/ky_server_base/internal/store"
@@ -31,7 +30,6 @@ type Server struct {
 	config     *config.Config
 	store      store.Store
 	sessions   *auth.SessionManager
-	pairing    *devices.PairingService
 	kysignon   *sso.KySignOnClient
 	oidc       *sso.GenericOIDCClient
 	saml       *sso.SAMLServiceProvider
@@ -131,7 +129,6 @@ const attemptsCap = 10000
 
 func NewServer(cfg *config.Config, st store.Store) *Server {
 	sessions := auth.NewSessionManager(st, cfg.Security)
-	pairing := devices.NewPairingService(st, cfg.Server.AppName, cfg.Server.AppURL)
 	kysignon := sso.NewKySignOnClient(cfg.SSO, st)
 	oidc := sso.NewGenericOIDCClient(cfg.SSO, st)
 	saml := sso.NewSAMLServiceProvider(cfg.SSO.SAMLEntityID, cfg.Server.AppURL+"/saml/acs")
@@ -142,7 +139,6 @@ func NewServer(cfg *config.Config, st store.Store) *Server {
 		config:   cfg,
 		store:    st,
 		sessions: sessions,
-		pairing:  pairing,
 		kysignon: kysignon,
 		oidc:     oidc,
 		saml:     saml,
@@ -218,11 +214,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/sso/kysignon/sync", s.handleKySignOnSyncWebhook)
 	s.mux.HandleFunc("POST /api/sso/kysignon/backchannel-logout", s.handleKySignOnBackchannelLogout)
 	s.mux.HandleFunc("/saml/metadata", s.handleSAMLMetadata)
-
-	// Devices & Ephemeral QR Pairing
-	s.mux.HandleFunc("/api/devices/pair/init", s.requireAuthenticated(s.handlePairInit))
-	s.mux.HandleFunc("/api/devices/pair/verify", s.handlePairVerify)
-	s.mux.HandleFunc("/api/devices/pair/poll", s.handlePairPoll)
 
 	// Feature 0 KyBackup & Restore Drills. Capsules carry site data and keys: admins only.
 	// Method patterns: only the declared method reaches a handler. Export is a POST so the
