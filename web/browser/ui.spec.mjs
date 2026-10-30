@@ -12,7 +12,7 @@ async function fits(page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-test('production CSP, worker, themes, keyboard, dialog and responsive shell', async ({ page, context }, testInfo) => {
+test('production CSP, worker, themes, keyboard and responsive shell', async ({ page, context }, testInfo) => {
   const violations = [];
   page.on('console', message => {
     if (/Content Security Policy|violates.*directive/i.test(message.text())) violations.push(message.text());
@@ -106,20 +106,6 @@ test('production CSP, worker, themes, keyboard, dialog and responsive shell', as
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--panel-hover'))).toBe('');
   await picker.getByRole('radio', { name: /Match system/ }).check();
   await expect(page.locator('body')).toHaveCSS('background-color', testInfo.project.use.colorScheme === 'dark' ? 'rgb(24, 35, 38)' : 'rgb(248, 246, 240)');
-  const pair = page.getByRole('button', { name: 'Pair Device' });
-  await pair.click();
-  const dialog = page.getByRole('dialog', { name: 'Link Mobile Device' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Close modal' })).toBeFocused();
-  // Native modal containment makes the rest of the document inert.
-  await pair.evaluate(button => button.focus());
-  await expect(dialog.getByRole('button', { name: 'Close modal' })).toBeFocused();
-  await expect(dialog.getByText('Pairing PIN')).toHaveCount(0);
-  await fits(page);
-  await page.screenshot({ path: testInfo.outputPath('dialog.png'), fullPage: true });
-  await page.keyboard.press('Escape');
-  await expect(dialog).not.toBeVisible();
-  await expect(pair).toBeFocused();
   // New suite palettes must keep status text readable against both app surfaces.
   await nav.getByRole('button', { name: 'Appearance' }).click();
   const statusContrast = [];

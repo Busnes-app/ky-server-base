@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Smartphone, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
-import { QRPairingModal } from './QRPairingModal';
+import React, { useEffect, useRef } from 'react';
+import { LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
 
 interface AppHeaderProps {
   appName: string;
@@ -11,7 +10,6 @@ interface AppHeaderProps {
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabChange, user, onLogout }) => {
-  const [showPairing, setShowPairing] = useState<boolean>(false);
   const navRef = useRef<HTMLElement>(null);
   // Phones scroll the navigation sideways: keep the current page's row in view, also after Overview actions.
   useEffect(() => {
@@ -52,12 +50,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
             })}
           </nav>
         <div className="app-header-actions">
-          <button className="btn-secondary app-pair" onClick={() => setShowPairing(true)}>
-            <Smartphone size={16} style={{ color: 'var(--accent)' }} />
-            <span>Pair Device</span>
-          </button>
-
-
           {user && (
             <div className="app-user">
               <div className="app-user-copy">
@@ -76,8 +68,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
           )}
         </div>
       </header>
-
-      {showPairing && <QRPairingModal onClose={() => setShowPairing(false)} />}
     </>
   );
 };

@@ -39,14 +39,6 @@ func (sm *SessionManager) IssueSession(ctx context.Context, w http.ResponseWrite
 	return sm.issue(ctx, w, r, user, time.Now().UTC(), "")
 }
 
-// IssueDerivedSession issues a session whose credentials were verified at authenticatedAt,
-// for a session minted from another one (device pairing) without a fresh sign-in. It
-// inherits the parent's provider sid, so it fails with store.ErrSSOSessionEnded once the
-// provider ended that login, and a later logout of it ends this session too.
-func (sm *SessionManager) IssueDerivedSession(ctx context.Context, w http.ResponseWriter, r *http.Request, user *store.User, authenticatedAt time.Time, sid string) (*store.Session, string, error) {
-	return sm.issue(ctx, w, r, user, authenticatedAt, sid)
-}
-
 // IssueSSOSession issues a session for an SSO login the provider names by sid and dates
 // it by the ID token's issuedAt, so a back-channel logout for that sid or subject ends it.
 // It fails with store.ErrSSOSessionEnded when the provider already ended that login.

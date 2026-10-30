@@ -79,9 +79,6 @@ func TestAdminPasswordResetRevokesGrants(t *testing.T) {
 	if err := st.Sessions().CreateMFAChallenge(ctx, challenge, "old"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Devices().CreatePairing(ctx, &store.DevicePairing{Secret: "pair", UserID: u.ID, Status: "pending", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
-		t.Fatal(err)
-	}
 	u.Status = "disabled"
 	if err := st.Users().UpdateUser(ctx, u); err != nil {
 		t.Fatal(err)
@@ -95,9 +92,6 @@ func TestAdminPasswordResetRevokesGrants(t *testing.T) {
 	}
 	if !updated.MustChangePassword || updated.PasswordHash != "reset-hash" || updated.Status != "active" || updated.Role != "admin" {
 		t.Fatalf("unexpected reset state: %+v", updated)
-	}
-	if _, err := st.Devices().GetPairingBySecret(ctx, "pair"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("pairing survived", err)
 	}
 
 	if _, err := st.Sessions().GetSession(ctx, sess.TokenHash); !errors.Is(err, store.ErrNotFound) {

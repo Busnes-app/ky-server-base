@@ -49,11 +49,16 @@ These are human summaries, not a raw version-control log.
   still cancelled.
 - CI only: CodeQL moved from default setup to an advanced workflow with the same
   languages and query suite, so the docs/ screenshot tooling is excluded.
+- Removed QR device pairing: the sidebar's "Pair Device" button, its "Link Mobile
+  Device" dialog and the anonymous `/api/devices/pair/init`, `/verify` and `/poll`
+  routes. No app could scan the code. Migration 8 drops the `device_pairings` table.
 
 ### Upgrade impact
 
-- None. The only user-visible change is the login link's text; its address and
-  behavior are unchanged and nothing needs migrating.
+- The login link's text changed; its address and behavior did not.
+- Migration 8 runs on start and deletes stored device pairings. Calls to
+  `/api/devices/pair/*` now get the web app's page, like any unknown path; no
+  client shipped.
 
 ## Maintaining notes
 

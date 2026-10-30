@@ -32,8 +32,7 @@ type Session struct {
 	UserID    string `json:"user_id"`
 	UserAgent string `json:"user_agent"`
 	IPAddress string `json:"ip_address"`
-	// CreatedAt is when the credentials behind this session were verified; a session derived
-	// by pairing carries its parent's time, never a fresh one.
+	// CreatedAt is when the credentials behind this session were verified.
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	// SSOSID is the identity provider's sid for an SSO login; empty for local sign-in.
@@ -44,25 +43,6 @@ type MFAChallenge struct {
 	TokenHash string
 	UserID    string
 	ExpiresAt time.Time
-}
-
-// DevicePairing represents a 90-second ephemeral session to link mobile/PWA wrappers.
-type DevicePairing struct {
-	// Secret and PushToken never serialise: this record is reached by unauthenticated
-	// pair/verify and pair/poll callers. A handler that must return one needs its own type.
-	Secret     string    `json:"-"` // Ephemeral secret for exchange
-	UserID     string    `json:"user_id,omitempty"`
-	DeviceName string    `json:"device_name,omitempty"`
-	Platform   string    `json:"platform,omitempty"` // "android", "ios", "pwa", "desktop"
-	PushToken  string    `json:"-"`
-	Status     string    `json:"status"` // "pending", "approved", "consumed", "expired"
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	// AuthenticatedAt is the initiating session's credential time, inherited by the paired session.
-	AuthenticatedAt time.Time `json:"-"`
-	// SSOSID is the initiating session's provider sid, inherited too, so the provider's
-	// logout of that login ends the paired session and refuses a pairing still pending.
-	SSOSID string `json:"-"`
 }
 
 // Group represents a SCIM/RBAC user group.

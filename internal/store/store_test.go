@@ -150,41 +150,6 @@ func TestSessionStoreLifecycle(t *testing.T) {
 	}
 }
 
-func TestDevicePairingLifecycle(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-
-	pairing := &store.DevicePairing{
-		Secret:     "secret-pairing-token-abc",
-		DeviceName: "Yoshi's Pixel 9",
-		Platform:   "android",
-		Status:     "pending",
-		CreatedAt:  time.Now().UTC(),
-		ExpiresAt:  time.Now().UTC().Add(90 * time.Second),
-	}
-
-	if err := st.Devices().CreatePairing(ctx, pairing); err != nil {
-		t.Fatalf("CreatePairing error: %v", err)
-	}
-
-	bySecret, err := st.Devices().GetPairingBySecret(ctx, "secret-pairing-token-abc")
-	if err != nil {
-		t.Fatalf("GetPairingBySecret error: %v", err)
-	}
-	if bySecret.Status != "pending" {
-		t.Errorf("unexpected status: %s", bySecret.Status)
-	}
-
-	if err := st.Devices().ConsumePairing(ctx, pairing.Secret, "Pixel", "android", "fcm-token-xyz"); err != nil {
-		t.Fatalf("ConsumePairing error: %v", err)
-	}
-
-	updated, _ := st.Devices().GetPairingBySecret(ctx, pairing.Secret)
-	if updated.Status != "consumed" || updated.PushToken != "fcm-token-xyz" {
-		t.Errorf("pairing update failed: %+v", updated)
-	}
-}
-
 func TestGroupStoreAndMembers(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

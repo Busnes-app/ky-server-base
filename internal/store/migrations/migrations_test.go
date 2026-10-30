@@ -89,4 +89,9 @@ func TestMigration7DropsUnreachableSSOSessions(t *testing.T) {
 			t.Errorf("after migration 7, session %s: got %d rows, want %d", token, got, want)
 		}
 	}
+
+	runThrough(8)
+	if _, err := db.ExecContext(ctx, "SELECT 1 FROM device_pairings"); err == nil {
+		t.Error("after migration 8, device_pairings still exists")
+	}
 }

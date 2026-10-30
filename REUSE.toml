@@ -21,7 +21,7 @@ precedence = "override"
 SPDX-FileCopyrightText = "2020 The Space Grotesk Project Authors"
 SPDX-License-Identifier = "OFL-1.1"
 
-# The built bundle includes React, react-dom, lucide-react and qrcode (see web/package-lock.json).
+# The built bundle includes React, react-dom and lucide-react (see web/package-lock.json).
 [[annotations]]
 path = "web/dist/assets/*.js"
 precedence = "override"

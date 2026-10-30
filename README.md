@@ -60,11 +60,11 @@ and IdP keys. Encryption/recovery keys and stored records stay in place.
 ## First sign-in
 
 Every bootstrap or `init-admin` password must be replaced, including when
-`KY_ADMIN_PASSWORD` supplies it. Operator resets revoke existing sessions, MFA challenges and
-device pairings immediately, reactivate local admins and require replacement at the next login. Sign in, enter the current password and a different password
+`KY_ADMIN_PASSWORD` supplies it. Operator resets revoke existing sessions, MFA challenges
+immediately, reactivate local admins and require replacement at the next login. Sign in, enter the current password and a different password
 of at least 12 characters, then sign in again. Until replacement, the session can only check
 its identity, change the password or sign out; privileged APIs remain blocked. Replacement
-revokes existing sessions, MFA transactions and device pairings atomically. Existing accounts
+revokes existing sessions and MFA transactions atomically. Existing accounts
 are not retroactively flagged, since the server cannot infer whether they still use a bootstrap password.
 
 ## Upgrading after the Busnes-app owner move
