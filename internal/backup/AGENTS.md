@@ -27,7 +27,8 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
 - `Checks(dir, opened)` reads the opened capsule's manifest, normalizes JSON lists and
   fails malformed or incomplete recipes. Required files include all capsule members and
   the database, settings and encryption key; SQLite integrity and required environment
-  checks cannot be disabled. File checks accept only clean relative manifest members;
+  checks cannot be disabled; an unset `KY_PORT` or `KY_DB_DRIVER` passes because the
+  config defaults apply, any other unset expected variable fails. File checks accept only clean relative manifest members;
   SQLite opens read-only and missing/empty databases fail.
 - HTTP and CLI call `RunDrill`, which holds an OS advisory lock on `<data dir>/drill.lock`
   across scratch preparation and the library drill. Contention returns `ErrDrillBusy`;
