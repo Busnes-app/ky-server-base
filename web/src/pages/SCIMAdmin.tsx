@@ -6,22 +6,28 @@ export const SCIMAdmin: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [scimToken, setScimToken] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string>('');
 
   useEffect(() => {
     const fetchUsers = async () => {
       try {
         const setResp = await fetch('/api/settings');
         const setJson = await setResp.json();
-        setScimToken(setJson.extra_settings?.scim_token || 'Bearer token configured in environment');
+        setScimToken(setJson.extra_settings?.scim_token || '');
 
         // Fetch users through SCIM
         const resp = await fetch('/scim/v2/Users');
         if (resp.ok) {
           const data = await resp.json();
           setUsers(data.Resources || []);
+        } else {
+          setLoadError(
+            `Could not load the account list (HTTP ${resp.status}). The SCIM API accepts only the provisioning token, not a browser sign-in.`,
+          );
         }
       } catch (err) {
         console.error('Failed to load SCIM directory', err);
+        setLoadError('Could not load the account list.');
       } finally {
         setLoading(false);
       }
@@ -63,17 +69,24 @@ export const SCIMAdmin: React.FC = () => {
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--ink)', marginBottom: '4px' }}>
               SCIM Bearer Token
             </label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="password"
-                readOnly
-                value={scimToken}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: '13px' }}
-              />
-              <button type="button" className="btn-secondary" onClick={copyToken}>
-                {copied ? <Check size={16} /> : <Copy size={16} />}
-              </button>
-            </div>
+            {scimToken ? (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="password"
+                  readOnly
+                  value={scimToken}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '13px' }}
+                />
+                <button type="button" className="btn-secondary" onClick={copyToken}>
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                </button>
+              </div>
+            ) : (
+              <p style={{ color: 'var(--ink)', fontSize: '13px' }}>
+                Set <code>KY_SCIM_TOKEN</code> in the server environment and give the same value to your identity provider.
+                Without it the server makes a new token at every start.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -83,6 +96,8 @@ export const SCIMAdmin: React.FC = () => {
 
         {loading ? (
           <p style={{ color: 'var(--ink)', fontSize: '13px' }}>Loading directory...</p>
+        ) : loadError ? (
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: '13px' }}>{loadError}</p>
         ) : users.length === 0 ? (
           <p style={{ color: 'var(--ink)', fontSize: '13px' }}>No users provisioned yet via SCIM or local directory.</p>
         ) : (
