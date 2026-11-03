@@ -111,3 +111,41 @@ func TestAdminPasswordResetRevokesGrants(t *testing.T) {
 		t.Fatal("audit", n, err)
 	}
 }
+
+// A directory sync works from a read taken before a concurrent reset; its write must not put
+// the old password hash, MFA state or recovery codes back.
+func TestUpdateUserProfileLeavesCredentialsAlone(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	u := &store.User{ID: "sync", Username: "sync", PasswordHash: "old", Role: "admin", Status: "active", SSOProvider: "local", RecoveryCodesHash: `["a"]`}
+	if err := st.Users().CreateUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := st.Users().GetUserByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().ResetAdminPassword(ctx, u.ID, "reset-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().UpdateRecoveryCodes(ctx, u.ID, `["a"]`, `[]`); err != nil {
+		t.Fatal(err)
+	}
+	stale.DisplayName = "Synced Name"
+	if err := st.Users().UpdateUserProfile(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Users().GetUserByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "Synced Name" {
+		t.Fatalf("profile not written: %+v", got)
+	}
+	if got.PasswordHash != "reset-hash" || !got.MustChangePassword || got.RecoveryCodesHash != `[]` {
+		t.Fatalf("stale profile write restored credentials: hash=%q must_change=%v codes=%q", got.PasswordHash, got.MustChangePassword, got.RecoveryCodesHash)
+	}
+	if err := st.Users().UpdateUserProfile(ctx, &store.User{ID: "missing"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing user: %v", err)
+	}
+}

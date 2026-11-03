@@ -54,6 +54,10 @@ services:
       # - KY_TRUSTED_PROXIES=172.18.0.2/32
       - KY_SSO_ENABLED=true
       - KY_SCIM_ENABLED=true
+      # Read from .env, so rotating either there and running `docker compose up -d` takes
+      # effect. Left empty, the server mints a fresh one at every start.
+      - KY_SESSION_SECRET=${KY_SESSION_SECRET:-}
+      - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:-}
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups
@@ -68,8 +72,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: ky_server
+    # Loopback only: the password above is public, and Docker's published ports bypass the
+    # host firewall. The app reaches it over the compose network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

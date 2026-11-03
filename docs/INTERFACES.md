@@ -25,6 +25,9 @@ For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 applies when an Authorization header is present alongside the cookie. Login, MFA
 verification and the signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
+Login and MFA verification instead refuse an unsafe request carrying
+`Sec-Fetch-Site: cross-site` with 403 `{"error":"Cross-site sign-in refused"}`;
+clients that send no such header are unaffected.
 
 CORS permits credentials only for the exact configured application origin. An
 OPTIONS request returns 200, or 403 plain text for a different nonempty origin.
@@ -201,15 +204,19 @@ Changing role/status invalidates sessions. Group resources persist `displayName`
 
 Adapter limits matter when configuring a provisioning connector:
 
-- User list filtering recognizes `userName`, `email` or `displayName` with `eq` and
-  a quoted value, then passes that value to the store's shared search. It is not
-  attribute-exact RFC filtering. Other query filters return 400 `invalidFilter`.
+- User list filtering accepts exactly one `userName`, `emails`/`emails.value`/`email`
+  or `displayName` `eq` comparison with a quoted value and matches that attribute
+  exactly, case-insensitively. A blank value or any other filter returns 400
+  `invalidFilter`; an `emails` or `displayName` value whose substring matches more
+  than 1000 accounts returns 400 `tooMany`.
   User search currently reads this filter from the URL query, not the SearchRequest
   body's filter. Group filtering is not applied.
 - User PATCH supports add/replace of active, displayName, userName, emails and
   roles; remove operations are ignored. Group PATCH only applies explicit paths
   into displayName/members; complex member filters and complete RFC patch semantics
   are not implemented by the persistence adapter. Prefer PUT when replacing a group.
+  An unknown member id on create, replace or PATCH is 400 `invalidValue` and leaves
+  the group unchanged.
 - Cross-resource root list/search has no configured root-query handler; `/scim/v2/Me`
   is 501. Bulk is not enabled. Discover capabilities before using optional operations.
 

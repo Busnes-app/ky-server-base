@@ -100,7 +100,7 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 			existing.DisplayName = payload.DisplayName
 			existing.Role = role
 			existing.Status = status
-			if err := k.store.Users().UpdateUser(ctx, existing); err != nil {
+			if err := k.store.Users().UpdateUserProfile(ctx, existing); err != nil {
 				return err
 			}
 			if privilegesChanged {
@@ -123,19 +123,25 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 
 	case "user.deactivated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
-		if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil // User might not exist locally
 		}
+		if err != nil {
+			return err
+		}
 		existing.Status = "inactive"
-		if err := k.store.Users().UpdateUser(ctx, existing); err != nil {
+		if err := k.store.Users().UpdateUserProfile(ctx, existing); err != nil {
 			return err
 		}
 		return k.store.Sessions().DeleteUserSessions(ctx, existing.ID)
 
 	case "user.deleted":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
-		if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		return k.store.Users().DeleteUser(ctx, existing.ID)
 	}

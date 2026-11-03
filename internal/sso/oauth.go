@@ -124,19 +124,19 @@ func requireOIDCHTTPS(endpoints ...string) error {
 	return nil
 }
 
-// Keep the caller's trust roots/transport; the selected profile refuses redirects
-// for discovery, token exchange and JWKS rather than allowing an HTTP downgrade.
+// Keep the caller's trust roots/transport. Discovery and token exchange are always bounded,
+// because discovery runs under the provider mutex and a stalled IdP would hold every login;
+// the strong-crypto profile also refuses redirects rather than allowing an HTTP downgrade.
 func strongOIDCContext(ctx context.Context) context.Context {
-	if !fips140.Enabled() {
-		return ctx
-	}
 	client := http.DefaultClient
 	if configured, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
 		client = configured
 	}
 	copy := *client
-	copy.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return errors.New("OIDC redirects are refused in strong-crypto mode")
+	if fips140.Enabled() {
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return errors.New("OIDC redirects are refused in strong-crypto mode")
+		}
 	}
 	if copy.Timeout == 0 {
 		copy.Timeout = 10 * time.Second

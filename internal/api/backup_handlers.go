@@ -30,7 +30,8 @@ const errRecoveryKeyMismatch = "Recovery key file does not match the pinned key 
 const privateRecoveryHint = " (set KY_BACKUP_ALLOW_PRIVATE_RECOVERY=true for a KyRecovery on your own network)"
 
 // depositWriteBudget is how long the admin's connection may stay open for the receipt: the
-// upload budget plus room for sealing. The listener's WriteTimeout is sized for JSON replies.
+// upload budget plus room for sealing. The listener's WriteTimeout is sized for JSON replies,
+// so the export and drill, which snapshot and seal the whole database, use this budget too.
 const depositWriteBudget = 16 * time.Minute
 
 // AuditDetails flattens the lib's details map into the bounded audit column. Locally
@@ -103,6 +104,7 @@ func (s *Server) handleBackupDrill(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	ctx := r.Context()
 	payload, err := backup.Collect(ctx, s.config, appVersion)
 	if errors.Is(err, backup.ErrNoDatabaseSnapshot) {
@@ -135,6 +137,7 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	ctx := r.Context()
 	actor := s.actorID(r)
 	settings := backup.Settings(ctx, s.store.Settings())

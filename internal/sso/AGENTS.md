@@ -18,6 +18,11 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   provider/verifier pair is initialized once under the discovery mutex.
   Match the verifier's envelope parsing and go-jose's case-sensitive JWK member
   parsing; case variants must never substitute another modulus for this check.
+- Discovery and token exchange use a client with a 10 s timeout in every mode
+  (`strongOIDCContext`), because discovery holds the provider mutex.
+- Directory deprovisioning (`user.deactivated`, `user.deleted`) ignores only
+  `store.ErrNotFound`; any other lookup error fails the webhook. Updates use
+  `UpdateUserProfile`.
 - When `fips140.Enabled()`, issuer/authorization/token/JWKS endpoints require
   HTTPS without URL credentials; discovery/token redirects are refused. Preserve
   caller TLS trust roots and ordinary verification. This mode is process-wide.

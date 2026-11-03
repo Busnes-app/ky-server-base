@@ -35,6 +35,10 @@ type UserStore interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserBySSO(ctx context.Context, provider, subject string) (*User, error)
 	UpdateUser(ctx context.Context, u *User) error
+	// UpdateUserProfile writes only username, email, display name, role, status and SSO
+	// identity, so a directory sync working from a stale read cannot undo a concurrent
+	// password reset, MFA change or recovery-code spend.
+	UpdateUserProfile(ctx context.Context, u *User) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
 	UpdateRecoveryCodes(ctx context.Context, userID, oldHashes, newHashes string) error

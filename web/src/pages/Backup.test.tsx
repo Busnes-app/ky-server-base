@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Backup } from './Backup';
 
 function mockStatus(body: Record<string, unknown>) {
@@ -63,13 +63,37 @@ describe('Backup', () => {
   it('says so on Postgres, where no capsule carries the database', async () => {
     mockStatus({ ...PAIRED, database_driver: 'postgres' });
     render(<Backup />);
-    expect(await screen.findByText(/Backups do not include the PostgreSQL database/)).toBeTruthy();
+    expect(await screen.findByText(/No backups are made on PostgreSQL/)).toBeTruthy();
   });
 
   it('does not warn about the database on SQLite', async () => {
     mockStatus(PAIRED);
     render(<Backup />);
     await screen.findByText('https://recovery.example');
-    expect(screen.queryByText(/Backups do not include the PostgreSQL database/)).toBeNull();
+    expect(screen.queryByText(/No backups are made on PostgreSQL/)).toBeNull();
   });
+});
+
+// The pin is write-once; a wrong key or split is only undone by a new ceremony.
+it('pins the recovery key only after confirmation', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/api/backup/status')) {
+      return new Response(JSON.stringify({ key_pinned: false, paired: false, interval_sec: 0, database_driver: 'sqlite', members: [] }), { status: 200 });
+    }
+    if (url.endsWith('/api/backup/pin-key')) return new Response('{}', { status: 200 });
+    throw new Error(`unexpected fetch ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal('confirm', confirm);
+  render(<Backup />);
+  fireEvent.change(await screen.findByPlaceholderText('base64 from the ceremony page'), { target: { value: 'AAAA' } });
+  fireEvent.click(screen.getByRole('button', { name: /pin key/i }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/backup/pin-key'))).toBe(false);
+
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: /pin key/i }));
+  await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/backup/pin-key'))).toBe(true));
 });

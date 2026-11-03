@@ -26,39 +26,53 @@ development before the first image is summarized with that initial distribution.
 These are human summaries, not a raw version-control log.
 
 ## Current source
-
 ### Changes
 
-- Documentation only: the README's Container IP address and Disaster recovery
-  sections moved verbatim to [docs/CONTAINER-IP.md](docs/CONTAINER-IP.md) and
-  [docs/DISASTER-RECOVERY.md](docs/DISASTER-RECOVERY.md). Links to the old
-  README sections land on its Documentation list, which links the new pages.
-- The README has a License section with an [OctoCounts](https://octocounts.com)
-  badge showing the repository's line counts, followed by a Documentation section
-  listing the operator and contributor documents.
-- CI only, same checks: the browser regressions run in the pinned Playwright
-  container instead of installing Chromium and its system packages on every run,
-  the four bounded fuzz runs move from the SQLite Go job to the PostgreSQL job so
-  the two run in parallel, and the vulnerability scan no longer saves the Go cache
-  the test jobs need.
-- The login page's single sign-on link reads "Continue with Single Sign On"
-  (was "KySignOn Identity"), and the "Or continue with Single Sign-On" caption
-  above it is gone so the phrase appears once.
-- CI only: pushes to `master` each get their own concurrency group, so a push run
-  queued behind another is no longer dropped. Superseded pull-request runs are
-  still cancelled.
-- CI only: CodeQL moved from default setup to an advanced workflow with the same
-  languages and query suite, so the docs/ screenshot tooling is excluded.
-- Removed QR device pairing: the sidebar's "Pair Device" button, its "Link Mobile
-  Device" dialog and the anonymous `/api/devices/pair/init`, `/verify` and `/poll`
-  routes. No app could scan the code. Migration 8 drops the `device_pairings` table.
+- SCIM: a `userName`, `emails` or `displayName` `eq` filter now matches that attribute
+  exactly (case-insensitive) instead of any substring of any of the three, so an IdP's
+  lookup of `ann@corp.com` no longer returns `joann@corp.com`. A blank value is 400
+  `invalidFilter`, and an `emails`/`displayName` value matching more than 1000
+  accounts as a substring is 400 `tooMany`.
+- SCIM: a group member id that does not exist is refused with 400 before anything is
+  written, and replacing a group writes only the membership difference, so one bad id
+  no longer leaves the group half-rewritten behind a 500.
+- SCIM and KySignOn directory updates write only profile, role, status and SSO identity
+  columns, so a sync cannot undo a concurrent password reset, MFA change or
+  recovery-code spend. KySignOn `user.deactivated`/`user.deleted` events now fail
+  (401) when the account lookup fails, instead of acknowledging and doing nothing.
+- Sign-in: the login CAPTCHA solves one challenge (renewed every four minutes) instead
+  of fetching and solving new ones in a loop for as long as the page is open. After a
+  rejected MFA code the page returns to the password step, because the server has
+  already spent that transaction. A browser `POST` to the login or MFA routes labelled
+  `Sec-Fetch-Site: cross-site` is refused with 403 (login CSRF).
+- Directory & SCIM page: shows why the account list could not load instead of "No
+  users provisioned yet", and asks for `KY_SCIM_TOKEN` instead of offering placeholder
+  text to copy as the token.
+- Backup page: the PostgreSQL warning says no capsule is made at all, and pinning the
+  recovery key asks for confirmation with the k-of-n split.
+- Capsule export and the restore drill get the same 16-minute write budget as a
+  deposit, so a large database is not cut off at the 15-second reply timeout. The
+  drill no longer fails its environment check when `KY_PORT`/`KY_DB_DRIVER` are unset
+  and their defaults apply.
+- OIDC discovery and token exchange use a 10-second client timeout in every mode, not
+  only under strong crypto.
+- `docker-compose.yml` forwards `KY_SESSION_SECRET` and `KY_SCIM_TOKEN` from `.env`, so
+  the restore runbook's rotation (edit `.env`, `docker compose up -d`) takes effect, and
+  the optional `postgres` profile publishes 5432 on 127.0.0.1 only.
+- `make clean` no longer deletes `data/` and `backups/` (the database, encryption key,
+  recovery pin and local capsules); it removes build output only.
 
 ### Upgrade impact
 
-- The login link's text changed; its address and behavior did not.
-- Migration 8 runs on start and deletes stored device pairings. Calls to
-  `/api/devices/pair/*` now get the web app's page, like any unknown path; no
-  client shipped.
+- No migration. Restart onto the new image.
+- Compose: values for `KY_SESSION_SECRET` and `KY_SCIM_TOKEN` already in `.env` now
+  reach the container on the next `docker compose up -d`; unset or empty, the server
+  still mints fresh ones at every start. A `KY_SESSION_SECRET` there that is shorter
+  than 16 bytes now stops the server at startup, as it already did outside compose; fix
+  or remove it before upgrading. Anything that reached the `postgres` profile's
+  5432 from another host must now go through the compose network or an SSH tunnel.
+- SCIM clients that relied on substring matching from an `eq` filter see exact
+  matching now.
 
 ## Maintaining notes
 
@@ -81,6 +95,15 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-11-03 — ba7adf5
+
+Source: [ba7adf535954093c08564c99bd314f79aaf6c8dc](https://github.com/Busnes-app/ky-server-base/commit/ba7adf535954093c08564c99bd314f79aaf6c8dc) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/41647539283)
+
+Covers every publication after c81a19b, including the 2026-11-03 dependency updates (#91-#95).
+
+- **Changes:** Documentation only: the README's Container IP address and Disaster recovery sections moved verbatim to [docs/CONTAINER-IP.md](docs/CONTAINER-IP.md) and [docs/DISASTER-RECOVERY.md](docs/DISASTER-RECOVERY.md). Links to the old README sections land on its Documentation list, which links the new pages. The README has a License section with an [OctoCounts](https://octocounts.com) badge showing the repository's line counts, followed by a Documentation section listing the operator and contributor documents. CI only, same checks: the browser regressions run in the pinned Playwright container instead of installing Chromium and its system packages on every run, the four bounded fuzz runs move from the SQLite Go job to the PostgreSQL job so the two run in parallel, and the vulnerability scan no longer saves the Go cache the test jobs need. The login page's single sign-on link reads "Continue with Single Sign On" (was "KySignOn Identity"), and the "Or continue with Single Sign-On" caption above it is gone so the phrase appears once. CI only: pushes to `master` each get their own concurrency group, so a push run queued behind another is no longer dropped. Superseded pull-request runs are still cancelled. CI only: CodeQL moved from default setup to an advanced workflow with the same languages and query suite, so the docs/ screenshot tooling is excluded. Removed QR device pairing: the sidebar's "Pair Device" button, its "Link Mobile Device" dialog and the anonymous `/api/devices/pair/init`, `/verify` and `/poll` routes. No app could scan the code. Migration 8 drops the `device_pairings` table.
+- **Upgrade impact:** The login link's text changed; its address and behavior did not. Migration 8 runs on start and deletes stored device pairings. Calls to `/api/devices/pair/*` now get the web app's page, like any unknown path; no client shipped.
 
 ### 2026-10-28 — c81a19b
 

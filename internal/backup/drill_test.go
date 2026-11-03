@@ -297,3 +297,34 @@ func TestChecksSQLiteFilenameIsNotADSN(t *testing.T) {
 		t.Fatalf("escaped filename failed: %+v", result)
 	}
 }
+
+// KY_PORT and KY_DB_DRIVER have defaults, so a bare install that leaves them unset passes the
+// drill; any other expected variable that is unset still fails it.
+func TestDrillAcceptsDefaultedEnvironment(t *testing.T) {
+	for _, name := range []string{"KY_PORT", "KY_DB_DRIVER", "KY_DRILL_TEST_EXTRA"} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
+	cfg, _ := payloadConfig(t)
+	payload, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := backup.RunDrill(context.Background(), cfg, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Passed {
+		t.Fatalf("drill with defaulted environment failed: %+v", result.Checks)
+	}
+
+	payload.VerificationRecipe = maps.Clone(payload.VerificationRecipe)
+	payload.VerificationRecipe["expected_env"] = []string{"KY_PORT", "KY_DB_DRIVER", "KY_DRILL_TEST_EXTRA"}
+	result, err = backup.RunDrill(context.Background(), cfg, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Passed {
+		t.Fatalf("unset variable without a default passed: %+v", result.Checks)
+	}
+}

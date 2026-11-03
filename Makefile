@@ -56,4 +56,4 @@ docker-build:
 	@docker build -t ky_server_base .
 
 clean:
-	@rm -rf ky_server_base web/dist web/node_modules data/ backups/ coverage.out
+	@rm -rf ky_server_base web/dist web/node_modules coverage.out

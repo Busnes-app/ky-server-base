@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	protocol "github.com/elimity-com/scim"
@@ -104,26 +105,77 @@ func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource
 	return userResource(user), nil
 }
 
-var equalityFilter = regexp.MustCompile(`(?i)(?:userName|email|displayName)\s+eq\s+"([^"]+)"`)
+// SCIM equality on the attribute named. userName uses the exact lookup; for the others the
+// LIKE search only narrows the candidates, and past maxFilterCandidates the filter is refused
+// (tooMany) instead of reading the directory into memory.
+const maxFilterCandidates = 1000
+
+var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|email|displayName)\s+eq\s+"([^"]+)"\s*$`)
 
 func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
-	search := ""
-	if raw := r.URL.Query().Get("filter"); raw != "" {
-		match := equalityFilter.FindStringSubmatch(raw)
-		if len(match) != 2 {
-			return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
+	raw := r.URL.Query().Get("filter")
+	if raw == "" {
+		users, total, err := h.store.Users().ListUsers(r.Context(), params.StartIndex-1, params.Count, "")
+		if err != nil {
+			return protocol.Page{}, err
 		}
-		search = match[1]
+		return userPage(users, total), nil
 	}
-	users, total, err := h.store.Users().ListUsers(r.Context(), params.StartIndex-1, params.Count, search)
-	if err != nil {
-		return protocol.Page{}, err
+	match := equalityFilter.FindStringSubmatch(raw)
+	if match == nil {
+		return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
 	}
+	if strings.TrimSpace(match[2]) == "" {
+		return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
+	}
+	var candidates []*store.User
+	if strings.EqualFold(match[1], "userName") {
+		user, err := h.store.Users().GetUserByUsername(r.Context(), match[2])
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return protocol.Page{}, err
+		}
+		if err == nil {
+			candidates = []*store.User{user}
+		}
+	} else {
+		var total int
+		var err error
+		candidates, total, err = h.store.Users().ListUsers(r.Context(), 0, maxFilterCandidates, match[2])
+		if err != nil {
+			return protocol.Page{}, err
+		}
+		if total > maxFilterCandidates {
+			return protocol.Page{}, protocolErrors.ScimErrorTooMany
+		}
+	}
+	var users []*store.User
+	for _, user := range candidates {
+		value := user.Email
+		switch strings.ToLower(match[1]) {
+		case "username":
+			value = user.Username
+		case "displayname":
+			value = user.DisplayName
+		}
+		if strings.EqualFold(value, match[2]) {
+			users = append(users, user)
+		}
+	}
+	total := len(users)
+	start := min(max(params.StartIndex-1, 0), total)
+	end := total
+	if params.Count > 0 {
+		end = min(start+params.Count, total)
+	}
+	return userPage(users[start:end], total), nil
+}
+
+func userPage(users []*store.User, total int) protocol.Page {
 	resources := make([]protocol.Resource, 0, len(users))
 	for _, user := range users {
 		resources = append(resources, userResource(user))
 	}
-	return protocol.Page{TotalResults: total, Resources: resources}, nil
+	return protocol.Page{TotalResults: total, Resources: resources}
 }
 
 func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
@@ -139,7 +191,7 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Role = role
 	}
 	user.Status = statusFromActive(attrs)
-	if err := h.store.Users().UpdateUser(r.Context(), user); err != nil {
+	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
 	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
@@ -168,7 +220,7 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 		}
 		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
 	}
-	if err := h.store.Users().UpdateUser(r.Context(), user); err != nil {
+	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
 	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
@@ -228,13 +280,17 @@ type groupResourceHandler struct{ store store.Store }
 
 func (h *groupResourceHandler) Create(r *http.Request, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group := &store.Group{ID: "grp_" + crypto.RandomHex(12), DisplayName: stringValue(attrs, "displayName", ""), ExternalID: stringValue(attrs, "externalId", "")}
+	members := memberValues(attrs["members"])
+	if err := h.checkMembers(r, nil, members); err != nil {
+		return protocol.Resource{}, err
+	}
 	if err := h.store.Groups().CreateGroup(r.Context(), group); err != nil {
 		return protocol.Resource{}, scimStoreError(err, group.ID)
 	}
-	if err := h.replaceMembers(r, group.ID, nil, memberValues(attrs["members"])); err != nil {
+	if err := h.replaceMembers(r, group.ID, nil, members); err != nil {
 		return protocol.Resource{}, err
 	}
-	group.Members = memberValues(attrs["members"])
+	group.Members = members
 	return groupResource(group), nil
 }
 func (h *groupResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {
@@ -264,6 +320,9 @@ func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protoco
 	group.DisplayName = stringValue(attrs, "displayName", group.DisplayName)
 	group.ExternalID = stringValue(attrs, "externalId", group.ExternalID)
 	group.Members = memberValues(attrs["members"])
+	if err := h.checkMembers(r, old, group.Members); err != nil {
+		return protocol.Resource{}, err
+	}
 	if err := h.store.Groups().UpdateGroup(r.Context(), group); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
@@ -275,6 +334,7 @@ func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protoco
 func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 	return scimStoreError(h.store.Groups().DeleteGroup(r.Context(), id), id)
 }
+
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
@@ -288,13 +348,37 @@ func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []pr
 	}
 	return h.Replace(r, id, attrs)
 }
+
+// checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
+// group half-rewritten.
+func (h *groupResourceHandler) checkMembers(r *http.Request, old, next []string) error {
+	for _, id := range next {
+		if slices.Contains(old, id) {
+			continue
+		}
+		if _, err := h.store.Users().GetUserByID(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+			return protocolErrors.ScimErrorInvalidValue
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// replaceMembers writes only the difference between old and next.
 func (h *groupResourceHandler) replaceMembers(r *http.Request, groupID string, old, next []string) error {
 	for _, id := range old {
+		if slices.Contains(next, id) {
+			continue
+		}
 		if err := h.store.Groups().RemoveGroupMember(r.Context(), groupID, id); err != nil {
 			return err
 		}
 	}
 	for _, id := range next {
+		if slices.Contains(old, id) {
+			continue
+		}
 		if err := h.store.Groups().AddGroupMember(r.Context(), groupID, id); err != nil {
 			return err
 		}
@@ -339,6 +423,7 @@ func primaryValue(value interface{}) string {
 	}
 	return ""
 }
+
 func interfaceSlice(value interface{}) []interface{} {
 	if values, ok := value.([]interface{}); ok {
 		return values

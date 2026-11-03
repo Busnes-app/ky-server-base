@@ -302,6 +302,12 @@ export const Backup: React.FC = () => {
 
   const pin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (
+      !window.confirm(
+        `Pin this recovery key for ${pinK} of ${pinN} custodian cards?\n\nThe pin is permanent: replacing it means a new ceremony and a fresh data directory.`,
+      )
+    )
+      return;
     setPinning(true);
     setPinError('');
     try {
@@ -345,8 +351,8 @@ export const Backup: React.FC = () => {
       {status?.recovery_key_error && <Alert kind="error">{status.recovery_key_error}</Alert>}
       {status && status.database_driver !== 'sqlite' && (
         <Alert kind="warn">
-          Backups do not include the PostgreSQL database: a capsule can only snapshot SQLite. Back this database up
-          with pg_dump on its own schedule.
+          No backups are made on PostgreSQL: a capsule can only snapshot SQLite, so nothing is sealed, copied or
+          deposited. Back this database up with pg_dump on its own schedule.
         </Alert>
       )}
       {status && !keyPinned && <Alert kind="warn">No backups are being made. Pair with KyRecovery or pin the suite recovery key below.</Alert>}
