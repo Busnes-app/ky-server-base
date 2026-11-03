@@ -35,7 +35,9 @@ These are human summaries, not a raw version-control log.
   `members[value eq "id"]` remove) instead of replacing the whole membership. A member
   id that does not exist is refused with 400 before anything is written, and replacing
   a group writes only the membership difference.
-- SCIM: user PATCH applies filtered paths such as `emails[type eq "work"].value`.
+- SCIM: user PATCH applies filtered paths such as `emails[type eq "work"].value` when
+  the filter selects the stored (work, primary) email or role; other selectors change
+  nothing.
 - SCIM and KySignOn directory updates write only profile, role, status and SSO identity
   columns, so a sync cannot undo a concurrent password reset, MFA change or
   recovery-code spend. KySignOn `user.deactivated`/`user.deleted` events now fail
@@ -67,7 +69,9 @@ These are human summaries, not a raw version-control log.
 - No migration. Restart onto the new image.
 - Compose: values for `KY_SESSION_SECRET` and `KY_SCIM_TOKEN` already in `.env` now
   reach the container on the next `docker compose up -d`; unset or empty, the server
-  still mints fresh ones at every start. Anything that reached the `postgres` profile's
+  still mints fresh ones at every start. A `KY_SESSION_SECRET` there that is shorter
+  than 16 bytes now stops the server at startup, as it already did outside compose; fix
+  or remove it before upgrading. Anything that reached the `postgres` profile's
   5432 from another host must now go through the compose network or an SSH tunnel.
 - SCIM clients that relied on substring matching from an `eq` filter, or on PATCH
   `add members` replacing a group, see standards behaviour now.

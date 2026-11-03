@@ -19,7 +19,7 @@ Owns user interface components, service worker caching, PWA installation manifes
 - Register the service worker from the production JS bundle; keep `script-src 'self'` intact.
 - Worker caching is limited to the same-origin public shell, manifest and assets. HTML is network-first with offline fallback so deployments refresh; dynamic/auth routes stay uncached.
 - `Backup.tsx` warns for as long as `database_driver` from `/api/backup/status` is not `sqlite`: only the SQLite path can snapshot a database into a capsule, so a Postgres deployment makes no capsules at all, and the warning says exactly that. Pinning the write-once recovery key asks `window.confirm` with the k-of-n first.
-- `CaptchaWidget` takes a stable `onToken` (a state setter); an inline callback restarts the solve on every parent render. It renews its token every four minutes, inside the five-minute challenge life.
+- `CaptchaWidget` takes a stable `onToken` (a state setter); an inline callback restarts the solve on every parent render. It renews its token every four minutes, inside the five-minute challenge life, and `Login.tsx` remounts it (new `key`) after a failed sign-in so a token that expired while the tab slept is replaced.
 - After a rejected MFA code `Login.tsx` returns to the password step: the server spends the transaction on every attempt.
 - `SCIMAdmin.tsx` shows the load error when `/scim/v2/Users` refuses the session, and shows the token field only when a real token is supplied; otherwise it asks for `KY_SCIM_TOKEN`.
 

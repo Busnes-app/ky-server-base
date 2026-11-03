@@ -210,9 +210,10 @@ Adapter limits matter when configuring a provisioning connector:
   User search currently reads this filter from the URL query, not the SearchRequest
   body's filter. Group filtering is not applied.
 - User PATCH supports add/replace of active, displayName, userName, emails and
-  roles, including filtered value paths such as `emails[type eq "work"].value`;
-  remove operations are ignored. Group PATCH applies add, remove and replace to
-  displayName and members; the only member filter is `members[value eq "id"]` with
+  roles, including filtered value paths such as `emails[type eq "work"].value` when
+  the filter selects the single stored (work, primary) value; remove operations are
+  ignored. Group PATCH applies add, remove and replace to
+  displayName, externalId and members; the only member filter is `members[value eq "id"]` with
   remove, and any other filter is 400 `invalidPath`. An unknown member id is 400
   `invalidValue` and leaves the group unchanged.
 - Cross-resource root list/search has no configured root-query handler; `/scim/v2/Me`
