@@ -18,9 +18,12 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
   const [status, setStatus] = useState<'working' | 'done' | 'failed'>('working');
   const [progress, setProgress] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [round, setRound] = useState<number>(0);
 
+  // onToken must be stable (a state setter): a new function per render restarts the solve.
   useEffect(() => {
     let cancelled = false;
+    let refresh: ReturnType<typeof setTimeout> | undefined;
 
     const runPoW = async () => {
       try {
@@ -36,6 +39,7 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
           if (cancelled) return;
           const target = `${chal.salt}${i}`;
           const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(target));
+          if (cancelled) return;
           const hashHex = Array.from(new Uint8Array(hashBuf))
             .map((b) => b.toString(16).padStart(2, '0'))
             .join('');
@@ -53,6 +57,8 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
             const token = btoa(JSON.stringify(sol));
             setStatus('done');
             onToken(token);
+            // Challenges expire after five minutes (internal/auth/pow.go); fetch the next one before then.
+            refresh = setTimeout(() => setRound((r) => r + 1), 4 * 60_000);
             solved = true;
             break;
           }
@@ -77,8 +83,9 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
     runPoW();
     return () => {
       cancelled = true;
+      clearTimeout(refresh);
     };
-  }, [onToken]);
+  }, [onToken, round]);
 
   return (
     <div

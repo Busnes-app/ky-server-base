@@ -84,7 +84,11 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
         onSuccess(data.user);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid verification code');
+      // The server spends the MFA transaction on every attempt, so a retry needs a new sign-in.
+      setMfaChallenge(null);
+      setMfaCode('');
+      setIsRecoveryCode(false);
+      setError(`${err instanceof Error ? err.message : 'Invalid verification code'}. Sign in again to retry.`);
     } finally {
       setLoading(false);
     }
@@ -207,7 +211,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
                 />
               </div>
 
-              <CaptchaWidget onToken={(tok) => setCaptchaToken(tok)} />
+              <CaptchaWidget onToken={setCaptchaToken} />
 
               <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading}>
                 <LogIn size={16} />

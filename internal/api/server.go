@@ -303,6 +303,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusForbidden, "Invalid CSRF token")
 		return
 	}
+	// Sign-in carries no CSRF token, so a cross-site form could log the victim into the
+	// attacker's account. Browsers label such posts; API clients send no Sec-Fetch-Site.
+	if isUnsafeMethod(r.Method) && isSignIn(r.URL.Path) && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		s.writeError(w, http.StatusForbidden, "Cross-site sign-in refused")
+		return
+	}
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	}
@@ -326,7 +332,11 @@ func hasSessionCookie(r *http.Request) bool {
 }
 
 func csrfExempt(path string) bool {
-	return path == "/api/auth/login" || strings.HasPrefix(path, "/api/auth/mfa/") || path == "/api/sso/kysignon/sync"
+	return isSignIn(path) || path == "/api/sso/kysignon/sync"
+}
+
+func isSignIn(path string) bool {
+	return path == "/api/auth/login" || strings.HasPrefix(path, "/api/auth/mfa/")
 }
 
 func sameOrigin(origin, appURL string) bool {
