@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -14,7 +13,6 @@ import (
 	protocolErrors "github.com/elimity-com/scim/errors"
 	"github.com/elimity-com/scim/optional"
 	"github.com/elimity-com/scim/schema"
-	filter "github.com/scim2/filter-parser/v2"
 
 	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
@@ -220,16 +218,7 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 			}
 			continue
 		}
-		if sub := subAttribute(op.Path); sub != "" && sub != "value" {
-			continue
-		}
-		if !selectsStored(user, op.Path, op.Op) {
-			if op.Op == protocol.PatchOperationReplace {
-				return protocol.Resource{}, protocolErrors.ScimErrorNoTarget
-			}
-			continue
-		}
-		applyUserValue(user, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
+		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
 	}
 	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -346,63 +335,18 @@ func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 	return scimStoreError(h.store.Groups().DeleteGroup(r.Context(), id), id)
 }
 
-// Patch applies add, remove and replace to the current membership, then stores the result
-// through Replace. A member filter other than `value eq "id"` is refused, not ignored.
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
-	displayName, externalID, members := group.DisplayName, group.ExternalID, group.Members
-	apply := func(op, attr string, value interface{}) {
-		switch strings.ToLower(attr) {
-		case "displayname":
-			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
-				displayName = v
-			}
-		case "externalid":
-			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
-				externalID = v
-			}
-		case "members":
-			switch op {
-			case protocol.PatchOperationAdd:
-				for _, m := range memberValues(value) {
-					if !slices.Contains(members, m) {
-						members = append(members, m)
-					}
-				}
-			case protocol.PatchOperationRemove:
-				if value == nil {
-					members = nil
-				}
-				gone := memberValues(value)
-				members = slices.DeleteFunc(slices.Clone(members), func(m string) bool { return slices.Contains(gone, m) })
-			default:
-				members = memberValues(value)
-			}
-		}
-	}
+	attrs := protocol.ResourceAttributes{"displayName": group.DisplayName, "members": memberMaps(group.Members)}
 	for _, op := range operations {
-		switch {
-		case op.Path == nil:
-			values, _ := op.Value.(map[string]interface{})
-			for key, value := range values {
-				apply(op.Op, key, value)
-			}
-		case op.Path.ValueExpression != nil:
-			e, ok := op.Path.ValueExpression.(*filter.AttributeExpression)
-			if !ok || !strings.EqualFold(op.Path.AttributePath.AttributeName, "members") || op.Op != protocol.PatchOperationRemove ||
-				!strings.EqualFold(e.AttributePath.AttributeName, "value") || e.Operator != filter.EQ {
-				return protocol.Resource{}, protocolErrors.ScimErrorInvalidPath
-			}
-			target, _ := e.CompareValue.(string)
-			apply(op.Op, "members", []interface{}{map[string]interface{}{"value": target}})
-		default:
-			apply(op.Op, op.Path.AttributePath.AttributeName, op.Value)
+		if op.Path != nil {
+			attrs[op.Path.String()] = op.Value
 		}
 	}
-	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
+	return h.Replace(r, id, attrs)
 }
 
 // checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
@@ -464,10 +408,6 @@ func memberValues(value interface{}) []string {
 	return out
 }
 func primaryValue(value interface{}) string {
-	if m, ok := value.(map[string]interface{}); ok {
-		v, _ := m["value"].(string)
-		return v
-	}
 	for _, item := range interfaceSlice(value) {
 		if m, ok := item.(map[string]interface{}); ok {
 			if v, ok := m["value"].(string); ok {
@@ -484,42 +424,6 @@ func primaryValue(value interface{}) string {
 	return ""
 }
 
-// selectsStored reports whether a path's filter, such as emails[type eq "work"], selects the
-// single email or role this adapter stores and emits (see userResource). Unfiltered paths do;
-// an absent email is selectable only by add, which creates it.
-func selectsStored(user *store.User, p *filter.Path, op string) bool {
-	if p.ValueExpression == nil {
-		return true
-	}
-	if strings.EqualFold(p.AttributePath.AttributeName, "emails") && user.Email == "" && op != protocol.PatchOperationAdd {
-		return false
-	}
-	e, ok := p.ValueExpression.(*filter.AttributeExpression)
-	if !ok || e.Operator != filter.EQ || e.AttributePath.SubAttribute != nil {
-		return false
-	}
-	emitted := map[string]interface{}{"primary": true}
-	switch strings.ToLower(p.AttributePath.AttributeName) {
-	case "emails":
-		emitted["type"], emitted["value"] = "work", user.Email
-	case "roles":
-		emitted["value"] = user.Role
-	default:
-		return false
-	}
-	want, ok := emitted[strings.ToLower(e.AttributePath.AttributeName)]
-	return ok && strings.EqualFold(fmt.Sprint(want), fmt.Sprint(e.CompareValue))
-}
-
-func subAttribute(p *filter.Path) string {
-	if p.SubAttribute != nil {
-		return strings.ToLower(*p.SubAttribute)
-	}
-	if p.AttributePath.SubAttribute != nil {
-		return strings.ToLower(*p.AttributePath.SubAttribute)
-	}
-	return ""
-}
 func interfaceSlice(value interface{}) []interface{} {
 	if values, ok := value.([]interface{}); ok {
 		return values

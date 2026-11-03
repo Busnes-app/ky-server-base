@@ -72,40 +72,6 @@ func TestSCIMUserNameFilterIsExact(t *testing.T) {
 	}
 }
 
-func TestSCIMGroupPatchAddsAndRemovesMembers(t *testing.T) {
-	srv, mux, token := setupSCIMServer(t)
-	h := srv.AuthMiddleware(mux)
-	a, b, c := scimUser(t, h, token, "a"), scimUser(t, h, token, "b"), scimUser(t, h, token, "c")
-	_, g := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{
-		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Group"}, "displayName": "G",
-		"members": []any{map[string]any{"value": a}, map[string]any{"value": b}},
-	})
-	gid := g["id"].(string)
-
-	patch := func(ops ...map[string]any) int {
-		code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Groups/"+gid, map[string]any{"schemas": []string{patchOp}, "Operations": ops})
-		if code != http.StatusOK {
-			t.Logf("patch: %d %v", code, out)
-		}
-		return code
-	}
-	if patch(map[string]any{"op": "add", "path": "members", "value": []any{map[string]any{"value": c}}}) != http.StatusOK {
-		t.Fatal("add failed")
-	}
-	if got := groupMembers(t, h, token, gid); !slices.Equal(got, sorted(a, b, c)) {
-		t.Fatalf("add replaced the membership: %v", got)
-	}
-	if patch(map[string]any{"op": "remove", "path": `members[value eq "` + c + `"]`}) != http.StatusOK {
-		t.Fatal("filtered remove failed")
-	}
-	if patch(map[string]any{"op": "remove", "path": "members", "value": []any{map[string]any{"value": a}}}) != http.StatusOK {
-		t.Fatal("valued remove failed")
-	}
-	if got := groupMembers(t, h, token, gid); !slices.Equal(got, []string{b}) {
-		t.Fatalf("remove left %v, want [%s]", got, b)
-	}
-}
-
 func TestSCIMGroupReplaceWithUnknownMemberChangesNothing(t *testing.T) {
 	srv, mux, token := setupSCIMServer(t)
 	h := srv.AuthMiddleware(mux)
@@ -128,52 +94,6 @@ func TestSCIMGroupReplaceWithUnknownMemberChangesNothing(t *testing.T) {
 	}
 }
 
-func TestSCIMUserPatchFilteredEmailPath(t *testing.T) {
-	srv, mux, token := setupSCIMServer(t)
-	h := srv.AuthMiddleware(mux)
-	id := scimUser(t, h, token, "mail")
-	// A filtered replace on an absent email selects nothing (noTarget); add creates it.
-	if code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
-		map[string]any{"op": "replace", "path": `emails[type eq "work"].value`, "value": "new@corp.com"},
-	}}); code != http.StatusBadRequest || out["scimType"] != "noTarget" {
-		t.Fatalf("replace on absent email: %d %v", code, out)
-	}
-	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
-		map[string]any{"op": "add", "path": `emails[type eq "work"].value`, "value": "new@corp.com"},
-		map[string]any{"op": "replace", "path": `emails[type eq "work"].type`, "value": "work"},
-	}})
-	if code != http.StatusOK {
-		t.Fatalf("patch: %d %v", code, out)
-	}
-	email := func(out map[string]any) any {
-		emails, _ := out["emails"].([]any)
-		if len(emails) != 1 {
-			return nil
-		}
-		return emails[0].(map[string]any)["value"]
-	}
-	if email(out) != "new@corp.com" {
-		t.Fatalf("email not updated: %v", out["emails"])
-	}
-	// A filter that does not select the stored (work) email is noTarget and changes nothing.
-	code, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
-		map[string]any{"op": "replace", "path": `emails[type eq "home"].value`, "value": "home@corp.com"},
-	}})
-	if code != http.StatusBadRequest {
-		t.Fatalf("home selector: %d %v", code, out)
-	}
-	if _, out = scimCall(t, h, token, "GET", "/scim/v2/Users/"+id, nil); email(out) != "new@corp.com" {
-		t.Fatalf("home selector overwrote the work email: %v", out["emails"])
-	}
-	// Replacing the selected complex value keeps its value member.
-	code, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
-		map[string]any{"op": "replace", "path": `emails[type eq "work"]`, "value": map[string]any{"value": "third@corp.com", "type": "work"}},
-	}})
-	if code != http.StatusOK || email(out) != "third@corp.com" {
-		t.Fatalf("complex replace: %d %v", code, out["emails"])
-	}
-}
-
 func TestSCIMGroupPatchExternalID(t *testing.T) {
 	srv, mux, token := setupSCIMServer(t)
 	h := srv.AuthMiddleware(mux)
@@ -185,19 +105,6 @@ func TestSCIMGroupPatchExternalID(t *testing.T) {
 	}})
 	if code != http.StatusOK || out["externalId"] != "new" {
 		t.Fatalf("externalId not updated: %d %v", code, out)
-	}
-}
-
-func TestSCIMUserPatchFilteredRolePath(t *testing.T) {
-	srv, mux, token := setupSCIMServer(t)
-	h := srv.AuthMiddleware(mux)
-	id := scimUser(t, h, token, "roles")
-	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
-		map[string]any{"op": "replace", "path": `roles[primary eq "True"].value`, "value": "manager"},
-	}})
-	roles, _ := out["roles"].([]any)
-	if code != http.StatusOK || len(roles) != 1 || roles[0].(map[string]any)["value"] != "manager" {
-		t.Fatalf("role not updated: %d %v", code, out)
 	}
 }
 

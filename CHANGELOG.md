@@ -33,13 +33,9 @@ These are human summaries, not a raw version-control log.
   lookup of `ann@corp.com` no longer returns `joann@corp.com`. A blank value is 400
   `invalidFilter`, and an `emails`/`displayName` value matching more than 1000
   accounts as a substring is 400 `tooMany`.
-- SCIM: Group PATCH honours `add` and `remove` on `members` (including Entra's
-  `members[value eq "id"]` remove) instead of replacing the whole membership. A member
-  id that does not exist is refused with 400 before anything is written, and replacing
-  a group writes only the membership difference.
-- SCIM: user PATCH applies filtered paths such as `emails[type eq "work"].value` when
-  the filter selects the stored (work, primary) email or role. A filtered replace that
-  selects nothing is 400 `noTarget`; a filtered add creates a missing email.
+- SCIM: a group member id that does not exist is refused with 400 before anything is
+  written, and replacing a group writes only the membership difference, so one bad id
+  no longer leaves the group half-rewritten behind a 500.
 - SCIM and KySignOn directory updates write only profile, role, status and SSO identity
   columns, so a sync cannot undo a concurrent password reset, MFA change or
   recovery-code spend. KySignOn `user.deactivated`/`user.deleted` events now fail
@@ -75,8 +71,8 @@ These are human summaries, not a raw version-control log.
   than 16 bytes now stops the server at startup, as it already did outside compose; fix
   or remove it before upgrading. Anything that reached the `postgres` profile's
   5432 from another host must now go through the compose network or an SSH tunnel.
-- SCIM clients that relied on substring matching from an `eq` filter, or on PATCH
-  `add members` replacing a group, see standards behaviour now.
+- SCIM clients that relied on substring matching from an `eq` filter see exact
+  matching now.
 
 ## Maintaining notes
 
