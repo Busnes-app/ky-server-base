@@ -10,6 +10,9 @@ Owns local persistence adapters and bearer authentication; the library owns `/sc
 - Content-Type for all SCIM endpoints must be `application/scim+json`.
 - Requests must be authenticated with the configured bearer token.
 - User de-provisioning via `PATCH` with `active: false` updates user status to `inactive`.
+- A user `eq` filter matches the named attribute exactly; the store's LIKE search only narrows candidates.
+- Group PATCH applies `add`/`remove`/`replace` to the current membership. Member ids are checked before any write, and only the membership difference is written.
+- User writes go through `UpdateUserProfile`, never `UpdateUser`, so SCIM cannot rewrite credential or MFA columns from a stale read.
 - SCIM protocol models and parsing must come from `github.com/elimity-com/scim`; do not add parallel local request/response implementations.
 
 ## Verification

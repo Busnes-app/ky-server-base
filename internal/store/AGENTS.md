@@ -8,6 +8,7 @@ Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `
 
 ## Local Contracts
 - `CompletePasswordChange` atomically compares the old password, updates a flagged local account, clears the flag, deletes sessions/MFA challenges and records `auth.password_changed`. Session/MFA issuance locks the same user row against the verified hash; MFA challenges persist the creation-time password hash, and consumption returns that snapshot to reject stale completions. Migration 4 discards preexisting challenges because their credential snapshot is unknown.
+- `UpdateUserProfile` writes only username, email, display name, role, status and SSO identity; directory syncs (SCIM, KySignOn) use it so a stale read cannot restore a replaced password hash, MFA state or spent recovery codes. `UpdateUser` still writes every column.
 - `ResetAdminPassword` reactivates a local administrator with the replacement flag set and shares the atomic grant purge and audit path with `CompletePasswordChange`; it also works for disabled accounts.
 - Migration 5 rebuilds `device_pairings` without the six-digit code column and with `authenticated_at`; pending pairings (90 s) are dropped on upgrade.
 - Migration 7 deletes SSO sessions without a `sid` (pre-migration-6 sessions no logout can reach) and every SSO user's device pairing, then adds `device_pairings.sso_sid`; local sessions and pairings, and SSO sessions with a `sid`, stay (`TestMigration7DropsUnreachableSSOSessions`).

@@ -1,0 +1,146 @@
+package scim_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"testing"
+)
+
+const patchOp = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+
+func scimCall(t *testing.T, h http.Handler, token, method, path string, body any) (int, map[string]any) {
+	t.Helper()
+	var raw []byte
+	if body != nil {
+		raw, _ = json.Marshal(body)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/scim+json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+func scimUser(t *testing.T, h http.Handler, token, userName string) string {
+	t.Helper()
+	code, out := scimCall(t, h, token, "POST", "/scim/v2/Users", map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:User"}, "userName": userName, "active": true,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create %s: %d %v", userName, code, out)
+	}
+	return out["id"].(string)
+}
+
+func groupMembers(t *testing.T, h http.Handler, token, id string) []string {
+	t.Helper()
+	code, out := scimCall(t, h, token, "GET", "/scim/v2/Groups/"+id, nil)
+	if code != http.StatusOK {
+		t.Fatalf("get group: %d %v", code, out)
+	}
+	var ids []string
+	members, _ := out["members"].([]any)
+	for _, m := range members {
+		ids = append(ids, m.(map[string]any)["value"].(string))
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func sorted(ids ...string) []string { slices.Sort(ids); return ids }
+
+// An IdP looks a user up by userName before creating it; a substring match would hand it
+// somebody else's id, and every later update or deprovisioning would land on that account.
+func TestSCIMUserNameFilterIsExact(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	scimUser(t, h, token, "joann@corp.com")
+
+	code, out := scimCall(t, h, token, "GET", `/scim/v2/Users?filter=userName%20eq%20%22ann@corp.com%22`, nil)
+	if code != http.StatusOK || out["totalResults"].(float64) != 0 {
+		t.Fatalf("ann@corp.com matched another user: %d %v", code, out)
+	}
+	code, out = scimCall(t, h, token, "GET", `/scim/v2/Users?filter=userName%20eq%20%22JoAnn@corp.com%22`, nil)
+	if code != http.StatusOK || out["totalResults"].(float64) != 1 {
+		t.Fatalf("case-insensitive exact match missing: %d %v", code, out)
+	}
+}
+
+func TestSCIMGroupPatchAddsAndRemovesMembers(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	a, b, c := scimUser(t, h, token, "a"), scimUser(t, h, token, "b"), scimUser(t, h, token, "c")
+	_, g := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Group"}, "displayName": "G",
+		"members": []any{map[string]any{"value": a}, map[string]any{"value": b}},
+	})
+	gid := g["id"].(string)
+
+	patch := func(ops ...map[string]any) int {
+		code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Groups/"+gid, map[string]any{"schemas": []string{patchOp}, "Operations": ops})
+		if code != http.StatusOK {
+			t.Logf("patch: %d %v", code, out)
+		}
+		return code
+	}
+	if patch(map[string]any{"op": "add", "path": "members", "value": []any{map[string]any{"value": c}}}) != http.StatusOK {
+		t.Fatal("add failed")
+	}
+	if got := groupMembers(t, h, token, gid); !slices.Equal(got, sorted(a, b, c)) {
+		t.Fatalf("add replaced the membership: %v", got)
+	}
+	if patch(map[string]any{"op": "remove", "path": `members[value eq "` + c + `"]`}) != http.StatusOK {
+		t.Fatal("filtered remove failed")
+	}
+	if patch(map[string]any{"op": "remove", "path": "members", "value": []any{map[string]any{"value": a}}}) != http.StatusOK {
+		t.Fatal("valued remove failed")
+	}
+	if got := groupMembers(t, h, token, gid); !slices.Equal(got, []string{b}) {
+		t.Fatalf("remove left %v, want [%s]", got, b)
+	}
+}
+
+func TestSCIMGroupReplaceWithUnknownMemberChangesNothing(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	a, b := scimUser(t, h, token, "a"), scimUser(t, h, token, "b")
+	_, g := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Group"}, "displayName": "G",
+		"members": []any{map[string]any{"value": a}, map[string]any{"value": b}},
+	})
+	gid := g["id"].(string)
+
+	code, _ := scimCall(t, h, token, "PUT", "/scim/v2/Groups/"+gid, map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Group"}, "displayName": "Renamed",
+		"members": []any{map[string]any{"value": a}, map[string]any{"value": "usr_missing"}},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("unknown member got %d, want 400", code)
+	}
+	if got := groupMembers(t, h, token, gid); !slices.Equal(got, sorted(a, b)) {
+		t.Fatalf("failed replace changed membership to %v", got)
+	}
+}
+
+func TestSCIMUserPatchFilteredEmailPath(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	id := scimUser(t, h, token, "mail")
+	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "replace", "path": `emails[type eq "work"].value`, "value": "new@corp.com"},
+		map[string]any{"op": "replace", "path": `emails[type eq "work"].type`, "value": "work"},
+	}})
+	if code != http.StatusOK {
+		t.Fatalf("patch: %d %v", code, out)
+	}
+	emails, _ := out["emails"].([]any)
+	if len(emails) != 1 || emails[0].(map[string]any)["value"] != "new@corp.com" {
+		t.Fatalf("email not updated: %v", out["emails"])
+	}
+}

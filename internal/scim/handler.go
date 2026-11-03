@@ -4,14 +4,17 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	protocol "github.com/elimity-com/scim"
 	protocolErrors "github.com/elimity-com/scim/errors"
 	"github.com/elimity-com/scim/optional"
 	"github.com/elimity-com/scim/schema"
+	filter "github.com/scim2/filter-parser/v2"
 
 	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
@@ -104,26 +107,54 @@ func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource
 	return userResource(user), nil
 }
 
-var equalityFilter = regexp.MustCompile(`(?i)(?:userName|email|displayName)\s+eq\s+"([^"]+)"`)
+// SCIM equality on the attribute named. The LIKE search only narrows the candidates.
+var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|email|displayName)\s+eq\s+"([^"]*)"\s*$`)
 
 func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
-	search := ""
-	if raw := r.URL.Query().Get("filter"); raw != "" {
-		match := equalityFilter.FindStringSubmatch(raw)
-		if len(match) != 2 {
-			return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
+	raw := r.URL.Query().Get("filter")
+	if raw == "" {
+		users, total, err := h.store.Users().ListUsers(r.Context(), params.StartIndex-1, params.Count, "")
+		if err != nil {
+			return protocol.Page{}, err
 		}
-		search = match[1]
+		return userPage(users, total), nil
 	}
-	users, total, err := h.store.Users().ListUsers(r.Context(), params.StartIndex-1, params.Count, search)
+	match := equalityFilter.FindStringSubmatch(raw)
+	if match == nil {
+		return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
+	}
+	candidates, _, err := h.store.Users().ListUsers(r.Context(), 0, math.MaxInt32, match[2])
 	if err != nil {
 		return protocol.Page{}, err
 	}
+	var users []*store.User
+	for _, user := range candidates {
+		value := user.Email
+		switch strings.ToLower(match[1]) {
+		case "username":
+			value = user.Username
+		case "displayname":
+			value = user.DisplayName
+		}
+		if strings.EqualFold(value, match[2]) {
+			users = append(users, user)
+		}
+	}
+	total := len(users)
+	start := min(max(params.StartIndex-1, 0), total)
+	end := total
+	if params.Count > 0 {
+		end = min(start+params.Count, total)
+	}
+	return userPage(users[start:end], total), nil
+}
+
+func userPage(users []*store.User, total int) protocol.Page {
 	resources := make([]protocol.Resource, 0, len(users))
 	for _, user := range users {
 		resources = append(resources, userResource(user))
 	}
-	return protocol.Page{TotalResults: total, Resources: resources}, nil
+	return protocol.Page{TotalResults: total, Resources: resources}
 }
 
 func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
@@ -139,7 +170,7 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Role = role
 	}
 	user.Status = statusFromActive(attrs)
-	if err := h.store.Users().UpdateUser(r.Context(), user); err != nil {
+	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
 	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
@@ -166,9 +197,12 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 			}
 			continue
 		}
-		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
+		if sub := subAttribute(op.Path); sub != "" && sub != "value" {
+			continue
+		}
+		applyUserValue(user, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
 	}
-	if err := h.store.Users().UpdateUser(r.Context(), user); err != nil {
+	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
 	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
@@ -228,13 +262,17 @@ type groupResourceHandler struct{ store store.Store }
 
 func (h *groupResourceHandler) Create(r *http.Request, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group := &store.Group{ID: "grp_" + crypto.RandomHex(12), DisplayName: stringValue(attrs, "displayName", ""), ExternalID: stringValue(attrs, "externalId", "")}
+	members := memberValues(attrs["members"])
+	if err := h.checkMembers(r, nil, members); err != nil {
+		return protocol.Resource{}, err
+	}
 	if err := h.store.Groups().CreateGroup(r.Context(), group); err != nil {
 		return protocol.Resource{}, scimStoreError(err, group.ID)
 	}
-	if err := h.replaceMembers(r, group.ID, nil, memberValues(attrs["members"])); err != nil {
+	if err := h.replaceMembers(r, group.ID, nil, members); err != nil {
 		return protocol.Resource{}, err
 	}
-	group.Members = memberValues(attrs["members"])
+	group.Members = members
 	return groupResource(group), nil
 }
 func (h *groupResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {
@@ -264,6 +302,9 @@ func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protoco
 	group.DisplayName = stringValue(attrs, "displayName", group.DisplayName)
 	group.ExternalID = stringValue(attrs, "externalId", group.ExternalID)
 	group.Members = memberValues(attrs["members"])
+	if err := h.checkMembers(r, old, group.Members); err != nil {
+		return protocol.Resource{}, err
+	}
 	if err := h.store.Groups().UpdateGroup(r.Context(), group); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
@@ -275,26 +316,92 @@ func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protoco
 func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 	return scimStoreError(h.store.Groups().DeleteGroup(r.Context(), id), id)
 }
+
+// Patch applies add, remove and replace to the current membership, then stores the result
+// through Replace. A member filter other than `value eq "id"` is refused, not ignored.
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
-	attrs := protocol.ResourceAttributes{"displayName": group.DisplayName, "members": memberMaps(group.Members)}
-	for _, op := range operations {
-		if op.Path != nil {
-			attrs[op.Path.String()] = op.Value
+	displayName, members := group.DisplayName, group.Members
+	apply := func(op, attr string, value interface{}) {
+		switch strings.ToLower(attr) {
+		case "displayname":
+			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
+				displayName = v
+			}
+		case "members":
+			switch op {
+			case protocol.PatchOperationAdd:
+				for _, m := range memberValues(value) {
+					if !slices.Contains(members, m) {
+						members = append(members, m)
+					}
+				}
+			case protocol.PatchOperationRemove:
+				if value == nil {
+					members = nil
+				}
+				gone := memberValues(value)
+				members = slices.DeleteFunc(slices.Clone(members), func(m string) bool { return slices.Contains(gone, m) })
+			default:
+				members = memberValues(value)
+			}
 		}
 	}
-	return h.Replace(r, id, attrs)
+	for _, op := range operations {
+		switch {
+		case op.Path == nil:
+			values, _ := op.Value.(map[string]interface{})
+			for key, value := range values {
+				apply(op.Op, key, value)
+			}
+		case op.Path.ValueExpression != nil:
+			e, ok := op.Path.ValueExpression.(*filter.AttributeExpression)
+			if !ok || !strings.EqualFold(op.Path.AttributePath.AttributeName, "members") || op.Op != protocol.PatchOperationRemove ||
+				!strings.EqualFold(e.AttributePath.AttributeName, "value") || e.Operator != filter.EQ {
+				return protocol.Resource{}, protocolErrors.ScimErrorInvalidPath
+			}
+			target, _ := e.CompareValue.(string)
+			apply(op.Op, "members", []interface{}{map[string]interface{}{"value": target}})
+		default:
+			apply(op.Op, op.Path.AttributePath.AttributeName, op.Value)
+		}
+	}
+	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "members": memberMaps(members)})
 }
+
+// checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
+// group half-rewritten.
+func (h *groupResourceHandler) checkMembers(r *http.Request, old, next []string) error {
+	for _, id := range next {
+		if slices.Contains(old, id) {
+			continue
+		}
+		if _, err := h.store.Users().GetUserByID(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+			return protocolErrors.ScimErrorInvalidValue
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// replaceMembers writes only the difference between old and next.
 func (h *groupResourceHandler) replaceMembers(r *http.Request, groupID string, old, next []string) error {
 	for _, id := range old {
+		if slices.Contains(next, id) {
+			continue
+		}
 		if err := h.store.Groups().RemoveGroupMember(r.Context(), groupID, id); err != nil {
 			return err
 		}
 	}
 	for _, id := range next {
+		if slices.Contains(old, id) {
+			continue
+		}
 		if err := h.store.Groups().AddGroupMember(r.Context(), groupID, id); err != nil {
 			return err
 		}
@@ -336,6 +443,15 @@ func primaryValue(value interface{}) string {
 	}
 	if v, ok := value.(string); ok {
 		return v
+	}
+	return ""
+}
+func subAttribute(p *filter.Path) string {
+	if p.SubAttribute != nil {
+		return strings.ToLower(*p.SubAttribute)
+	}
+	if p.AttributePath.SubAttribute != nil {
+		return strings.ToLower(*p.AttributePath.SubAttribute)
 	}
 	return ""
 }

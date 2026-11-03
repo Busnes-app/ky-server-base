@@ -230,6 +230,27 @@ WHERE id = ?
 	return nil
 }
 
+func (u *userStore) UpdateUserProfile(ctx context.Context, user *User) error {
+	user.UpdatedAt = time.Now().UTC()
+	q := u.store.rebind(`
+UPDATE users SET
+    username = ?, email = ?, display_name = ?, role = ?, status = ?,
+    sso_provider = ?, sso_subject = ?, updated_at = ?
+WHERE id = ?
+`)
+	res, err := u.store.db.ExecContext(ctx, q,
+		user.Username, user.Email, user.DisplayName, user.Role, user.Status,
+		user.SSOProvider, user.SSOSubject, user.UpdatedAt, user.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (u *userStore) UpdateRecoveryCodes(ctx context.Context, userID, oldHashes, newHashes string) error {
 	q := u.store.rebind("UPDATE users SET recovery_codes_hash = ?, updated_at = ? WHERE id = ? AND recovery_codes_hash = ?")
 	res, err := u.store.db.ExecContext(ctx, q, newHashes, time.Now().UTC(), userID, oldHashes)
