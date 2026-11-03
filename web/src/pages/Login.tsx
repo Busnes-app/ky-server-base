@@ -16,6 +16,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [captchaToken, setCaptchaToken] = useState<string>('');
+  const [captchaRound, setCaptchaRound] = useState<number>(0);
   const [mfaChallenge, setMfaChallenge] = useState<MFAChallenge | null>(null);
   const [mfaCode, setMfaCode] = useState<string>('');
   const [isRecoveryCode, setIsRecoveryCode] = useState<boolean>(false);
@@ -53,6 +54,9 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
+      // The token may have expired while the tab slept; solve a fresh one for the retry.
+      setCaptchaToken('');
+      setCaptchaRound((n) => n + 1);
     } finally {
       setLoading(false);
     }
@@ -211,7 +215,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
                 />
               </div>
 
-              <CaptchaWidget onToken={setCaptchaToken} />
+              <CaptchaWidget key={captchaRound} onToken={setCaptchaToken} />
 
               <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading}>
                 <LogIn size={16} />

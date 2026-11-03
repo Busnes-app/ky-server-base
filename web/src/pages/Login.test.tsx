@@ -59,3 +59,15 @@ it('returns to the password step after a rejected MFA code', async () => {
   expect(screen.queryByPlaceholderText('123456')).toBeNull();
   expect(screen.getByRole('button', { name: /sign in/i })).toBeTruthy();
 });
+
+// A token can expire while the tab sleeps; a failed sign-in solves a fresh one for the retry.
+it('solves a fresh CAPTCHA after a failed sign-in', async () => {
+  const fetchMock = await stubAuth({ '/api/auth/login': () => json({ error: 'Invalid credentials' }, 401) });
+  const { container } = render(<Login onSuccess={vi.fn()} appName="Test" />);
+  await screen.findByText('Security check verified.');
+  fireEvent.change(container.querySelector('input[type="text"]')!, { target: { value: 'admin' } });
+  fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'wrong password!' } });
+  fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+  await screen.findByText('Invalid credentials');
+  await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(2));
+});
