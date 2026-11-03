@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"regexp"
@@ -108,7 +109,7 @@ func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource
 }
 
 // SCIM equality on the attribute named. The LIKE search only narrows the candidates.
-var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|email|displayName)\s+eq\s+"([^"]*)"\s*$`)
+var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|email|displayName)\s+eq\s+"([^"]+)"\s*$`)
 
 func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
 	raw := r.URL.Query().Get("filter")
@@ -197,7 +198,7 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 			}
 			continue
 		}
-		if sub := subAttribute(op.Path); sub != "" && sub != "value" {
+		if sub := subAttribute(op.Path); (sub != "" && sub != "value") || !selectsStored(user, op.Path) {
 			continue
 		}
 		applyUserValue(user, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
@@ -324,12 +325,16 @@ func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []pr
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
-	displayName, members := group.DisplayName, group.Members
+	displayName, externalID, members := group.DisplayName, group.ExternalID, group.Members
 	apply := func(op, attr string, value interface{}) {
 		switch strings.ToLower(attr) {
 		case "displayname":
 			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
 				displayName = v
+			}
+		case "externalid":
+			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
+				externalID = v
 			}
 		case "members":
 			switch op {
@@ -369,7 +374,7 @@ func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []pr
 			apply(op.Op, op.Path.AttributePath.AttributeName, op.Value)
 		}
 	}
-	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "members": memberMaps(members)})
+	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
 }
 
 // checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
@@ -431,6 +436,10 @@ func memberValues(value interface{}) []string {
 	return out
 }
 func primaryValue(value interface{}) string {
+	if m, ok := value.(map[string]interface{}); ok {
+		v, _ := m["value"].(string)
+		return v
+	}
 	for _, item := range interfaceSlice(value) {
 		if m, ok := item.(map[string]interface{}); ok {
 			if v, ok := m["value"].(string); ok {
@@ -446,6 +455,30 @@ func primaryValue(value interface{}) string {
 	}
 	return ""
 }
+
+// selectsStored reports whether a path's filter, such as emails[type eq "work"], selects the
+// single email or role this adapter stores and emits (see userResource). Unfiltered paths do.
+func selectsStored(user *store.User, p *filter.Path) bool {
+	if p.ValueExpression == nil {
+		return true
+	}
+	e, ok := p.ValueExpression.(*filter.AttributeExpression)
+	if !ok || e.Operator != filter.EQ || e.AttributePath.SubAttribute != nil {
+		return false
+	}
+	emitted := map[string]interface{}{"primary": true}
+	switch strings.ToLower(p.AttributePath.AttributeName) {
+	case "emails":
+		emitted["type"], emitted["value"] = "work", user.Email
+	case "roles":
+		emitted["value"] = user.Role
+	default:
+		return false
+	}
+	want, ok := emitted[strings.ToLower(e.AttributePath.AttributeName)]
+	return ok && strings.EqualFold(fmt.Sprint(want), fmt.Sprint(e.CompareValue))
+}
+
 func subAttribute(p *filter.Path) string {
 	if p.SubAttribute != nil {
 		return strings.ToLower(*p.SubAttribute)

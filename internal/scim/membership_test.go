@@ -139,8 +139,42 @@ func TestSCIMUserPatchFilteredEmailPath(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("patch: %d %v", code, out)
 	}
-	emails, _ := out["emails"].([]any)
-	if len(emails) != 1 || emails[0].(map[string]any)["value"] != "new@corp.com" {
+	email := func(out map[string]any) any {
+		emails, _ := out["emails"].([]any)
+		if len(emails) != 1 {
+			return nil
+		}
+		return emails[0].(map[string]any)["value"]
+	}
+	if email(out) != "new@corp.com" {
 		t.Fatalf("email not updated: %v", out["emails"])
+	}
+	// A filter that does not select the stored (work) email changes nothing.
+	_, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "replace", "path": `emails[type eq "home"].value`, "value": "home@corp.com"},
+	}})
+	if email(out) != "new@corp.com" {
+		t.Fatalf("home selector overwrote the work email: %v", out["emails"])
+	}
+	// Replacing the selected complex value keeps its value member.
+	code, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "replace", "path": `emails[type eq "work"]`, "value": map[string]any{"value": "third@corp.com", "type": "work"}},
+	}})
+	if code != http.StatusOK || email(out) != "third@corp.com" {
+		t.Fatalf("complex replace: %d %v", code, out["emails"])
+	}
+}
+
+func TestSCIMGroupPatchExternalID(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	_, g := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{
+		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Group"}, "displayName": "G", "externalId": "old",
+	})
+	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Groups/"+g["id"].(string), map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "replace", "path": "externalId", "value": "new"},
+	}})
+	if code != http.StatusOK || out["externalId"] != "new" {
+		t.Fatalf("externalId not updated: %d %v", code, out)
 	}
 }
