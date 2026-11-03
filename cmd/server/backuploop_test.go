@@ -108,3 +108,17 @@ func TestWaitForBackupWorkWaitsBothAtOnce(t *testing.T) {
 		t.Fatal("the detached-handler wait had not run when waitForBackupWork returned; a hung scheduled deposit consumed its whole budget")
 	}
 }
+
+// RESTORE.md rotates these by editing .env and running `docker compose up -d`; that only
+// works if the base service forwards them.
+func TestComposeForwardsRotatableSecrets(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"KY_SESSION_SECRET", "KY_SCIM_TOKEN"} {
+		if !regexp.MustCompile(`(?m)^\s*- ` + name + `=\$\{` + name + `:-\}\s*$`).Match(raw) {
+			t.Errorf("docker-compose.yml does not forward %s from .env", name)
+		}
+	}
+}
