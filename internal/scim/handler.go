@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -108,7 +107,11 @@ func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource
 	return userResource(user), nil
 }
 
-// SCIM equality on the attribute named. The LIKE search only narrows the candidates.
+// SCIM equality on the attribute named. userName uses the exact lookup; for the others the
+// LIKE search only narrows the candidates, and past maxFilterCandidates the filter is refused
+// (tooMany) instead of reading the directory into memory.
+const maxFilterCandidates = 1000
+
 var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|email|displayName)\s+eq\s+"([^"]+)"\s*$`)
 
 func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
@@ -124,9 +127,28 @@ func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListReques
 	if match == nil {
 		return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
 	}
-	candidates, _, err := h.store.Users().ListUsers(r.Context(), 0, math.MaxInt32, match[2])
-	if err != nil {
-		return protocol.Page{}, err
+	if strings.TrimSpace(match[2]) == "" {
+		return protocol.Page{}, protocolErrors.ScimErrorInvalidFilter
+	}
+	var candidates []*store.User
+	if strings.EqualFold(match[1], "userName") {
+		user, err := h.store.Users().GetUserByUsername(r.Context(), match[2])
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return protocol.Page{}, err
+		}
+		if err == nil {
+			candidates = []*store.User{user}
+		}
+	} else {
+		var total int
+		var err error
+		candidates, total, err = h.store.Users().ListUsers(r.Context(), 0, maxFilterCandidates, match[2])
+		if err != nil {
+			return protocol.Page{}, err
+		}
+		if total > maxFilterCandidates {
+			return protocol.Page{}, protocolErrors.ScimErrorTooMany
+		}
 	}
 	var users []*store.User
 	for _, user := range candidates {
@@ -198,7 +220,13 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 			}
 			continue
 		}
-		if sub := subAttribute(op.Path); (sub != "" && sub != "value") || !selectsStored(user, op.Path) {
+		if sub := subAttribute(op.Path); sub != "" && sub != "value" {
+			continue
+		}
+		if !selectsStored(user, op.Path, op.Op) {
+			if op.Op == protocol.PatchOperationReplace {
+				return protocol.Resource{}, protocolErrors.ScimErrorNoTarget
+			}
 			continue
 		}
 		applyUserValue(user, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
@@ -457,10 +485,14 @@ func primaryValue(value interface{}) string {
 }
 
 // selectsStored reports whether a path's filter, such as emails[type eq "work"], selects the
-// single email or role this adapter stores and emits (see userResource). Unfiltered paths do.
-func selectsStored(user *store.User, p *filter.Path) bool {
+// single email or role this adapter stores and emits (see userResource). Unfiltered paths do;
+// an absent email is selectable only by add, which creates it.
+func selectsStored(user *store.User, p *filter.Path, op string) bool {
 	if p.ValueExpression == nil {
 		return true
+	}
+	if strings.EqualFold(p.AttributePath.AttributeName, "emails") && user.Email == "" && op != protocol.PatchOperationAdd {
+		return false
 	}
 	e, ok := p.ValueExpression.(*filter.AttributeExpression)
 	if !ok || e.Operator != filter.EQ || e.AttributePath.SubAttribute != nil {

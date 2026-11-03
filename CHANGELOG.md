@@ -30,14 +30,16 @@ These are human summaries, not a raw version-control log.
 
 - SCIM: a `userName`, `emails` or `displayName` `eq` filter now matches that attribute
   exactly (case-insensitive) instead of any substring of any of the three, so an IdP's
-  lookup of `ann@corp.com` no longer returns `joann@corp.com`.
+  lookup of `ann@corp.com` no longer returns `joann@corp.com`. A blank value is 400
+  `invalidFilter`, and an `emails`/`displayName` value matching more than 1000
+  accounts as a substring is 400 `tooMany`.
 - SCIM: Group PATCH honours `add` and `remove` on `members` (including Entra's
   `members[value eq "id"]` remove) instead of replacing the whole membership. A member
   id that does not exist is refused with 400 before anything is written, and replacing
   a group writes only the membership difference.
 - SCIM: user PATCH applies filtered paths such as `emails[type eq "work"].value` when
-  the filter selects the stored (work, primary) email or role; other selectors change
-  nothing.
+  the filter selects the stored (work, primary) email or role. A filtered replace that
+  selects nothing is 400 `noTarget`; a filtered add creates a missing email.
 - SCIM and KySignOn directory updates write only profile, role, status and SSO identity
   columns, so a sync cannot undo a concurrent password reset, MFA change or
   recovery-code spend. KySignOn `user.deactivated`/`user.deleted` events now fail

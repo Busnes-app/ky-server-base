@@ -206,13 +206,16 @@ Adapter limits matter when configuring a provisioning connector:
 
 - User list filtering accepts exactly one `userName`, `emails`/`emails.value`/`email`
   or `displayName` `eq` comparison with a quoted value and matches that attribute
-  exactly, case-insensitively. Other query filters return 400 `invalidFilter`.
+  exactly, case-insensitively. A blank value or any other filter returns 400
+  `invalidFilter`; an `emails` or `displayName` value whose substring matches more
+  than 1000 accounts returns 400 `tooMany`.
   User search currently reads this filter from the URL query, not the SearchRequest
   body's filter. Group filtering is not applied.
 - User PATCH supports add/replace of active, displayName, userName, emails and
   roles, including filtered value paths such as `emails[type eq "work"].value` when
-  the filter selects the single stored (work, primary) value; remove operations are
-  ignored. Group PATCH applies add, remove and replace to
+  the filter selects the single stored (work, primary) value. A filtered replace
+  that selects nothing (another type, or no email yet) is 400 `noTarget`; a filtered
+  add creates the email. Remove operations are ignored. Group PATCH applies add, remove and replace to
   displayName, externalId and members; the only member filter is `members[value eq "id"]` with
   remove, and any other filter is 400 `invalidPath`. An unknown member id is 400
   `invalidValue` and leaves the group unchanged.

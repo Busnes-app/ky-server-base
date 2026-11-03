@@ -132,8 +132,14 @@ func TestSCIMUserPatchFilteredEmailPath(t *testing.T) {
 	srv, mux, token := setupSCIMServer(t)
 	h := srv.AuthMiddleware(mux)
 	id := scimUser(t, h, token, "mail")
-	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+	// A filtered replace on an absent email selects nothing (noTarget); add creates it.
+	if code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
 		map[string]any{"op": "replace", "path": `emails[type eq "work"].value`, "value": "new@corp.com"},
+	}}); code != http.StatusBadRequest || out["scimType"] != "noTarget" {
+		t.Fatalf("replace on absent email: %d %v", code, out)
+	}
+	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "add", "path": `emails[type eq "work"].value`, "value": "new@corp.com"},
 		map[string]any{"op": "replace", "path": `emails[type eq "work"].type`, "value": "work"},
 	}})
 	if code != http.StatusOK {
@@ -149,11 +155,14 @@ func TestSCIMUserPatchFilteredEmailPath(t *testing.T) {
 	if email(out) != "new@corp.com" {
 		t.Fatalf("email not updated: %v", out["emails"])
 	}
-	// A filter that does not select the stored (work) email changes nothing.
-	_, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+	// A filter that does not select the stored (work) email is noTarget and changes nothing.
+	code, out = scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
 		map[string]any{"op": "replace", "path": `emails[type eq "home"].value`, "value": "home@corp.com"},
 	}})
-	if email(out) != "new@corp.com" {
+	if code != http.StatusBadRequest {
+		t.Fatalf("home selector: %d %v", code, out)
+	}
+	if _, out = scimCall(t, h, token, "GET", "/scim/v2/Users/"+id, nil); email(out) != "new@corp.com" {
 		t.Fatalf("home selector overwrote the work email: %v", out["emails"])
 	}
 	// Replacing the selected complex value keeps its value member.
@@ -176,5 +185,32 @@ func TestSCIMGroupPatchExternalID(t *testing.T) {
 	}})
 	if code != http.StatusOK || out["externalId"] != "new" {
 		t.Fatalf("externalId not updated: %d %v", code, out)
+	}
+}
+
+func TestSCIMUserPatchFilteredRolePath(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	id := scimUser(t, h, token, "roles")
+	code, out := scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, map[string]any{"schemas": []string{patchOp}, "Operations": []any{
+		map[string]any{"op": "replace", "path": `roles[primary eq "True"].value`, "value": "manager"},
+	}})
+	roles, _ := out["roles"].([]any)
+	if code != http.StatusOK || len(roles) != 1 || roles[0].(map[string]any)["value"] != "manager" {
+		t.Fatalf("role not updated: %d %v", code, out)
+	}
+}
+
+// Blank or wildcard values must not turn an equality filter into a whole-directory read.
+func TestSCIMFilterRefusesBlankAndMatchesWildcardsLiterally(t *testing.T) {
+	srv, mux, token := setupSCIMServer(t)
+	h := srv.AuthMiddleware(mux)
+	scimUser(t, h, token, "someone")
+	if code, _ := scimCall(t, h, token, "GET", `/scim/v2/Users?filter=userName%20eq%20%22%20%22`, nil); code != http.StatusBadRequest {
+		t.Fatalf("blank value got %d, want 400", code)
+	}
+	code, out := scimCall(t, h, token, "GET", `/scim/v2/Users?filter=userName%20eq%20%22%25%22`, nil)
+	if code != http.StatusOK || out["totalResults"].(float64) != 0 {
+		t.Fatalf("%% matched as a wildcard: %d %v", code, out)
 	}
 }
