@@ -39,7 +39,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if len(req.CurrentPassword) > 1024 || len(req.NewPassword) > 1024 {
+	if len(req.NewPassword) > 1024 { // the current one is verified at any length: init-admin sets no cap
 		s.writeError(w, http.StatusBadRequest, "Password is too long")
 		return
 	}
@@ -52,6 +52,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok, err := password.Verify(req.CurrentPassword, user.PasswordHash)
+	if errors.Is(err, password.ErrBusy) {
+		w.Header().Set("Retry-After", "5")
+		s.writeError(w, http.StatusServiceUnavailable, "The server is busy. Try again in a few seconds.")
+		return
+	}
 	if err != nil || !ok {
 		s.writeError(w, http.StatusUnauthorized, "Current password is incorrect")
 		return

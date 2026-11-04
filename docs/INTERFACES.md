@@ -25,9 +25,10 @@ For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 applies when an Authorization header is present alongside the cookie. Login and the
 signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
-Login instead refuses an unsafe request carrying
-`Sec-Fetch-Site: cross-site` with 403 `{"error":"Cross-site sign-in refused"}`;
-clients that send no such header are unaffected.
+Login instead refuses an unsafe request carrying `Sec-Fetch-Site: cross-site` or
+`same-site`, or an `Origin` that is neither the request's host nor `KY_APP_URL`
+(browsers omit Fetch Metadata over plain HTTP), with 403
+`{"error":"Cross-site sign-in refused"}`; clients that send neither header are unaffected.
 
 CORS permits credentials only for the exact configured application origin. An
 OPTIONS request returns 200, or 403 plain text for a different nonempty origin.
@@ -86,6 +87,8 @@ answers the same 401 as a wrong password without checking the password, and only
 that client, so nobody elsewhere can lock an account out. Unknown names cost the same
 password hashing as known ones. Invalid credentials and inactive or disabled accounts
 both return 401 `{"error":"Invalid credentials"}`; a failed or reused CAPTCHA returns 403.
+When too many password hashes are already running, login and password change answer 503
+with `Retry-After: 5` and spend no attempt.
 
 The PoW challenge has `algorithm:"SHA-256"`, `salt`, `challenge`, `maxnumber`,
 `expires_at` (Unix seconds) and `signature`. Find an integer `number` from 1 through

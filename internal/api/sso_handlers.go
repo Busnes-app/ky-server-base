@@ -92,7 +92,7 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		}
 		err = s.store.Users().CreateUser(r.Context(), user)
 		if errors.Is(err, store.ErrAlreadyExists) {
-			s.writeError(w, http.StatusConflict, fmt.Sprintf("An account named %q already exists here and is not linked to this KyIdentity sign-in. Ask an administrator to link or rename it.", claims.PreferredUsername))
+			s.writeError(w, http.StatusConflict, fmt.Sprintf("An account named %q already exists here and is not linked to this KyIdentity sign-in. An administrator must rename or remove that account in its directory, or provision it through SCIM with your KyIdentity ID as its externalId.", claims.PreferredUsername))
 			return
 		}
 	}

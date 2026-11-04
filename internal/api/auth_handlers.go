@@ -89,7 +89,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if user == nil || user.PasswordHash == "" {
 		password.DummyVerify() // an unknown or password-less name costs what a wrong password costs
 	} else {
-		ok, _ = password.Verify(req.Password, user.PasswordHash)
+		ok, err = password.Verify(req.Password, user.PasswordHash)
+		// Too many hashes already running: the server said "not now", the user did not get
+		// the password wrong, so no strike is spent and the answer is not "invalid".
+		if errors.Is(err, password.ErrBusy) {
+			w.Header().Set("Retry-After", "5")
+			s.writeError(w, http.StatusServiceUnavailable, "The server is busy. Try again in a few seconds.")
+			return
+		}
 	}
 	// A disabled account answers like a wrong password, so the status cannot enumerate it.
 	if !ok || user.Status != "active" {
