@@ -189,9 +189,10 @@ func LoadFromEnv() (*Config, error) {
 			ConnMaxLifetime: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
-			SessionSecret:  sessionSecret,
-			EncryptionKey:  encryptionKey,
-			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production"),
+			SessionSecret: sessionSecret,
+			EncryptionKey: encryptionKey,
+			// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
+			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://")),
 			CookieDomain:   getEnv("KY_COOKIE_DOMAIN", ""),
 			SessionTTL:     7 * 24 * time.Hour,
 			TrustedProxies: trustedProxies,

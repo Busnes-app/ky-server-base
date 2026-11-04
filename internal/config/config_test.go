@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +148,33 @@ func TestBackupKeepBelowOneIsRefused(t *testing.T) {
 	t.Setenv("KY_BACKUP_KEEP", "0")
 	if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "KY_BACKUP_KEEP") {
 		t.Fatalf("want KY_BACKUP_KEEP error, got %v", err)
+	}
+}
+
+func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	for _, tc := range []struct {
+		url, explicit string
+		want          bool
+	}{
+		{"https://app.example.com", "", true},
+		{"HTTPS://app.example.com", "", true},
+		{"http://localhost:8080", "", false},
+		{"https://app.example.com", "false", false}, // an explicit setting still wins
+		{"http://localhost:8080", "true", true},
+	} {
+		t.Setenv("KY_APP_URL", tc.url)
+		if tc.explicit == "" {
+			os.Unsetenv("KY_COOKIE_SECURE")
+		} else {
+			t.Setenv("KY_COOKIE_SECURE", tc.explicit)
+		}
+		cfg, err := config.LoadFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Security.CookieSecure != tc.want {
+			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q: CookieSecure=%v, want %v", tc.url, tc.explicit, cfg.Security.CookieSecure, tc.want)
+		}
 	}
 }

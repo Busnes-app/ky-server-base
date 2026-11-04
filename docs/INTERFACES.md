@@ -297,16 +297,15 @@ normally go to stderr. Setup/operational failures return a nonzero exit status.
 |---|---|---|
 | No subcommand | Load environment, open store, bootstrap if empty, serve HTTP and run configured backup schedule | Startup/operation logs; listener defaults to `:8080` |
 | `version` | No inputs or data-directory access | Version text on stdout; use the source commit/image digest for exact build identity |
-| `init-admin -username NAME -password VALUE` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions/challenges/pairings, require password replacement | Confirmation on stderr |
-| `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results |
+| `init-admin -username NAME -password VALUE [-promote]` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions, require password replacement. An existing non-local account is refused; an existing local account that is not an active administrator is refused unless `-promote` is given (exit 1 either way) | Confirmation, and the previous role and status of an existing account, on stderr |
+| `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
 | `export-capsule [-out PATH]` | Require suite pin; seal payload to custodian public key; default output `<capsule-id>.kycap` | File plus capsule/key/size confirmation on stderr |
 | `deposit` | Seal once and deliver to configured destinations | Audit record; remote success logs capsule/time/digest on stderr; failures on stderr; no JSON stdout contract |
 | `restore -capsule PATH -to DIRECTORY [-service NAME]` | Read custodian shares from stdin, one `ky2-…` line each; target must be empty; expected service defaults to `KY_APP_NAME`, then `Busnes.app` | Authenticated manifest/restore result on stdout; optional terminal prompt on stderr |
 
 `init-admin` currently takes its password in argv, so it can be visible in process
-listings or shell history. Custodian shares are accepted only on stdin. A completed
-`backup-drill` can exit zero with a FAILED summary; inspect the summary rather than
-using exit zero as proof of recovery. Unknown subcommands currently fall through to
+listings or shell history. Custodian shares are accepted only on stdin. `backup-drill`
+exits 1 when the drill FAILED, so cron and monitoring see a failed recovery check. Unknown subcommands currently fall through to
 starting the server; there is no top-level help command. Flag-bearing subcommands
 support `-h`/`-help` without operating on data.
 
@@ -332,8 +331,8 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
 | `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
-| `KY_COOKIE_SECURE` | true only in production | Secure flag and HSTS response header |
-| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain |
+| `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header |
+| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
 | `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
