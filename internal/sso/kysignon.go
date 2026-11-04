@@ -78,18 +78,30 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	}
 	// Per-subject ordering: an event older than the newest one applied for this subject is a
 	// replay or arrived late, and applying it would undo a newer change (a demotion, say).
-	// It is acknowledged and dropped, so the sender does not retry it.
+	// It is acknowledged and dropped, so the sender does not retry it. The check, the change
+	// and the advance run under one lock per subject, and only an applied event advances.
 	if payload.ID == "" {
 		return errors.New("webhook event names no subject")
 	}
-	fresh, err := k.store.Users().AdvanceDirectoryEvent(ctx, "kysignon", payload.ID, payload.Timestamp)
-	if err != nil {
+	users := k.store.Users()
+	return users.WithDirectoryLock(ctx, "kysignon", payload.ID, func() error {
+		last, err := users.LastDirectoryEvent(ctx, "kysignon", payload.ID)
+		if err != nil {
+			return err
+		}
+		if payload.Timestamp < last {
+			return nil
+		}
+		if err := k.apply(ctx, payload); err != nil {
+			return err
+		}
+		_, err = users.AdvanceDirectoryEvent(ctx, "kysignon", payload.ID, payload.Timestamp)
 		return err
-	}
-	if !fresh {
-		return nil
-	}
+	})
+}
 
+// apply makes the local account match one directory event.
+func (k *KySignOnClient) apply(ctx context.Context, payload KySignOnSyncPayload) error {
 	switch payload.Event {
 	case "user.created", "user.updated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)

@@ -82,6 +82,40 @@ func TestExistingCaseVariantsSkipTheIndex(t *testing.T) {
 	if err := st.Users().CreateUser(ctx, &store.User{ID: "u3", Username: "Admin", Role: "user", Status: "active", SSOProvider: "local"}); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("new variant beside existing duplicates: %v", err)
 	}
+	// Either account of the pair can still be updated and deprovisioned under its own name.
+	u2, _ := st.Users().GetUserByID(ctx, "u2")
+	u2.Status = "inactive"
+	if err := st.Users().UpdateUserProfile(ctx, u2, u2.Role, "active"); err != nil {
+		t.Fatalf("deprovisioning one of an existing pair: %v", err)
+	}
+	u2.Username = "Admin" // a case change of its own name adds no clash
+	if err := st.Users().UpdateUserProfile(ctx, u2, u2.Role, u2.Status); err != nil {
+		t.Fatalf("case change of an existing pair member's own name: %v", err)
+	}
+}
+
+// Adoption moves an account's provider; a profile write from a read taken before it must not
+// move it back, or back-channel logout by subject would miss the account.
+func TestProfileWritesLeaveTheSSOLinkAlone(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	if err := st.Users().CreateUser(ctx, &store.User{ID: "u1", Username: "frank", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "f", SCIMManaged: true}); err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := st.Users().GetUserByID(ctx, "u1")
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second link: %v, want ErrConflict", err)
+	}
+	stale.DisplayName = "Frank"
+	if err := st.Users().UpdateUserProfile(ctx, stale, stale.Role, stale.Status); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := st.Users().GetUserBySSO(ctx, "kysignon", "f"); u == nil || u.DisplayName != "Frank" {
+		t.Fatalf("stale profile write undid the link: %+v", u)
+	}
 }
 
 func TestAdvanceDirectoryEventDropsOlderEvents(t *testing.T) {

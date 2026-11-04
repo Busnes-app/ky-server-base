@@ -37,13 +37,16 @@ type UserStore interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserBySSO(ctx context.Context, provider, subject string) (*User, error)
 	UpdateUser(ctx context.Context, u *User) error
-	// UpdateUserProfile writes only username, email, display name, role, status and SSO
-	// identity, so a directory sync working from a stale read cannot undo a concurrent
-	// password reset. It applies only while role and status are still prevRole and prevStatus
+	// UpdateUserProfile writes only username, email, display name, role and status, so a
+	// directory sync working from a stale read cannot undo a concurrent password reset or SSO
+	// link. It applies only while role and status are still prevRole and prevStatus
 	// (the values the caller read), returning ErrConflict otherwise, so a stale read cannot put
 	// back a privilege a concurrent write revoked. When it changes either, it deletes the
 	// user's sessions in the same transaction.
 	UpdateUserProfile(ctx context.Context, u *User, prevRole, prevStatus string) error
+	// LinkSSOIdentity moves an account from fromProvider to toProvider, keeping its subject;
+	// ErrConflict when the account is no longer on fromProvider.
+	LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
 	DeleteUser(ctx context.Context, id string) error
@@ -53,6 +56,11 @@ type UserStore interface {
 	// AdvanceDirectoryEvent records ts as the newest directory-sync event applied for the
 	// subject; false means a newer event was already applied and this one must be dropped.
 	AdvanceDirectoryEvent(ctx context.Context, provider, subject string, ts int64) (bool, error)
+	// LastDirectoryEvent is the newest timestamp AdvanceDirectoryEvent recorded, 0 if none.
+	LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error)
+	// WithDirectoryLock runs fn holding a lock on the subject that every server process
+	// sharing the database honours, so one subject's directory events apply one at a time.
+	WithDirectoryLock(ctx context.Context, provider, subject string, fn func() error) error
 	CountUsers(ctx context.Context) (int, error)
 }
 

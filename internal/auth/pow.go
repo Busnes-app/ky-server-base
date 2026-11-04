@@ -72,19 +72,17 @@ func GeneratePoWChallenge(difficulty int, signingSecret string) (*PoWChallenge, 
 	}, nil
 }
 
-// powSpentCap bounds the spent-salt set. Salts are recorded only after the signature and the
-// work check out, and login is rate limited per client before that, so reaching the cap
-// needs many clients; at the cap a solution is accepted unrecorded rather than locking
-// every sign-in out.
-const powSpentCap = 100000
-
 // PoWSpent remembers solved challenges until they expire, so one solution buys one attempt.
+// Salts are recorded only after the signature and the work check out, and login is rate
+// limited per client before that, so the set grows only as fast as clients solve puzzles;
+// expired salts are pruned whenever the set has doubled since the last prune.
 type PoWSpent struct {
-	mu    sync.Mutex
-	salts map[string]int64 // salt -> expiry (unix seconds)
+	mu      sync.Mutex
+	salts   map[string]int64 // salt -> expiry (unix seconds)
+	pruneAt int
 }
 
-func NewPoWSpent() *PoWSpent { return &PoWSpent{salts: make(map[string]int64)} }
+func NewPoWSpent() *PoWSpent { return &PoWSpent{salts: make(map[string]int64), pruneAt: 1024} }
 
 // spend records salt and reports false when it was already spent.
 func (p *PoWSpent) spend(salt string, expiresAt int64) bool {
@@ -94,15 +92,13 @@ func (p *PoWSpent) spend(salt string, expiresAt int64) bool {
 	if exp, ok := p.salts[salt]; ok && exp >= now {
 		return false
 	}
-	if len(p.salts) >= powSpentCap {
+	if len(p.salts) >= p.pruneAt {
 		for s, exp := range p.salts {
 			if exp < now {
 				delete(p.salts, s)
 			}
 		}
-		if len(p.salts) >= powSpentCap {
-			return true
-		}
+		p.pruneAt = max(1024, 2*len(p.salts))
 	}
 	p.salts[salt] = expiresAt
 	return true

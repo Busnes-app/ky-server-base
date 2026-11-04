@@ -128,10 +128,12 @@ func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, er
 	if err != nil {
 		return nil, err
 	}
-	user.SSOProvider = "kysignon"
-	if err := s.store.Users().UpdateUserProfile(r.Context(), user, user.Role, user.Status); err != nil {
+	if err := s.store.Users().LinkSSOIdentity(r.Context(), user.ID, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
+		return s.store.Users().GetUserBySSO(r.Context(), "kysignon", subject) // a concurrent sign-in linked it first
+	} else if err != nil {
 		return nil, err
 	}
+	user.SSOProvider = "kysignon"
 	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
 	return user, nil
 }

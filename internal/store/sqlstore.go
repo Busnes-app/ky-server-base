@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/store/migrations"
@@ -21,6 +22,8 @@ type SQLStore struct {
 	groups   *groupStore
 	audit    *auditStore
 	settings *settingsStore
+	// dirMu serializes directory events on SQLite, which only this process opens for writes.
+	dirMu sync.Mutex
 }
 
 // newSQLStore creates and initializes a SQLStore, running migrations automatically.
@@ -103,7 +106,12 @@ func (u *userStore) CreateUser(ctx context.Context, user *User) error {
 	if user.UpdatedAt.IsZero() {
 		user.UpdatedAt = now
 	}
-	if err := u.checkUsernameFree(ctx, user.Username, ""); err != nil {
+	tx, err := u.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := u.checkUsernameFree(ctx, tx, user.Username, ""); err != nil {
 		return err
 	}
 
@@ -120,13 +128,15 @@ INSERT INTO users (
 		lastLogin = sql.NullTime{Time: *user.LastLoginAt, Valid: true}
 	}
 
-	_, err := u.store.db.ExecContext(ctx, q,
+	if _, err := tx.ExecContext(ctx, q,
 		user.ID, user.Username, user.Email, user.DisplayName, user.PasswordHash,
 		user.Role, user.Status, user.SSOProvider, user.SSOSubject, user.SCIMManaged,
 		user.PushDeviceID, user.MustChangePassword,
 		user.CreatedAt, user.UpdatedAt, lastLogin,
-	)
-	return uniqueErr(err)
+	); err != nil {
+		return uniqueErr(err)
+	}
+	return uniqueErr(tx.Commit())
 }
 
 // uniqueErr maps a unique-constraint violation on either backend to ErrAlreadyExists.
@@ -143,13 +153,28 @@ const userColumns = `id, username, email, display_name, password_hash, role, sta
        sso_provider, sso_subject, scim_managed, push_device_id, must_change_password,
        created_at, updated_at, last_login_at`
 
-// checkUsernameFree refuses a name another account already holds in any letter case. The
-// LOWER(username) unique index enforces the same under concurrency once existing data allows
-// it to be built (see ensureUsernameIndex); this check covers installations where it cannot be.
-func (u *userStore) checkUsernameFree(ctx context.Context, username, exceptID string) error {
+// checkUsernameFree refuses, inside the write's transaction, a name another account already
+// holds in any letter case. The LOWER(username) unique index enforces this once existing data
+// allows it to be built (migrations.EnsureUsernameIndex); the check covers installations where
+// it cannot be. It is atomic with the write: SQLite runs one connection, and PostgreSQL takes a
+// transaction advisory lock on the lowered name. An account keeping its own name (in any case)
+// passes, so a pre-existing case-variant pair can still be updated and deprovisioned.
+func (u *userStore) checkUsernameFree(ctx context.Context, tx *sql.Tx, username, id string) error {
+	if u.store.driver == "postgres" {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(2, hashtext(LOWER($1)))`, username); err != nil {
+			return err
+		}
+	}
+	var current string
+	err := tx.QueryRowContext(ctx, u.store.rebind(`SELECT username FROM users WHERE id = ?`), id).Scan(&current)
+	if err != nil && !errorsIs(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && strings.EqualFold(current, username) {
+		return nil
+	}
 	var n int
-	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT COUNT(1) FROM users WHERE LOWER(username) = LOWER(?) AND id <> ?`), username, exceptID).Scan(&n)
-	if err != nil {
+	if err := tx.QueryRowContext(ctx, u.store.rebind(`SELECT COUNT(1) FROM users WHERE LOWER(username) = LOWER(?) AND id <> ?`), username, id).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -219,7 +244,12 @@ func (u *userStore) UpdateUser(ctx context.Context, user *User) error {
 		lastLogin = sql.NullTime{Time: *user.LastLoginAt, Valid: true}
 	}
 
-	if err := u.checkUsernameFree(ctx, user.Username, user.ID); err != nil {
+	tx, err := u.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
 		return err
 	}
 	q := u.store.rebind(`
@@ -231,7 +261,7 @@ UPDATE users SET
 WHERE id = ?
 `)
 
-	res, err := u.store.db.ExecContext(ctx, q,
+	res, err := tx.ExecContext(ctx, q,
 		user.Username, user.Email, user.DisplayName, user.PasswordHash,
 		user.Role, user.Status, user.SSOProvider, user.SSOSubject,
 		user.PushDeviceID, user.MustChangePassword, user.UpdatedAt,
@@ -244,26 +274,25 @@ WHERE id = ?
 	if rows == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return uniqueErr(tx.Commit())
 }
 
 func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole, prevStatus string) error {
 	user.UpdatedAt = time.Now().UTC()
-	if err := u.checkUsernameFree(ctx, user.Username, user.ID); err != nil {
-		return err
-	}
 	tx, err := u.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, u.store.rebind(`
 UPDATE users SET
-    username = ?, email = ?, display_name = ?, role = ?, status = ?,
-    sso_provider = ?, sso_subject = ?, updated_at = ?
+    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
 WHERE id = ? AND role = ? AND status = ?
 `), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.SSOProvider, user.SSOSubject, user.UpdatedAt, user.ID, prevRole, prevStatus)
+		user.UpdatedAt, user.ID, prevRole, prevStatus)
 	if err != nil {
 		return uniqueErr(err)
 	}
@@ -283,6 +312,17 @@ WHERE id = ? AND role = ? AND status = ?
 		}
 	}
 	return tx.Commit()
+}
+
+func (u *userStore) LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, fromProvider)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return ErrConflict
+	}
+	return nil
 }
 
 func (u *userStore) DeleteUser(ctx context.Context, id string) error {
@@ -362,6 +402,36 @@ ON CONFLICT (provider, subject) DO UPDATE SET last_timestamp = excluded.last_tim
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+func (u *userStore) LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error) {
+	var ts int64
+	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT last_timestamp FROM sso_directory_events WHERE provider = ? AND subject = ?`), provider, subject).Scan(&ts)
+	if errorsIs(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return ts, err
+}
+
+// WithDirectoryLock uses a session advisory lock on PostgreSQL (key space 1; usernames use 2),
+// held on a dedicated connection, so replicas sharing the database serialize too.
+func (u *userStore) WithDirectoryLock(ctx context.Context, provider, subject string, fn func() error) error {
+	if u.store.driver != "postgres" {
+		u.store.dirMu.Lock()
+		defer u.store.dirMu.Unlock()
+		return fn()
+	}
+	conn, err := u.store.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	key := provider + "/" + subject
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(1, hashtext($1))`, key); err != nil {
+		return err
+	}
+	defer conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(1, hashtext($1))`, key)
+	return fn()
 }
 
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {

@@ -131,7 +131,8 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
 
             <CaptchaWidget key={captchaRound} onToken={setCaptchaToken} />
 
-            <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading}>
+            {/* Disabled until the security check is solved (about a second): submitting earlier is refused. */}
+            <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading || !captchaToken}>
               <LogIn size={16} />
               <span>{loading ? 'Signing in...' : 'Sign In'}</span>
             </button>

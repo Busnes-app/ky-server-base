@@ -52,3 +52,13 @@ it('solves a fresh CAPTCHA after a failed sign-in', async () => {
   await screen.findByText('Invalid credentials');
   await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(2));
 });
+
+// At the default difficulty the solve takes about a second; Enter before that would be refused.
+it('keeps Sign In disabled until the security check is solved', async () => {
+  await stubAuth({});
+  render(<Login onSuccess={vi.fn()} appName="Test" />);
+  const button = screen.getByRole('button', { name: /sign in/i }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  await screen.findByText('Security check verified.');
+  expect(button.disabled).toBe(false);
+});
