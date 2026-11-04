@@ -4,9 +4,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	protocol "github.com/elimity-com/scim"
@@ -236,21 +238,91 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 	})
 }
 
-// applyUserPatch applies PATCH operations to user in order.
+// applyUserPatch applies PATCH operations to user in order. A filtered emails/roles path
+// applies when its selector matches the single value userResource emits; a replace that
+// selects nothing is noTarget. Paths into attributes this adapter does not store
+// (name.*, phoneNumbers, addresses, ...) are ignored, never refused.
 func applyUserPatch(user *store.User, operations []protocol.PatchOperation) error {
 	for _, op := range operations {
-		if op.Op == protocol.PatchOperationRemove {
-			continue
-		}
 		if op.Path == nil {
-			if values, ok := op.Value.(map[string]interface{}); ok {
-				applyUserValues(user, values)
+			if op.Op != protocol.PatchOperationRemove {
+				if values, ok := op.Value.(map[string]interface{}); ok {
+					applyUserValues(user, values)
+				}
 			}
 			continue
 		}
-		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
+		attr := strings.ToLower(op.Path.AttributePath.AttributeName)
+		sub := op.Path.SubAttributeName()
+		if sub == "" {
+			sub = op.Path.AttributePath.SubAttributeName()
+		}
+		var stored map[string]interface{}
+		switch attr {
+		case "emails":
+			if user.Email != "" {
+				stored = map[string]interface{}{"value": user.Email, "type": "work", "primary": true}
+			}
+		case "roles":
+			stored = map[string]interface{}{"value": user.Role, "primary": true}
+		default:
+			if op.Path.ValueExpression != nil || sub != "" {
+				continue
+			}
+			if op.Op != protocol.PatchOperationRemove {
+				applyUserValue(user, attr, op.Value)
+			} else if attr == "displayname" {
+				user.DisplayName = user.Username
+			}
+			continue
+		}
+		if sub != "" && !strings.EqualFold(sub, "value") {
+			continue // type, primary and display are not stored
+		}
+		if op.Path.ValueExpression != nil {
+			if stored == nil && op.Op == protocol.PatchOperationAdd {
+				stored = map[string]interface{}{"value": primaryValue(op.Value), "type": "work", "primary": true}
+			}
+			if stored == nil || !selects(op.Path.ValueExpression, stored) {
+				if op.Op == protocol.PatchOperationReplace {
+					return protocolErrors.ScimErrorNoTarget
+				}
+				continue
+			}
+		}
+		switch {
+		case op.Op != protocol.PatchOperationRemove:
+			applyUserValue(user, attr, op.Value)
+		case attr == "emails":
+			user.Email = ""
+		default:
+			user.Role = "user"
+		}
 	}
 	return nil
+}
+
+// eqSelector matches a value filter of the single form `attr eq value`, as the library's
+// filter AST prints it (string values Go-quoted).
+var eqSelector = regexp.MustCompile(`^(\w+) eq ("(?:[^"\\]|\\.)*"|true|false)$`)
+
+func selector(e interface{}) (attr, value string, ok bool) {
+	m := eqSelector.FindStringSubmatch(fmt.Sprint(e))
+	if m == nil {
+		return "", "", false
+	}
+	value = m[2]
+	if v, err := strconv.Unquote(value); err == nil {
+		value = v
+	}
+	return strings.ToLower(m[1]), value, true
+}
+
+// selects reports whether filter e selects element; Entra's `primary eq "True"` matches.
+func selects(e interface{}, element map[string]interface{}) bool {
+	attr, value, ok := selector(e)
+	got, present := element[attr]
+	return ok && present && strings.EqualFold(fmt.Sprint(got), value)
 }
 
 // update reads a managed user, applies change and writes it back. The write is a
@@ -348,8 +420,28 @@ func (h *groupResourceHandler) Get(r *http.Request, id string) (protocol.Resourc
 	}
 	return groupResource(group), nil
 }
+
+// groupFilter is the one group filter an IdP sends before creating a group. displayName
+// matches case-insensitively through GetGroupByName; externalId (caseExact) scans at most
+// maxFilterCandidates groups.
+var groupFilter = regexp.MustCompile(`(?i)^\s*(displayName|externalId)\s+eq\s+"([^"]+)"\s*$`)
+
 func (h *groupResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
-	groups, total, err := h.store.Groups().ListGroups(r.Context(), params.StartIndex-1, params.Count)
+	var groups []*store.Group
+	var total int
+	var err error
+	if raw := r.URL.Query().Get("filter"); raw == "" {
+		groups, total, err = h.store.Groups().ListGroups(r.Context(), params.StartIndex-1, params.Count)
+	} else {
+		groups, err = h.filterGroups(r, raw)
+		total = len(groups)
+		start := min(max(params.StartIndex-1, 0), total)
+		end := total
+		if params.Count > 0 {
+			end = min(start+params.Count, total)
+		}
+		groups = groups[start:end]
+	}
 	if err != nil {
 		return protocol.Page{}, err
 	}
@@ -359,6 +451,43 @@ func (h *groupResourceHandler) GetAll(r *http.Request, params protocol.ListReque
 	}
 	return protocol.Page{TotalResults: total, Resources: resources}, nil
 }
+
+func (h *groupResourceHandler) filterGroups(r *http.Request, raw string) ([]*store.Group, error) {
+	match := groupFilter.FindStringSubmatch(raw)
+	if match == nil || strings.TrimSpace(match[2]) == "" {
+		return nil, protocolErrors.ScimErrorInvalidFilter
+	}
+	if strings.EqualFold(match[1], "displayName") {
+		group, err := h.store.Groups().GetGroupByName(r.Context(), match[2])
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !strings.EqualFold(group.DisplayName, match[2])) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []*store.Group{group}, nil
+	}
+	var out []*store.Group
+	for offset := 0; ; {
+		page, total, err := h.store.Groups().ListGroups(r.Context(), offset, 200)
+		if err != nil {
+			return nil, err
+		}
+		if total > maxFilterCandidates {
+			return nil, protocolErrors.ScimErrorTooMany
+		}
+		for _, group := range page {
+			if group.ExternalID == match[2] {
+				out = append(out, group)
+			}
+		}
+		offset += len(page)
+		if len(page) == 0 || offset >= total {
+			return out, nil
+		}
+	}
+}
+
 func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
@@ -383,18 +512,73 @@ func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 	return scimStoreError(h.store.Groups().DeleteGroup(r.Context(), id), id)
 }
 
+// Patch applies each operation by type to the current group, then stores the result through
+// Replace (member check, difference-only writes). Member sub-attribute paths and any member
+// filter but `members[value eq "id"]` with remove are refused before anything is written.
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
-	attrs := protocol.ResourceAttributes{"displayName": group.DisplayName, "members": memberMaps(group.Members)}
-	for _, op := range operations {
-		if op.Path != nil {
-			attrs[op.Path.String()] = op.Value
+	displayName, externalID, members := group.DisplayName, group.ExternalID, slices.Clone(group.Members)
+	apply := func(op, attr string, value interface{}) {
+		switch attr {
+		case "displayname":
+			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
+				displayName = v
+			}
+		case "externalid":
+			if v, ok := value.(string); ok && op != protocol.PatchOperationRemove {
+				externalID = v
+			}
+		case "members":
+			switch op {
+			case protocol.PatchOperationAdd:
+				for _, m := range memberValues(value) {
+					if !slices.Contains(members, m) {
+						members = append(members, m)
+					}
+				}
+			case protocol.PatchOperationRemove:
+				if value == nil {
+					members = nil
+				}
+				gone := memberValues(value)
+				members = slices.DeleteFunc(members, func(m string) bool { return slices.Contains(gone, m) })
+			default:
+				members = memberValues(value)
+			}
 		}
 	}
-	return h.Replace(r, id, attrs)
+	for _, op := range operations {
+		switch {
+		case op.Path == nil:
+			values, _ := op.Value.(map[string]interface{})
+			for key, value := range values {
+				attr := strings.ToLower(key)
+				if attr != "members" && strings.Contains(attr, "members") {
+					return protocol.Resource{}, protocolErrors.ScimErrorInvalidPath
+				}
+				apply(op.Op, attr, value)
+			}
+		case strings.EqualFold(op.Path.AttributePath.AttributeName, "members"):
+			if op.Path.SubAttribute != nil || op.Path.AttributePath.SubAttribute != nil {
+				return protocol.Resource{}, protocolErrors.ScimErrorInvalidPath
+			}
+			if op.Path.ValueExpression == nil {
+				apply(op.Op, "members", op.Value)
+				continue
+			}
+			attr, target, ok := selector(op.Path.ValueExpression)
+			if !ok || attr != "value" || op.Op != protocol.PatchOperationRemove {
+				return protocol.Resource{}, protocolErrors.ScimErrorInvalidPath
+			}
+			apply(op.Op, "members", []interface{}{map[string]interface{}{"value": target}})
+		case op.Path.ValueExpression == nil && op.Path.SubAttribute == nil:
+			apply(op.Op, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
+		}
+	}
+	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
 }
 
 // checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
@@ -457,6 +641,10 @@ func memberValues(value interface{}) []string {
 	return out
 }
 func primaryValue(value interface{}) string {
+	if m, ok := value.(map[string]interface{}); ok {
+		v, _ := m["value"].(string)
+		return v
+	}
 	for _, item := range interfaceSlice(value) {
 		if m, ok := item.(map[string]interface{}); ok {
 			if v, ok := m["value"].(string); ok {

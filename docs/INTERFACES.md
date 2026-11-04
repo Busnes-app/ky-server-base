@@ -183,14 +183,14 @@ browser session cookies; otherwise the shared CSRF rule also applies to writes.
 | GET `/scim/v2/ResourceTypes/{id}` | `User` or `Group` | 200 resource-type description |
 | GET `/scim/v2/Users` | `startIndex`, `count`, optional `filter` | 200 user ListResponse |
 | POST `/scim/v2/Users` | Core User resource | 201 created User resource |
-| POST `/scim/v2/Users/.search` | RFC 7644 SearchRequest | 200 user ListResponse; see filter limitation below |
+| POST `/scim/v2/Users/.search` | RFC 7644 SearchRequest | 501; search is not implemented, use GET with `filter` |
 | GET `/scim/v2/Users/{id}` | User ID | 200 User resource |
 | PUT `/scim/v2/Users/{id}` | Replacement User resource | 200 User resource |
 | PATCH `/scim/v2/Users/{id}` | RFC 7644 PatchOp | 200 User resource |
 | DELETE `/scim/v2/Users/{id}` | User ID | 204, no body |
-| GET `/scim/v2/Groups` | `startIndex`, `count` | 200 group ListResponse |
+| GET `/scim/v2/Groups` | `startIndex`, `count`, optional `filter` | 200 group ListResponse |
 | POST `/scim/v2/Groups` | Core Group resource | 201 created Group resource |
-| POST `/scim/v2/Groups/.search` | RFC 7644 SearchRequest | 200 group ListResponse; filtering is not applied by this adapter |
+| POST `/scim/v2/Groups/.search` | RFC 7644 SearchRequest | 501; search is not implemented, use GET with `filter` |
 | GET `/scim/v2/Groups/{id}` | Group ID | 200 Group resource |
 | PUT `/scim/v2/Groups/{id}` | Replacement Group resource | 200 Group resource |
 | PATCH `/scim/v2/Groups/{id}` | RFC 7644 PatchOp; see limitations below | 200 Group resource |
@@ -212,14 +212,25 @@ Adapter limits matter when configuring a provisioning connector:
   exactly, case-insensitively. A blank value or any other filter returns 400
   `invalidFilter`; an `emails` or `displayName` value whose substring matches more
   than 1000 accounts returns 400 `tooMany`.
-  User search currently reads this filter from the URL query, not the SearchRequest
-  body's filter. Group filtering is not applied.
+- Group list filtering accepts exactly one `displayName eq "x"` (exact,
+  case-insensitive) or `externalId eq "x"` (exact, case-sensitive) comparison. Any
+  other filter returns 400 `invalidFilter`; an `externalId` filter over more than
+  1000 groups returns 400 `tooMany`.
 - User PATCH supports add/replace of active, displayName, userName, emails and
-  roles; remove operations are ignored. Group PATCH only applies explicit paths
-  into displayName/members; complex member filters and complete RFC patch semantics
-  are not implemented by the persistence adapter. Prefer PUT when replacing a group.
-  An unknown member id on create, replace or PATCH is 400 `invalidValue` and leaves
-  the group unchanged.
+  roles. Filtered paths such as `emails[type eq "work"].value` or
+  `roles[primary eq "True"].value` take one `eq` selector and apply when it matches
+  the single stored value (the email is emitted as type `work`, primary; the role as
+  primary). A replace whose emails/roles selector matches nothing is 400 `noTarget`;
+  a filtered add creates a missing email. Remove clears `emails`, resets `roles` to
+  `user` and sets `displayName` back to `userName`. Paths into attributes not stored
+  here (`name.*`, `phoneNumbers`, `addresses`, email/role `type`/`primary`/`display`)
+  are ignored with 200.
+- Group PATCH applies each op by type to displayName, externalId and members:
+  add merges members, remove drops the listed members (or `members[value eq "id"]`,
+  or all members when `members` has no value), replace sets them. A member
+  sub-attribute path (`members.display`, `members[value eq "id"].display`) or any
+  other member filter is 400 `invalidPath`. An unknown member id on create, replace
+  or PATCH is 400 `invalidValue`. Either error leaves the group unchanged.
 - Cross-resource root list/search has no configured root-query handler; `/scim/v2/Me`
   is 501. Bulk is not enabled. Discover capabilities before using optional operations.
 
