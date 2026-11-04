@@ -312,6 +312,24 @@ UPDATE users SET scim_managed = 1 WHERE sso_provider = 'scim';`,
 		Postgres: `ALTER TABLE users ADD COLUMN IF NOT EXISTS scim_managed BOOLEAN NOT NULL DEFAULT FALSE;
 UPDATE users SET scim_managed = TRUE WHERE sso_provider = 'scim';`,
 	},
+	{
+		// sso_directory_events holds the newest directory-webhook timestamp applied per
+		// subject, so a replayed or late event cannot undo a newer change.
+		Version: 10,
+		Name:    "directory_event_order",
+		SQLite: `CREATE TABLE IF NOT EXISTS sso_directory_events (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    last_timestamp INTEGER NOT NULL,
+    PRIMARY KEY (provider, subject)
+);`,
+		Postgres: `CREATE TABLE IF NOT EXISTS sso_directory_events (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    last_timestamp BIGINT NOT NULL,
+    PRIMARY KEY (provider, subject)
+);`,
+	},
 }
 
 // EnsureUsernameIndex builds the case-insensitive unique index on usernames when existing

@@ -170,8 +170,11 @@ under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `ev
 `id` (provider subject), `username`, `email`, `display_name`, `role`, `status` and
 `timestamp` (Unix seconds within five minutes in either direction). Supported
 events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
-Events are not ordered per subject: a signed event replayed or delivered late inside
-the five-minute window is applied and can undo a newer change. Create/update defaults an empty role to `user` and status to
+Events are ordered per subject: one whose `timestamp` is older than the newest event
+already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
+event cannot undo a newer change; an equal timestamp is applied. A failed event does not
+count as applied, so the sender's retry applies it. An event without `id` returns 401.
+Create/update defaults an empty role to `user` and status to
 `active`; privilege or status changes revoke sessions in the same transaction.
 Deactivation sets `inactive` and revokes sessions; deletion removes the matching
 provider user. Unknown events currently return

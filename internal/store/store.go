@@ -54,6 +54,11 @@ type UserStore interface {
 	// ListSCIMUsers is ListUsers restricted to accounts SCIM created (SCIMManaged).
 	ListSCIMUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
 	CountUsers(ctx context.Context) (int, error)
+	// LastDirectoryEvent is the newest directory-webhook timestamp recorded for the subject,
+	// 0 if none.
+	LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error)
+	// RecordDirectoryEvent records ts as applied for the subject; it never moves back.
+	RecordDirectoryEvent(ctx context.Context, provider, subject string, ts int64) error
 }
 
 // SessionStore defines repository operations for active login sessions.

@@ -388,6 +388,21 @@ func (u *userStore) listUsers(ctx context.Context, offset, limit int, search str
 	return users, total, rows.Err()
 }
 
+func (u *userStore) LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error) {
+	var ts int64
+	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT last_timestamp FROM sso_directory_events WHERE provider = ? AND subject = ?`), provider, subject).Scan(&ts)
+	if errorsIs(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return ts, err
+}
+
+func (u *userStore) RecordDirectoryEvent(ctx context.Context, provider, subject string, ts int64) error {
+	_, err := u.store.db.ExecContext(ctx, u.store.rebind(`INSERT INTO sso_directory_events (provider, subject, last_timestamp) VALUES (?, ?, ?)
+ON CONFLICT (provider, subject) DO UPDATE SET last_timestamp = excluded.last_timestamp WHERE sso_directory_events.last_timestamp < excluded.last_timestamp`), provider, subject, ts)
+	return err
+}
+
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {
 	var count int
 	err := u.store.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users").Scan(&count)

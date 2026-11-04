@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -17,6 +18,9 @@ type KySignOnClient struct {
 	config config.SSOConfig
 	store  store.Store
 	flow   *oauthFlow
+	// order serializes directory events, so the per-subject order check and the change it
+	// guards cannot interleave. One server process per database is the supported deployment.
+	order sync.Mutex
 }
 
 func NewKySignOnClient(cfg config.SSOConfig, st store.Store) *KySignOnClient {
@@ -76,6 +80,31 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.Timestamp == 0 || time.Since(time.Unix(payload.Timestamp, 0)).Abs() > 5*time.Minute {
 		return errors.New("webhook timestamp is missing or expired")
 	}
+	if payload.ID == "" {
+		return errors.New("webhook event names no subject")
+	}
+	// Per-subject ordering: an event older than the newest one applied for this subject is a
+	// replay or arrived late, and applying it would undo a newer change. It is acknowledged
+	// and dropped. The order is recorded only after the change commits, so a failed event is
+	// retried by the sender and never needs undoing.
+	k.order.Lock()
+	defer k.order.Unlock()
+	users := k.store.Users()
+	last, err := users.LastDirectoryEvent(ctx, "kysignon", payload.ID)
+	if err != nil {
+		return err
+	}
+	if payload.Timestamp < last {
+		return nil
+	}
+	if err := k.apply(ctx, payload); err != nil {
+		return err
+	}
+	return users.RecordDirectoryEvent(context.WithoutCancel(ctx), "kysignon", payload.ID, payload.Timestamp)
+}
+
+// apply makes the local account match one directory event.
+func (k *KySignOnClient) apply(ctx context.Context, payload KySignOnSyncPayload) error {
 	switch payload.Event {
 	case "user.created", "user.updated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
@@ -123,14 +152,14 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 		if err != nil {
 			return err
 		}
-		prevStatus := existing.Status
-		existing.Status = "inactive"
-		if err := k.store.Users().UpdateUserProfile(ctx, existing, existing.Role, prevStatus); err != nil {
+		// Sessions go even when the row is already inactive. They go first, so a failure
+		// leaves nothing committed; a session created meanwhile is revoked by the status change.
+		if err := k.store.Sessions().DeleteUserSessions(ctx, existing.ID); err != nil {
 			return err
 		}
-		// Sessions go even when the row was already inactive: a retry after a failed
-		// revocation must still end them.
-		return k.store.Sessions().DeleteUserSessions(ctx, existing.ID)
+		prevStatus := existing.Status
+		existing.Status = "inactive"
+		return k.store.Users().UpdateUserProfile(ctx, existing, existing.Role, prevStatus)
 
 	case "user.deleted":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
