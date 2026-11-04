@@ -59,7 +59,7 @@ Sources: [auth handlers](../internal/api/auth_handlers.go),
 | GET `/api/auth/pow-challenge` | Anonymous; no body | 200 challenge object described below |
 | POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies |
 | GET `/api/auth/me` | Optional session; no body | 200 `{"authenticated":false}` or `{"authenticated":true,"user":User}` |
-| POST `/api/auth/change-password` | Restricted local session; JSON: `current_password`, `new_password`; cookie CSRF applies | 200 `{"password_changed":true,"login_required":true}`; all sessions revoked |
+| POST `/api/auth/change-password` | Any local-account session (also a restricted one); JSON: `current_password`, `new_password`; cookie CSRF applies; 409 for a federated account | 200 `{"password_changed":true,"login_required":true}`; replacement flag cleared; all sessions revoked |
 | POST `/api/auth/logout` | Optional session; no body; cookie CSRF applies | 200 `{"logged_out":true}`; current session revoked and cookies expired |
 
 A completed login returns `{"authenticated":true,"user":User}`. `User`
@@ -96,9 +96,9 @@ challenge expires after five minutes and each solved challenge is accepted once:
 second login with the same token returns 403. Login verifies it when the configured
 provider is `pow`; no Turnstile/Friendly server-side verification is wired here.
 
-Password replacement is specifically for a local account flagged
-`must_change_password`, not a general password-edit endpoint. Otherwise it returns
-409. Both passwords are limited to 1024 bytes; the new value must differ and pass
+Any local account can change its own password, whether or not it is flagged
+`must_change_password` (a flagged account must do so first); a federated account
+gets 409. Both passwords are limited to 1024 bytes; the new value must differ and pass
 the current policy (at least 12 bytes after trimming surrounding whitespace).
 The current password must verify. Limits are ten attempts per IP and five per
 account per minute. Success requires signing in again with the replacement.

@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [settings, setSettings] = useState<any>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -88,11 +89,14 @@ export const App: React.FC = () => {
     );
   }
 
-  if (user.must_change_password) {
-    return <ChangePassword onLogout={handleLogout} onComplete={() => {
-      setUser(null);
-      setNotice('Password changed. Sign in with your new password.');
-    }} />;
+  if (user.must_change_password || changingPassword) {
+    return <ChangePassword onLogout={handleLogout}
+      onCancel={user.must_change_password ? undefined : () => setChangingPassword(false)}
+      onComplete={() => {
+        setChangingPassword(false);
+        setUser(null);
+        setNotice('Password changed. Sign in with your new password.');
+      }} />;
   }
 
   return (
@@ -103,6 +107,7 @@ export const App: React.FC = () => {
         onTabChange={(tab) => setActiveTab(tab)}
         user={user}
         onLogout={handleLogout}
+        onChangePassword={user.sso_provider === 'local' ? () => setChangingPassword(true) : undefined}
       />
 
       <main className="app-main">

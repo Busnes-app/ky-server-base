@@ -183,15 +183,21 @@ func TestRestrictedSessionCannotInheritClearedFlag(t *testing.T) {
 	}
 }
 
-func TestReplacementRefusesUnflaggedAndFederatedAccounts(t *testing.T) {
+// Any local account can change its own password, not only one flagged for replacement; a
+// federated account has none to change.
+func TestPasswordChangeForLocalAccountsOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name, provider string
-		flag           bool
-	}{{"unflagged", "local", false}, {"federated", "kysignon", true}} {
+		want           int
+	}{{"unflagged local", "local", 200}, {"federated", "kysignon", 409}} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, st, cfg := setupTestServer(t)
 			ctx := context.Background()
-			u := &store.User{ID: "user", Username: "user", Status: "active", Role: "admin", SSOProvider: tc.provider, MustChangePassword: tc.flag}
+			hash, err := password.Hash("CurrentPassword123!")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := &store.User{ID: "user", Username: "user", PasswordHash: hash, Status: "active", Role: "user", SSOProvider: tc.provider}
 			if err := st.Users().CreateUser(ctx, u); err != nil {
 				t.Fatal(err)
 			}
@@ -200,12 +206,19 @@ func TestReplacementRefusesUnflaggedAndFederatedAccounts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader(`{"current_password":"x","new_password":"NewPassword123!"}`))
+			req := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader(`{"current_password":"CurrentPassword123!","new_password":"NewPassword123!"}`))
 			req.Header.Set("Authorization", "Bearer "+token)
 			w := httptest.NewRecorder()
 			srv.ServeHTTP(w, req)
-			if w.Code != 409 {
+			if w.Code != tc.want {
 				t.Fatal(w.Code, w.Body)
+			}
+			if tc.want == 200 {
+				me := httptest.NewRequest("GET", "/api/auth/me", nil)
+				me.Header.Set("Authorization", "Bearer "+token)
+				if _, _, err := manager.AuthenticateRequest(me); err == nil {
+					t.Fatal("the session survived the password change")
+				}
 			}
 		})
 	}

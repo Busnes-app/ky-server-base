@@ -23,8 +23,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusUnauthorized, "Authentication required")
 		return
 	}
-	if !user.MustChangePassword || user.SSOProvider != "local" {
-		s.writeError(w, http.StatusConflict, "No local password replacement is required")
+	if user.SSOProvider != "local" {
+		s.writeError(w, http.StatusConflict, "This account signs in through its identity provider and has no local password")
 		return
 	}
 	if !s.allowAttempt("password-change:"+s.limiterIP(r), 10, time.Minute) || !s.allowAttempt("password-change-user:"+user.ID, 5, time.Minute) {
