@@ -272,12 +272,13 @@ recorded backup. These shared formats are supplied by the pinned ky-primitives m
 Status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
 `allow_private_recovery`, `database_driver` and `members` (payload names).
 Conditional fields are `recovery_url`, `recovery_key_id`, `threshold`, `total_shares`,
-`recovery_key_error`, `last_deposit` (receipt), `local_dir`, `local_keep`,
+`recovery_key_error`, `database_path_error` (the SQLite database is not `<KY_DATA_DIR>/ky_server.db`, so nothing is sealed), `last_deposit` (receipt), `local_dir`, `local_keep`,
 `local_copies:[{name,size_bytes,created_at}]`, `local_error`, `interval_sec`,
 `min_interval_sec` and `next_run_at`. The recovery bearer token is never returned.
 
-Capsule creation currently requires SQLite. No consistent PostgreSQL snapshot is
-implemented. Export/deposit return 412 for missing prerequisites (key, destination,
+Capsule creation currently requires SQLite at `<KY_DATA_DIR>/ky_server.db`, the only
+path a capsule restores; a `KY_DB_DSN` pointing elsewhere refuses to seal (412, failed
+drill). No consistent PostgreSQL snapshot is implemented. Export/deposit return 412 for missing prerequisites (key, destination,
 database snapshot, or disallowed private destination as applicable); a PostgreSQL
 drill returns 200 with `passed:false`. A changed pin or concurrent deposit is 409;
 capsule size-cap failure is 413; remote deposit refusal is 502, which may still
@@ -326,7 +327,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_ENV` | `development` | `production` requires a session secret and defaults to Secure cookies |
 | `KY_DB_DRIVER` | `sqlite` | SQLite or `postgres` (`postgresql` alias); other drivers are not implemented |
 | `KY_DATA_DIR` | `./data` | Local database/key directory |
-| `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly |
+| `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly. A SQLite DSN other than `<KY_DATA_DIR>/ky_server.db` disables backups |
 | `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections |
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
 | `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |

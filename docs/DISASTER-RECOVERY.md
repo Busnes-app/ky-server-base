@@ -15,7 +15,9 @@ supplies what it seals and how it checks a drill.
 
 **Capsules are SQLite-only today.** The snapshot is `VACUUM INTO` against the local database
 file; on `KY_DB_DRIVER=postgres` there is no snapshot and every backup refuses with "no
-consistent database snapshot for this driver". A Postgres deployment must back its database up
+consistent database snapshot for this driver". SQLite must be at `<KY_DATA_DIR>/ky_server.db`,
+the one path a capsule restores to; a `KY_DB_DSN` naming any other file refuses to seal, and
+the Backup page and the drill say so. A Postgres deployment must back its database up
 itself, with `pg_dump` on its own schedule and its own retention, and must protect that dump:
 it is the plaintext of everything a capsule would have sealed. Nothing travels in a capsule
 there, because no capsule is made. The recovery key pin, the pairing and the schedule live in

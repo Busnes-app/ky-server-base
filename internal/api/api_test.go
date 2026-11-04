@@ -39,6 +39,9 @@ func setupTestServer(t *testing.T) (*api.Server, store.Store, *config.Config) {
 	cfg, _ := config.LoadFromEnv()
 	db := testdb.Config(t)
 	db.DataDir = cfg.Database.DataDir // testdb only picks the backend; keep the temp data dir
+	if db.Driver == "sqlite" {
+		db.DSN = filepath.Join(db.DataDir, "ky_server.db") // the only path a capsule seals
+	}
 	cfg.Database = db
 	cfg.Captcha.Provider = "none" // disable captcha for unit test speed
 
@@ -375,6 +378,7 @@ func TestExportCapsuleRefusesAMismatchedRecoveryKey(t *testing.T) {
 func TestExportCapsuleRejectsAnOversizedPayload(t *testing.T) {
 	srv, st, cfg := setupSQLiteServer(t)
 	ctx := context.Background()
+	cfg.Database.DataDir = t.TempDir() // a capsule seals only <data dir>/ky_server.db
 
 	key, err := recoverykey.Generate()
 	if err != nil {
@@ -387,7 +391,7 @@ func TestExportCapsuleRejectsAnOversizedPayload(t *testing.T) {
 
 	// A real database one blob past the per-member cap: the collector snapshots with VACUUM
 	// INTO, so the file has to be a database, and zeroblob makes a large one instantly.
-	big := filepath.Join(t.TempDir(), "oversized.db")
+	big := filepath.Join(cfg.Database.DataDir, "ky_server.db")
 	db, err := sql.Open("sqlite", big)
 	if err != nil {
 		t.Fatal(err)

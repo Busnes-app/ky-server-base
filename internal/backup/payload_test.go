@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
@@ -154,5 +155,21 @@ func TestCollectRefusesADriverItCannotSnapshot(t *testing.T) {
 	cfg.Database.Driver = "postgres"
 	if _, err := backup.Collect(context.Background(), cfg, "1.0.0"); !errors.Is(err, backup.ErrNoDatabaseSnapshot) {
 		t.Fatalf("got %v, want ErrNoDatabaseSnapshot", err)
+	}
+}
+
+func TestCollectRefusesADatabaseOutsideTheDataDir(t *testing.T) {
+	cfg, _ := sqliteInstance(t)
+	if err := backup.CheckDatabasePath(cfg); err != nil {
+		t.Fatalf("default path refused: %v", err)
+	}
+	cfg.Database.DSN = "file:" + filepath.Join(cfg.Database.DataDir, "ky_server.db") + "?_pragma=foreign_keys(ON)"
+	if err := backup.CheckDatabasePath(cfg); err != nil {
+		t.Fatalf("file: form of the default path refused: %v", err)
+	}
+	cfg.Database.DSN = filepath.Join(t.TempDir(), "app.db")
+	_, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	if !errors.Is(err, backup.ErrNoDatabaseSnapshot) || !strings.Contains(err.Error(), "app.db") {
+		t.Fatalf("custom DSN sealed or unclear error: %v", err)
 	}
 }

@@ -37,6 +37,7 @@ export interface BackupStatus {
   app_version: string;
   allow_private_recovery: boolean;
   database_driver: string;
+  database_path_error?: string;
   members: string[];
   recovery_url?: string;
   recovery_key_id?: string;
@@ -349,6 +350,9 @@ export const Backup: React.FC = () => {
 
       {statusError && <Alert kind="error">{statusError}</Alert>}
       {status?.recovery_key_error && <Alert kind="error">{status.recovery_key_error}</Alert>}
+      {status?.database_path_error && (
+        <Alert kind="error">No backups are made: {status.database_path_error}.</Alert>
+      )}
       {status && status.database_driver !== 'sqlite' && (
         <Alert kind="warn">
           No backups are made on PostgreSQL: a capsule can only snapshot SQLite, so nothing is sealed, copied or

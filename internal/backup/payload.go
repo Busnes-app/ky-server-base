@@ -28,6 +28,30 @@ const recoveryPubPath = "data/recovery.pub"
 // database, so a capsule without one is never sealed as if it were a backup.
 var ErrNoDatabaseSnapshot = errors.New("backup: no consistent database snapshot for this driver")
 
+// CheckDatabasePath refuses a SQLite database outside <DataDir>/ky_server.db. A capsule always
+// restores the database to data/ky_server.db, so one sealed from anywhere else comes back where
+// the server never reads it and the restored instance starts empty. Nil for other drivers.
+func CheckDatabasePath(cfg *config.Config) error {
+	if strings.ToLower(cfg.Database.Driver) != "sqlite" {
+		return nil
+	}
+	path, _, _ := strings.Cut(strings.TrimPrefix(cfg.Database.DSN, "file:"), "?")
+	want := filepath.Join(cfg.Database.DataDir, "ky_server.db")
+	got, err1 := filepath.Abs(path)
+	wantAbs, err2 := filepath.Abs(want)
+	if err1 == nil && err2 == nil && got == wantAbs {
+		return nil
+	}
+	return databasePathError(fmt.Sprintf("backup: the SQLite database is %q, but a capsule restores only %q (KY_DATA_DIR/ky_server.db); unset KY_DB_DSN or move the database there", path, want))
+}
+
+// databasePathError is an ErrNoDatabaseSnapshot with its own message, so every caller that
+// already refuses a sealed capsule without a database refuses this one the same way.
+type databasePathError string
+
+func (e databasePathError) Error() string        { return string(e) }
+func (e databasePathError) Is(target error) bool { return target == ErrNoDatabaseSnapshot }
+
 // Collect assembles the payload every sealing caller uses: the local application files
 // (SQLite database, configuration) plus the members that may only ever travel inside a
 // sealed capsule (the encryption key, the pinned recovery public key). Nothing that returns
@@ -35,6 +59,9 @@ var ErrNoDatabaseSnapshot = errors.New("backup: no consistent database snapshot 
 func Collect(ctx context.Context, cfg *config.Config, appVersion string) (recoveryclient.Payload, error) {
 	if strings.ToLower(cfg.Database.Driver) != "sqlite" {
 		return recoveryclient.Payload{}, fmt.Errorf("%w: %s", ErrNoDatabaseSnapshot, cfg.Database.Driver)
+	}
+	if err := CheckDatabasePath(cfg); err != nil {
+		return recoveryclient.Payload{}, err
 	}
 	dbBytes, err := snapshotSQLite(ctx, cfg.Database.DSN, cfg.Database.DataDir)
 	if err != nil {
