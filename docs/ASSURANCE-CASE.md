@@ -29,7 +29,7 @@ ties them together and points at the evidence. Paths are relative to the reposit
 | Signed-in ordinary user | Use their own session | Reach admin routes or other users' data |
 | Malicious web page in the user's browser | Make cross-site requests with the user's cookies | Act as the user (CSRF), inject script |
 | Forged identity provider or directory | Send tokens or webhooks | Sign in as someone, change roles |
-| Someone with the database file or a backup | Read the SQLite file or a `pg_dump` | TOTP secrets, sessions, recovery tokens |
+| Someone with the database file or a backup | Read the SQLite file or a `pg_dump` | Sessions, recovery tokens, retired TOTP secrets |
 | Network attacker at KyRecovery pairing | Answer the pairing request | Substitute a recovery key whose shares they hold |
 
 Out of scope: an attacker who runs code on the host or holds both the database and
@@ -47,9 +47,10 @@ Out of scope: an attacker who runs code on the host or holds both the database a
    back-channel logout tokens are verified like ID tokens plus the logout-token claims
    (`internal/sso/backchannel.go`). No SAML
    assertion route is exposed.
-3. **SCIM clients → server.** A bearer token compared in constant time (`internal/scim/handler.go`).
-4. **Server → its database.** TOTP secrets are AES-256-GCM sealed; sessions and recovery codes are
-   stored only as SHA-256 hashes; passwords as Argon2id hashes from `ky-primitives/password`.
+3. **SCIM clients → server.** A bearer token compared in constant time; SCIM sees only the accounts it
+   created and cannot grant admin unless `KY_SCIM_ALLOW_ADMIN` (`internal/scim/handler.go`).
+4. **Server → its database.** Secrets (the KyRecovery token, retired TOTP secrets) are AES-256-GCM
+   sealed; sessions are stored only as SHA-256 hashes; passwords as Argon2id hashes from `ky-primitives/password`.
 5. **Server → KyRecovery.** Capsules are sealed to the suite recovery key before they leave
    (`ky-primitives/recoveryclient`); the key is pinned write-once, and pairing over plain HTTP is
    refused ([Disaster recovery](DISASTER-RECOVERY.md#why-tls-matters-here)).
@@ -66,23 +67,22 @@ Out of scope: an attacker who runs code on the host or holds both the database a
   their session; a webhook status or role change revokes the user's sessions.
 - **Economy of mechanism.** Eight direct Go modules; OAuth/OIDC and SCIM come from maintained
   libraries rather than local parsers.
-- **Open design.** Only published algorithms (Argon2id, AES-256-GCM, HMAC-SHA-256, SHA-256, TOTP
-  per RFC 6238, PKCE S256); the code and this argument are public.
+- **Open design.** Only published algorithms (Argon2id, AES-256-GCM, HMAC-SHA-256, SHA-256,
+  PKCE S256); the code and this argument are public.
 
 ## Common weaknesses and how they are countered
 
 | Weakness | Counter | Where |
 |---|---|---|
-| Password guessing, credential stuffing | Argon2id hashes; at least 12 characters; per-address limits on login, MFA and pairing (20, 20 and 10 a minute) keyed by `ClientIP` | `internal/api/auth_handlers.go`, `internal/api/device_handlers.go`, `internal/auth/policy.go` |
+| Password guessing, credential stuffing | Argon2id hashes; at least 12 characters; login limited to 20 a minute per client and 10 failures per account per client per 15 minutes (IPv6 by /64, keyed by `ClientIP`), checked before hashing and answered like a wrong password; unknown names cost a dummy verification; a solved PoW buys one attempt. MFA is KyIdentity's | `internal/api/auth_handlers.go`, `internal/auth/pow.go`, `internal/auth/policy.go`, `TestLoginPerAccountWindow` |
 | Session theft | Random 32-byte token, only its SHA-256 stored; `HttpOnly`, `SameSite=Lax`, `Secure` when configured | `internal/auth/session.go`, `internal/store/sqlstore.go` |
 | CSRF | Credentialed writes need the CSRF cookie echoed in a header, compared in constant time; CORS admits only the exact `KY_APP_URL` origin | `internal/auth/session.go`, `internal/api/server.go`, `TestCookieAuthenticatedWriteRequiresCSRF` |
 | Broken access control | Admin wrapper on every privileged route; per-role tests for each | `internal/api/server.go`, `internal/api/authz_test.go` |
 | Forged federated identity | ID token signature, issuer, audience, expiry and one-time nonce verified; PKCE S256 | `internal/sso/oauth.go` |
 | Session outliving its identity-provider login | Back-channel logout token verified (signature, issuer, audience, expiry, logout event, no nonce) before ending every session of its `sid`, or of its subject issued before it; the `sid` or the subject's cutoff is fenced so an in-flight callback cannot revive it | `internal/sso/backchannel.go`, `internal/store/sqlstore.go`, `TestVerifyLogoutToken`, `TestBackchannelLogoutEndsTheSSOLogin` |
 | Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; configured HMAC keys require 16 bytes and sync checks again before mutation | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
-| Undersized TOTP secrets | Generate 20 decoded bytes and refuse authentication below 16 through the pinned shared library; retain existing sealed records for deliberate MFA recovery | `internal/auth/totp.go`, `internal/auth/totp_strength_test.go` |
 | Weak TLS peers or HTTP IdP downgrade | Supported process profile enables Go's verified-chain key policy, requires HTTPS OIDC endpoints and refuses redirects; normal trust/hostname verification remains required | [Strong profile](STRONG-CRYPTO.md), `internal/sso/oauth.go`, `TestOIDCStrongModeRejectsWeakTLSPeer` |
-| Forged directory webhook | HMAC-SHA256 checked in constant time before any change; five-minute window | `internal/sso/kysignon.go`, `internal/crypto/crypto.go` |
+| Forged or replayed directory webhook | HMAC-SHA256 checked in constant time before any change; five-minute window; per-subject ordering drops an event older than the last one applied | `internal/sso/kysignon.go`, `internal/crypto/crypto.go`, `TestKySignOnWebhookDropsOlderEventsPerSubject` |
 | SQL injection | Parameterised statements throughout (`?`, rebound per driver); the only `Sprintf` builds the SQLite DSN | `internal/store` |
 | Cross-site scripting, clickjacking | React escaping with no `dangerouslySetInnerHTML`; CSP `script-src 'self'`, `frame-ancestors 'none'`; `X-Frame-Options: DENY` | `web/src`, `internal/api/server.go` |
 | Oversized requests | Request bodies capped at 1 MiB, smaller on backup routes | `internal/api/server.go`, `internal/api/backup_handlers.go` |
@@ -108,7 +108,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 - **Tests:** the whole suite under the race detector on SQLite and again on PostgreSQL 17;
   `authz_test.go` for route exposure; `scripts/smoke-test.sh` against the built binary; vitest
   and Chromium regressions against the production server for the UI.
-- **Static analysis:** CodeQL (GitHub default setup: Go, JavaScript/TypeScript, Actions) on every
+- **Static analysis:** CodeQL (`.github/workflows/codeql.yml`: Go, JavaScript/TypeScript, Actions) on every
   push and pull request, `go vet`, `govulncheck`, `npm audit`, the TypeScript compiler in strict
   mode, and ShellCheck on `scripts/`.
 - **Dynamic analysis:** the race detector; bounded fuzzing in CI for the trusted-proxy parser,

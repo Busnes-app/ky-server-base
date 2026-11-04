@@ -67,7 +67,11 @@ contains `id`, `username`, `email`, `display_name`, `role`, `status`, `sso_provi
 `must_change_password`, `created_at` and `updated_at`; `sso_subject`,
 `push_device_id` and `last_login_at` appear when set. User timestamps are RFC 3339
 strings. Roles used by the scaffold are `admin`, `user` and `manager`; only `admin`
-authorizes administrator routes. Password hashes are never included.
+authorizes administrator routes. Password hashes are never included. Usernames are
+unique regardless of letter case: creating or renaming to a case variant of another
+account's name is refused (SCIM 409 `uniqueness`, KyIdentity sign-in 409). An
+installation that already holds such duplicates keeps them, logs each clash at
+startup and builds the case-insensitive unique index once they are resolved.
 
 There is no local multi-factor sign-in: MFA is a KyIdentity (SSO) feature, so require it
 there and sign in through KyIdentity. The former `/api/auth/mfa/totp` and
@@ -107,6 +111,7 @@ Source: [settings handlers](../internal/api/settings_handlers.go).
 |---|---|---|
 | GET `/api/settings` | Optional session; no body | 200 tiered settings object |
 | POST `/api/settings/theme` | Administrator; JSON `{"theme":"name"}`; cookie CSRF applies | 200 `{"theme":"name"}` |
+| GET `/api/admin/users` | Administrator; query `offset` (default 0), `limit` (default 50, at most 200), optional `search` (substring of username, display name or email) | 200 `{users, total, offset, limit}`, newest first |
 
 Public settings are `app_name`, `app_url`, `theme` (stored value or `patina`),
 `captcha_provider` and `sso_enabled`. An unrestricted session additionally receives
@@ -115,6 +120,11 @@ stored settings; it can contain sensitive configuration. All keys beginning with
 `kyrecovery_token` are removed, including sealed/legacy token forms. Invalid theme
 JSON or an empty name is 400; the handler stores a nonempty name without validating
 it against the frontend theme list.
+
+`/api/admin/users` is read-only and lists every account (local, KyIdentity and SCIM).
+Each entry has `id`, `username`, `display_name`, `email`, `role`, `status`,
+`sso_provider`, `scim_managed`, `created_at` and, when set, `last_login_at`; no
+credential, MFA state or SSO subject. The Directory & SCIM screen uses it.
 
 ## Federation and directory synchronization
 
@@ -130,9 +140,13 @@ Sources: [SSO handlers](../internal/api/sso_handlers.go),
 | GET `/saml/metadata` | Anonymous; no body | 200 XML service-provider metadata |
 
 The callback verifies provider tokens, PKCE and nonce. Invalid state/nonce is 400;
-failed exchange is 401; an unprovisioned account is 403 when automatic provisioning
-is off. Automatic provisioning creates role `user`; sign-in does not itself grant
-administration. The scaffold constructs generic OIDC and SAML helpers, but registers
+failed exchange is 401. A subject with no KyIdentity account adopts the SCIM account
+whose `externalId` equals the subject: that row becomes a KyIdentity row (so
+back-channel logout reaches it) and stays SCIM-managed, audited as
+`sso.scim_account_linked`. Otherwise an unprovisioned account is 403 when automatic
+provisioning is off, and a username that another account already holds (in any letter
+case) is 409 naming it. A disabled account is 403. Automatic provisioning creates role
+`user`; sign-in does not itself grant administration. The scaffold constructs generic OIDC and SAML helpers, but registers
 no generic OIDC login/callback or SAML assertion-consumer handler. In particular,
 the `/saml/acs` URL named in the metadata is not an implemented login route here.
 
@@ -149,18 +163,20 @@ sessions are dated by their ID token's `iat`, not by when the callback finished.
 replay is harmless and acknowledged; an unknown subject is acknowledged. The route is
 anonymous by design: the signature is its authority, and no session cookie means no
 CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
-client's back-channel logout URI in KyIdentity. A device paired from an SSO session
-inherits that login's `sid` and credential time, so either kind of logout ends it,
-and a pairing still pending when its login ends returns no `session_token`.
+client's back-channel logout URI in KyIdentity.
 
 The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
 under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,
 `id` (provider subject), `username`, `email`, `display_name`, `role`, `status` and
 `timestamp` (Unix seconds within five minutes in either direction). Supported
 events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
-Create/update defaults an empty role to `user` and status to `active`; privilege or
-status changes revoke sessions. Deactivation sets `inactive` and revokes sessions;
-deletion removes the matching provider user. Unknown events currently return
+Events are ordered per subject: one whose `timestamp` is older than the newest event
+already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
+event cannot undo a newer change; an equal timestamp is applied. An event without
+`id` returns 401. Create/update defaults an empty role to `user` and status to
+`active`; privilege or status changes revoke sessions in the same transaction.
+Deactivation sets `inactive` and revokes sessions; deletion removes the matching
+provider user. Unknown events currently return
 `synced:true` without changing a user. An unconfigured HMAC secret, invalid signature,
 bad timestamp or processing error returns 401; an unreadable body returns 400.
 
@@ -173,6 +189,13 @@ The pinned `github.com/elimity-com/scim` dependency owns protocol parsing and
 including discovery, requires `Authorization: Bearer <KY_SCIM_TOKEN>` and SCIM
 must be enabled. Use `application/scim+json` for request/response bodies. Do not send
 browser session cookies; otherwise the shared CSRF rule also applies to writes.
+
+SCIM sees only the accounts it created (`scim_managed`, kept when a KyIdentity sign-in
+adopts one). Local and other SSO accounts, the bootstrap admin included, are absent
+from lists and filters, 404 by id, and 400 `invalidValue` as group members. SCIM may
+not grant the `admin` role (400 `invalidValue`) unless `KY_SCIM_ALLOW_ADMIN=true`;
+an account that is already an admin can still be updated, deactivated or demoted. A
+`userName` that another account holds in any letter case is 409 `uniqueness`.
 
 | Method and path | Input | Output |
 |---|---|---|
@@ -359,6 +382,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_SAML_ENTITY_ID`, `KY_SAML_METADATA_URL` | Empty | SAML helper configuration; only local metadata output is wired |
 | `KY_SCIM_ENABLED` | `true` | Enable authenticated provisioning |
 | `KY_SCIM_TOKEN` | Fresh random 24-byte hex on each load | Provisioning bearer credential; set explicitly for a stable integration |
+| `KY_SCIM_ALLOW_ADMIN` | `false` | Let SCIM grant the `admin` role |
 | `KY_CAPTCHA_PROVIDER` | `pow` | Login PoW check; `none` disables it; other provider verification is not wired |
 | `KY_CAPTCHA_SITE_KEY`, `KY_CAPTCHA_SECRET_KEY` | Empty | Reserved provider configuration; not used by the current PoW verifier |
 | `KY_CAPTCHA_POW_DIFFICULTY` | `500000` | Maximum puzzle candidate number; nonpositive values fall back to the default. The default solves in about one second (median) in a desktop browser |
