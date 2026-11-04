@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -425,8 +427,34 @@ func runExportCapsule(args []string) {
 // restore is the product-side half of the ceremony, owned by the lib: k custodian shares
 // combined, used once, dropped; a capsule from another service refused before the key is
 // touched; the authenticated manifest printed for comparison with KyRecovery's record.
+// The restored copy has scheduled deposits off: it may be a drill or a migration beside a
+// server still in service, and two servers depositing under one pairing alternate
+// KyRecovery's newest capsule between diverging databases.
 func restore(capsulePath, targetDir, expectService string, shares []string, stdout io.Writer) error {
-	return recoveryclient.Restore(capsulePath, targetDir, expectService, shares, stdout)
+	if err := recoveryclient.Restore(capsulePath, targetDir, expectService, shares, stdout); err != nil {
+		return err
+	}
+	dbPath := filepath.Join(targetDir, "data", "ky_server.db")
+	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err := disableScheduledDeposits(dbPath); err != nil {
+		return fmt.Errorf("files restored, but scheduled deposits could not be turned off in %s (do not start it until they are): %w", dbPath, err)
+	}
+	fmt.Fprintln(stdout, "Scheduled deposits are OFF in the restored copy. Turn them back on in Backup & recovery once this server is the one in service.")
+	return nil
+}
+
+// disableScheduledDeposits writes the "off" schedule (recoveryclient's backup_interval_sec
+// = 0) the admin screen writes, so the database setting wins over KY_BACKUP_DEPOSIT_INTERVAL.
+func disableScheduledDeposits(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT INTO server_settings (key, value, updated_at) VALUES ('backup_interval_sec', '0', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, time.Now().UTC())
+	return errors.Join(err, db.Close())
 }
 
 // stdinIsTerminal reports whether a human is typing, so a pipeline gets no stray prompt.

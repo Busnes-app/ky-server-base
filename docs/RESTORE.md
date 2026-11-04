@@ -141,6 +141,7 @@ Restored 4 files from capsule cap-Busnes.app-1788605720094118543
   created:      2026-09-05T12:15:20Z
   recovery key: 886ff52c...
   payload hash: 8a053985...
+Scheduled deposits are OFF in the restored copy. Turn them back on in Backup & recovery once this server is the one in service.
 ```
 
 **Check it against KyRecovery's record.** The capsule ID and `created` must match the
@@ -200,12 +201,20 @@ sudo rm -rf data/* data/.[!.]*
 ls -A data | wc -l
 ```
 
-With `0` confirmed, copy the restored files in and start:
+With `0` confirmed, copy the restored files in. Before the server starts, delete the
+restored sessions: they are database rows, so every session cookie minted before the capsule,
+including one revoked or stolen since, would sign in again the moment the server listens.
+Everyone signs in again. Then start:
 
 ```bash
 sudo cp -a restored/data/. data/ && sudo chmod 600 data/*
+sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;'
 docker compose up -d
 ```
+
+`restore` has already turned scheduled deposits off in the restored copy and said so: it may
+be a drill or a migration beside a server still in service, and two servers depositing under
+one pairing would alternate KyRecovery's newest capsule between two databases.
 
 Keep `KY_APP_URL` and `KY_APP_NAME` identical to the old deployment, from
 `config/settings.json`: the app name is what every capsule is sealed under and what
@@ -219,17 +228,19 @@ one on a command line: it lands in scrollback, session recordings and shell hist
 must produce the hex form, write it straight into the compose project's `.env` with
 `umask 077` and nothing else on stdout.
 
-**Bare binary.** Point `KY_DATA_DIR` at `restored/data`, set `KY_APP_URL` and `KY_APP_NAME`
-as before, and start.
+**Bare binary.** Run `sqlite3 restored/data/ky_server.db 'DELETE FROM sessions;'`, point
+`KY_DATA_DIR` at `restored/data`, set `KY_APP_URL` and `KY_APP_NAME` as before, and start.
 
 ## Step 4: prove it
 
-1. Open the app URL and sign in with an existing admin account. A deposit in step 2 proves
-   `encryption.key` is right: the sealed KyRecovery token only opens under it.
+1. Open the app URL and sign in with an existing admin account.
 2. Open Backup & recovery. If the backup had a key, the recovery key shows as pinned with the
    same key ID as before; compare it with the ceremony card. If the backup was paired, the
    sealed token came across in the database, so the restored server can deposit again
-   without re-pairing: click Back up now to prove it. If the screen says the key is missing,
+   without re-pairing. Run the drill to prove the restored data seals. Only once this server
+   is the one in service (the old one is gone or stopped for good), turn the schedule back on
+   and click Back up now: that deposit proves `encryption.key` is right, because the sealed
+   KyRecovery token only opens under it. If the screen says the key is missing,
    `data/recovery.pub` did not come across; re-pair, which is refused unless KyRecovery hands
    back the same key.
 3. Check the audit log: the last events before the restore are there, followed by your
@@ -239,20 +250,10 @@ as before, and start.
 
 The restore proves the service works. It does not make the restored state current or safe.
 Everything comes back as of the capsule's `created_at`: users, passwords, SCIM state,
-sessions. Anything you revoked or changed after that moment is
-undone, and a session cookie minted before the capsule still validates against the restored
-server, because sessions are database rows and the capsule brought them back.
+sessions. Anything you revoked or changed after that moment is undone.
 
-1. Revoke sessions. There is no per-user control in the UI and no global revoke; sessions
-   are rows in the `sessions` table. Delete them all, once, before anyone signs in:
-
-   ```bash
-   docker compose down
-   sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;'
-   docker compose up -d
-   ```
-
-   Everyone signs in again. After hardware loss that is enough.
+1. Sessions: Step 3 deleted the restored ones before the server started. There is no
+   per-user control in the UI and no global revoke. After hardware loss that is enough.
 2. Walk the old audit log in `old-data/ky_server.db` from `created_at` to the moment the old
    server was lost (the restored server's log stops at `created_at`), and re-apply what
    happened after the capsule: disabled accounts, rotated passwords, SCIM changes.
@@ -273,8 +274,8 @@ server, because sessions are database rows and the capsule brought them back.
    - The KyRecovery pairing token: ask the KyRecovery admin to revoke this service and pair
      again from the screen; the same key comes back, so the pairing is accepted.
 
-   Then have every admin re-enrol their second factor, and confirm with a Back up now so the
-   recovered server has a capsule that reflects the rotation.
+   Then confirm with a Back up now so the recovered server has a capsule that reflects the
+   rotation.
 
 ## Afterwards
 
