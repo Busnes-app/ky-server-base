@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Busnes-app/ky_server_base/internal/auth"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
 	"github.com/Busnes-app/ky_server_base/internal/sso"
 	"github.com/Busnes-app/ky_server_base/internal/store"
@@ -25,23 +26,24 @@ func (s *Server) handleKySignOnLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store verifier in short-lived cookie
+	// Store verifier and nonce in short-lived cookies (__Host- on https, so Path=/).
+	secure := s.config.Security.CookieSecure
 	http.SetCookie(w, &http.Cookie{
-		Name:     "ky_pkce_" + state,
+		Name:     auth.CookieName("ky_pkce_"+state, secure),
 		Value:    verifier,
 		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   s.config.Security.CookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
-		Name:     "ky_nonce_" + state,
+		Name:     auth.CookieName("ky_nonce_"+state, secure),
 		Value:    nonce,
-		Path:     "/api/sso/kysignon/callback",
+		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   s.config.Security.CookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -52,13 +54,13 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 
-	cookie, err := r.Cookie("ky_pkce_" + state)
+	cookie, err := r.Cookie(auth.CookieName("ky_pkce_"+state, s.config.Security.CookieSecure))
 	if err != nil || cookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO state")
 		return
 	}
 	verifier := cookie.Value
-	nonceCookie, err := r.Cookie("ky_nonce_" + state)
+	nonceCookie, err := r.Cookie(auth.CookieName("ky_nonce_"+state, s.config.Security.CookieSecure))
 	if err != nil || nonceCookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO nonce")
 		return

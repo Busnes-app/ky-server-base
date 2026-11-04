@@ -16,12 +16,19 @@ an oversized JSON body, normally returns 400 rather than a dedicated 413.
 
 Authenticate with the `ky_session` cookie or `Authorization: Bearer <session-token>`.
 The bearer token takes precedence. The session cookie is HttpOnly and SameSite=Lax;
-`KY_COOKIE_SECURE` controls Secure. Sessions expire after seven days. SCIM uses a
+`KY_COOKIE_SECURE` controls Secure. With Secure cookies (the default when `KY_APP_URL`
+is https) every cookie this server sets and reads carries the `__Host-` prefix
+(`__Host-ky_session`, `__Host-ky_csrf`, and the KyIdentity sign-in's
+`__Host-ky_pkce_<state>`/`__Host-ky_nonce_<state>`, all `Path=/` without `Domain`), so
+another host under the same domain cannot plant one; the bare names are ignored there.
+Plain HTTP keeps the bare names. Switching to Secure cookies, including the upgrade that
+introduced the prefix, signs every browser out once. Sessions expire after seven days. SCIM uses a
 separate configured bearer token; it does not accept a login session as provisioning
 authority. The directory-sync webhook uses a signature instead of a login session.
 
 For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
-`ky_session` cookie requires `X-CSRF-Token` to equal the `ky_csrf` cookie. This also
+session cookie requires `X-CSRF-Token` to equal the CSRF cookie (`ky_csrf`, or
+`__Host-ky_csrf` with Secure cookies). This also
 applies when an Authorization header is present alongside the cookie. Login and the
 signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
@@ -398,7 +405,7 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
 | `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header |
-| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
+| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain, plain HTTP only: set together with Secure cookies (`KY_COOKIE_SECURE`, true for an https `KY_APP_URL`) it stops startup, because `__Host-` cookies take no domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
 | `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup. Set it behind a reverse proxy, or every client counts as the proxy for sign-in limits; startup logs a warning when `KY_APP_URL` is https and this is empty |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |

@@ -21,6 +21,17 @@ const (
 
 var ErrPasswordChangeRequired = errors.New("password change required")
 
+// CookieName is the name a cookie has on this server: with Secure (https) cookies it carries
+// the __Host- prefix, which the browser accepts only from this host (Secure, Path=/, no
+// Domain), so a sibling subdomain cannot plant a session, CSRF or SSO state cookie.
+// Plain HTTP keeps the bare name.
+func CookieName(name string, secure bool) string {
+	if secure {
+		return "__Host-" + name
+	}
+	return name
+}
+
 type SessionManager struct {
 	store  store.Store
 	config config.SecurityConfig
@@ -71,7 +82,7 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 
 	// Set HttpOnly session cookie
 	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
+		Name:     CookieName(SessionCookieName, sm.config.CookieSecure),
 		Value:    rawToken,
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
@@ -84,7 +95,7 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 	// Generate CSRF token for state-modifying endpoints
 	csrfToken := crypto.RandomHex(24)
 	http.SetCookie(w, &http.Cookie{
-		Name:     CSRFCookieName,
+		Name:     CookieName(CSRFCookieName, sm.config.CookieSecure),
 		Value:    csrfToken,
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
@@ -109,7 +120,7 @@ func (sm *SessionManager) AuthenticateRequest(r *http.Request) (*store.User, *st
 
 	// 2. Fallback to HttpOnly cookie
 	if rawToken == "" {
-		if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.CookieSecure)); err == nil && cookie.Value != "" {
 			rawToken = cookie.Value
 		}
 	}
@@ -146,8 +157,9 @@ func (sm *SessionManager) AuthenticateRequest(r *http.Request) (*store.User, *st
 	return user, sess, nil
 }
 
-func ValidateCSRF(r *http.Request) bool {
-	cookie, err := r.Cookie(CSRFCookieName)
+// ValidateCSRF compares the X-CSRF-Token header with the CSRF cookie (named per CookieName).
+func ValidateCSRF(r *http.Request, secure bool) bool {
+	cookie, err := r.Cookie(CookieName(CSRFCookieName, secure))
 	if err != nil || cookie.Value == "" {
 		return false
 	}
@@ -162,7 +174,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 		rawToken = ""
 	}
 	if rawToken == "" {
-		if cookie, err := r.Cookie(SessionCookieName); err == nil {
+		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.CookieSecure)); err == nil {
 			rawToken = cookie.Value
 		}
 	}
@@ -173,7 +185,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
+		Name:     CookieName(SessionCookieName, sm.config.CookieSecure),
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),
@@ -184,7 +196,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 	})
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     CSRFCookieName,
+		Name:     CookieName(CSRFCookieName, sm.config.CookieSecure),
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),

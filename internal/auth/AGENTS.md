@@ -12,6 +12,7 @@ Owns session issuance and verification, the client-address helpers, and PoW chal
 - `Session.CreatedAt` is the credential time. `IssueSession` stamps now.
 - `IssueSSOSession` stores the provider's `sid` and dates the session by the ID token's `iat`, so back-channel logout by `sid` or by subject can end it; it fails with `store.ErrSSOSessionEnded` when that login was already ended.
 - Active sessions are stored with SHA-256 hashed tokens and verified against secure HttpOnly / SameSite cookies or Bearer headers.
+- `CookieName` names every cookie the server sets or reads: with `CookieSecure` it adds the `__Host-` prefix (Secure, `Path=/`, no Domain), so a sibling subdomain cannot plant a session, CSRF or SSO state cookie; bare names are then never read. `ValidateCSRF` takes the same flag.
 - Session authentication rejects inactive accounts and deletes their presented session.
 - PoW solutions must carry unexpired server-signed challenge metadata. `VerifyPoWSolution` with a `PoWSpent` set accepts each solved salt once until it expires; salts are recorded only after the signature and work check out, and expired ones are pruned whenever the set has doubled; there is no cap that would let a solution through unrecorded.
 - The default puzzle size is `config.DefaultPoWDifficulty`, measured so the browser's median solve is about one second; re-measure before changing it.

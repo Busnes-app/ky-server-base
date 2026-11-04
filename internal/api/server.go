@@ -319,7 +319,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isUnsafeMethod(r.Method) && hasSessionCookie(r) && !csrfExempt(r.URL.Path) && !auth.ValidateCSRF(r) {
+	if isUnsafeMethod(r.Method) && s.hasSessionCookie(r) && !csrfExempt(r.URL.Path) && !auth.ValidateCSRF(r, s.config.Security.CookieSecure) {
 		s.writeError(w, http.StatusForbidden, "Invalid CSRF token")
 		return
 	}
@@ -349,8 +349,8 @@ func isUnsafeMethod(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
-func hasSessionCookie(r *http.Request) bool {
-	cookie, err := r.Cookie(auth.SessionCookieName)
+func (s *Server) hasSessionCookie(r *http.Request) bool {
+	cookie, err := r.Cookie(auth.CookieName(auth.SessionCookieName, s.config.Security.CookieSecure))
 	return err == nil && cookie.Value != ""
 }
 

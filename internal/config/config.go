@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -178,6 +179,13 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("KY_TRUSTED_PROXIES: %w", err)
 	}
 
+	// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
+	cookieSecure := getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://"))
+	cookieDomain := getEnv("KY_COOKIE_DOMAIN", "")
+	if cookieSecure && cookieDomain != "" {
+		return nil, errors.New("KY_COOKIE_DOMAIN: not allowed with Secure (https) cookies: they are __Host- cookies, which browsers refuse with a Domain, so that no other host under that domain can set them; leave KY_COOKIE_DOMAIN empty")
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Host:         host,
@@ -197,11 +205,10 @@ func LoadFromEnv() (*Config, error) {
 			ConnMaxLifetime: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
-			SessionSecret: sessionSecret,
-			EncryptionKey: encryptionKey,
-			// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
-			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://")),
-			CookieDomain:   getEnv("KY_COOKIE_DOMAIN", ""),
+			SessionSecret:  sessionSecret,
+			EncryptionKey:  encryptionKey,
+			CookieSecure:   cookieSecure,
+			CookieDomain:   cookieDomain,
 			SessionTTL:     7 * 24 * time.Hour,
 			TrustedProxies: trustedProxies,
 		},
