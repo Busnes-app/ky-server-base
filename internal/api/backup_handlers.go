@@ -113,6 +113,10 @@ func (s *Server) handleBackupDrill(w http.ResponseWriter, r *http.Request) {
 			Checks: []recoveryclient.Check{{Name: "Database", Passed: false, Message: err.Error()}}})
 		return
 	}
+	if errors.Is(err, capsule.ErrCapsuleTooLarge) {
+		s.writeError(w, http.StatusRequestEntityTooLarge, recoveryclient.TooLargeMessage)
+		return
+	}
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to collect backup files")
 		return
@@ -157,6 +161,10 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 	payload, err := backup.Collect(ctx, s.config, appVersion)
 	if errors.Is(err, backup.ErrNoDatabaseSnapshot) {
 		s.writeError(w, http.StatusPreconditionFailed, err.Error())
+		return
+	}
+	if errors.Is(err, capsule.ErrCapsuleTooLarge) {
+		s.writeError(w, http.StatusRequestEntityTooLarge, recoveryclient.TooLargeMessage)
 		return
 	}
 	if err != nil {
