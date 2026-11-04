@@ -42,6 +42,14 @@ These are human summaries, not a raw version-control log.
   (`__Host-ky_session`, `__Host-ky_csrf`), so a page on another host under the same
   domain can no longer plant its own session and sign a visitor into the wrong account.
   Plain HTTP keeps the old names.
+- A SQLite `KY_DB_DSN` that is a server URL (such as a `postgres://` URL in `.env`, while
+  compose pins `KY_DB_DRIVER=sqlite`) stops the server at startup. Before, it quietly
+  created a SQLite file named after the URL outside the data volume, and the data was lost
+  when the container was recreated. A `file:` URI no longer creates a stray directory.
+- The restore runbook hands the restored files to root before the first start; before,
+  the root container refused the operator-owned `encryption.key` and never started.
+- SCIM: a PATCH that removes `externalId` now unlinks it (it answered 200 and kept it),
+  and concurrent PATCHes of different attributes of one user no longer undo each other.
 
 ### Upgrade impact
 
@@ -57,6 +65,9 @@ These are human summaries, not a raw version-control log.
   through it, or they become users here. Local accounts are unaffected.
 - SCIM: an IdP that creates a user who already signed in through KyIdentity now gets that
   account (201) and manages it from then on.
+- A SQLite install whose `KY_DB_DSN` is a `scheme://` URL now refuses to start; it was
+  never writing to the data volume. Set `KY_DB_DRIVER=postgres` in the compose file or an
+  overlay for PostgreSQL.
 
 ## Maintaining notes
 

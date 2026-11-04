@@ -18,7 +18,7 @@ Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `
 - Migration 8 drops `device_pairings`: QR device pairing was removed because no client used it.
 - Migration 6 adds `sessions.sso_sid`, `sso_logouts` (by `sid`) and `sso_subject_logouts` (by provider and subject, with a `cutoff`; it never moves back). `EndSSOSession` and `EndSSOSubject` commit their fence before deleting sessions, and `CreateSession` checks both fences only after its insert commits, so under read committed a logout racing a login always ends it; a fenced create deletes its row and returns `ErrSSOSessionEnded`. The subject fence matches sessions by `created_at`, so it relies on SSO sessions being dated by the ID token's `iat`. Expired fences are pruned on the next call that writes one.
 - `store.Open(ctx, cfg)` initializes and auto-migrates the configured database backend.
-- SQLite runs in WAL mode with foreign keys enabled.
+- SQLite runs in WAL mode with foreign keys enabled. `openSQLite` takes a path or a `file:` URI (the same parse as `internal/backup`) and refuses a server URL (`scheme://`) without echoing it, so a PostgreSQL DSN under the sqlite driver never becomes a stray file.
 - PostgreSQL queries are rebound dynamically from standard positional parameters.
 
 ## Verification
