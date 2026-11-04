@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/config"
 	_ "modernc.org/sqlite"
@@ -129,8 +130,20 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 	if err := recoveryclient.SQLiteSnapshot(ctx, db, path); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoDatabaseSnapshot, err)
 	}
+	// A capsule member cannot exceed the library limit, so refuse before reading a snapshot
+	// that could not be sealed anyway: reading a large one could exhaust the server's memory.
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxSnapshotBytes {
+		return nil, fmt.Errorf("%w: the database snapshot is %d bytes, a capsule member may be %d", capsule.ErrCapsuleTooLarge, info.Size(), maxSnapshotBytes)
+	}
 	return os.ReadFile(path)
 }
+
+// maxSnapshotBytes is the largest database snapshot a capsule can carry (a variable for tests).
+var maxSnapshotBytes = recoveryclient.MaxCapsuleFileBytes
 
 // Members names what a capsule carries, for the screen; it is what Collect would seal now.
 func Members(cfg *config.Config) []string {

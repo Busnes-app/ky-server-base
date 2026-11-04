@@ -334,7 +334,7 @@ jobs:
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, postgres, web, browser, security, smoke, docker]
+    needs: [go, postgres, web, browser, security, smoke, docker, reuse]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # No concurrency group here on purpose: GitHub cancels a *pending* job when a

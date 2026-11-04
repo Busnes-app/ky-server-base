@@ -22,7 +22,8 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   WAL mode, so a plain file read misses uncheckpointed commits) and returns
   `ErrNoDatabaseSnapshot` for any other driver, and (`CheckDatabasePath`) for a SQLite DSN
   other than `<DataDir>/ky_server.db`, the only path a capsule restores to, so a capsule without a consistent database is
-  never sealed. It also carries the encryption key (`data/encryption.key`, required — restores
+  never sealed. A snapshot larger than the capsule member limit is refused with
+  `capsule.ErrCapsuleTooLarge` (HTTP 413) before it is read into memory. It also carries the encryption key (`data/encryption.key`, required — restores
   a database whose sealed KyRecovery token is unreadable otherwise) and the pinned recovery public key
   (`data/recovery.pub`, only when paired).
 - `Checks(dir, opened)` reads the opened capsule's manifest, normalizes JSON lists and
