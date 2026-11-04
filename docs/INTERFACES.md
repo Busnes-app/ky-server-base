@@ -277,7 +277,9 @@ Adapter limits matter when configuring a provisioning connector:
   the single stored value (the email is emitted as type `work`, primary; the role as
   primary). A replace whose emails/roles selector matches nothing is 400 `noTarget`;
   a filtered add creates a missing email. Remove clears `emails`, resets `roles` to
-  `user` and sets `displayName` back to `userName`. Paths into attributes not stored
+  `user`, sets `displayName` back to `userName` and clears `externalId` (an account a
+  KyIdentity sign-in adopted keeps its subject). SCIM user writes are applied one at a
+  time, so concurrent PATCHes of different attributes all take effect. Paths into attributes not stored
   here (`name.*`, `phoneNumbers`, `addresses`, email/role `type`/`primary`/`display`)
   are ignored with 200.
 - Group PATCH applies each op by type to displayName, externalId and members:

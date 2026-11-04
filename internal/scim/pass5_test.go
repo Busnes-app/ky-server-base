@@ -3,7 +3,9 @@ package scim_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/Busnes-app/ky_server_base/internal/scim"
@@ -79,5 +81,56 @@ func TestSCIMCreateTakesOverTheKyIdentityAccount(t *testing.T) {
 	// The take-over cannot grant admin with KY_SCIM_ALLOW_ADMIN off, and changes nothing.
 	if code, _ := create(map[string]any{"userName": "eve", "externalId": "sub-eve", "roles": []any{map[string]any{"value": "admin"}}}); code != http.StatusBadRequest || managed("usr_eve").SCIMManaged {
 		t.Fatalf("admin grant: %d", code)
+	}
+}
+
+// Removing externalId unlinks the account, so a KyIdentity sign-in under the old subject can
+// no longer adopt it (it answered 200 and kept the link).
+func TestSCIMExternalIDRemoveUnlinks(t *testing.T) {
+	st, do := scopedSCIM(t, false)
+	ctx := context.Background()
+	if w := do("POST", "/scim/v2/Users", map[string]any{"schemas": []string{scim.SchemaUser}, "userName": "fay", "externalId": "sub-fay"}); w.Code != http.StatusCreated {
+		t.Fatal(w.Code, w.Body)
+	}
+	u, _ := st.Users().GetUserByUsername(ctx, "fay")
+	if w := do("PATCH", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": patchSchema, "Operations": []any{map[string]any{"op": "remove", "path": "externalId"}}}); w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body)
+	}
+	if _, err := st.Users().GetUserBySSO(ctx, "scim", "sub-fay"); err == nil {
+		t.Fatal("externalId remove kept the link")
+	}
+}
+
+// Concurrent PATCHes of different attributes of one user both take effect.
+func TestSCIMConcurrentUserPatchesKeepEveryChange(t *testing.T) {
+	st, do := scopedSCIM(t, false)
+	ctx := context.Background()
+	if w := do("POST", "/scim/v2/Users", map[string]any{"schemas": []string{scim.SchemaUser}, "userName": "gus"}); w.Code != http.StatusCreated {
+		t.Fatal(w.Code, w.Body)
+	}
+	u, _ := st.Users().GetUserByUsername(ctx, "gus")
+	const n = 40
+	op := func(i int, attr string) map[string]any {
+		if attr == "emails" {
+			return map[string]any{"op": "replace", "path": "emails", "value": []any{map[string]any{"value": fmt.Sprintf("gus%d@example.com", i)}}}
+		}
+		return map[string]any{"op": "replace", "path": "displayName", "value": fmt.Sprintf("Gus %d", i)}
+	}
+	var wg sync.WaitGroup
+	for _, attr := range []string{"displayName", "emails"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range n {
+				if w := do("PATCH", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": patchSchema, "Operations": []any{op(i, attr)}}); w.Code != http.StatusOK {
+					t.Error(w.Code, w.Body)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if got, _ := st.Users().GetUserByID(ctx, u.ID); got.DisplayName != fmt.Sprintf("Gus %d", n-1) || got.Email != fmt.Sprintf("gus%d@example.com", n-1) {
+		t.Fatalf("a concurrent PATCH was undone: %q %q", got.DisplayName, got.Email)
 	}
 }

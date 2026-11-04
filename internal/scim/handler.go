@@ -88,6 +88,9 @@ func writeAuthError(w http.ResponseWriter, status int, detail string) {
 type userResourceHandler struct {
 	store      store.Store
 	allowAdmin bool
+	// mu serializes SCIM user writes, so two PATCHes read from the same row cannot each write
+	// back the other's stale fields (the store compares only role, status and subject).
+	mu sync.Mutex
 }
 
 // errAdminGrant refuses a SCIM write that would make an account an administrator.
@@ -310,6 +313,8 @@ func applyUserPatch(user *store.User, operations []protocol.PatchOperation) erro
 				applyUserValue(user, attr, op.Value)
 			} else if attr == "displayname" {
 				user.DisplayName = user.Username
+			} else if attr == "externalid" {
+				user.SSOSubject = "" // update keeps an adopted account's subject
 			}
 			continue
 		}
@@ -367,6 +372,8 @@ func selects(e interface{}, element map[string]interface{}) bool {
 // concurrent write got there first, it re-reads and re-applies, so a stale read can never put
 // back a role or status another request just took away.
 func (h *userResourceHandler) update(r *http.Request, id string, change func(*store.User) error) (protocol.Resource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	for attempt := 0; ; attempt++ {
 		user, err := h.managedUser(r, id)
 		if err != nil {
