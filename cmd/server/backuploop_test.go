@@ -121,4 +121,9 @@ func TestComposeForwardsRotatableSecrets(t *testing.T) {
 			t.Errorf("docker-compose.yml does not forward %s from .env", name)
 		}
 	}
+	// Every other documented setting (KY_KYSIGNON_*, KY_TRUSTED_PROXIES, ...) reaches the
+	// container through .env itself, which an install may not have yet.
+	if !regexp.MustCompile(`(?m)^    env_file:\n      - path: \.env\n        required: false$`).Match(raw) {
+		t.Error("docker-compose.yml does not read optional .env into the app's environment")
+	}
 }

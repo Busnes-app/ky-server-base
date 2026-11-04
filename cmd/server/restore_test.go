@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,6 +16,11 @@ import (
 
 func sealFixture(t *testing.T, service string) (string, []string) {
 	t.Helper()
+	return sealFiles(t, service, []recoveryclient.File{{Path: "data/x.db", Data: []byte("payload"), Mode: 0600}})
+}
+
+func sealFiles(t *testing.T, service string, files []recoveryclient.File) (string, []string) {
+	t.Helper()
 	priv, err := recoverykey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -24,8 +30,7 @@ func sealFixture(t *testing.T, service string) (string, []string) {
 		t.Fatal(err)
 	}
 	key := recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}
-	payload := recoveryclient.Payload{ServiceName: service, AppVersion: "1.0.0",
-		Files: []recoveryclient.File{{Path: "data/x.db", Data: []byte("payload"), Mode: 0600}}}
+	payload := recoveryclient.Payload{ServiceName: service, AppVersion: "1.0.0", Files: files}
 	raw, _, err := recoveryclient.Seal(payload, key)
 	if err != nil {
 		t.Fatal(err)
@@ -75,5 +80,48 @@ func TestRestoreRefusesOneShare(t *testing.T) {
 	path, shares := sealFixture(t, "busnes_app")
 	if err := restore(path, t.TempDir(), "busnes_app", shares[:1], &bytes.Buffer{}); err == nil {
 		t.Fatal("one share of a 2-of-3 kit was accepted")
+	}
+}
+
+// A restored copy may be a drill beside the live server: it must not deposit on its own,
+// even when the old server had a schedule saved.
+func TestRestoreTurnsScheduledDepositsOff(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "ky_server.db")
+	db, err := sql.Open("sqlite", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at DATETIME NOT NULL);
+INSERT INTO server_settings VALUES ('backup_interval_sec', '86400', '2026-01-01 00:00:00');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, shares := sealFiles(t, "busnes_app", []recoveryclient.File{{Path: "data/ky_server.db", Data: raw, Mode: 0600}})
+	target := t.TempDir()
+	var out bytes.Buffer
+	if err := restore(path, target, "busnes_app", shares, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Scheduled deposits are OFF") {
+		t.Fatalf("restore does not say deposits are off: %s", out.String())
+	}
+	db, err = sql.Open("sqlite", filepath.Join(target, "data", "ky_server.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var v string
+	if err := db.QueryRow(`SELECT value FROM server_settings WHERE key = 'backup_interval_sec'`).Scan(&v); err != nil || v != "0" {
+		t.Fatalf("backup_interval_sec = %q, %v; want 0", v, err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(target, "data"))
+	if len(entries) != 1 {
+		t.Fatalf("restore left extra files beside the database: %v", entries)
 	}
 }

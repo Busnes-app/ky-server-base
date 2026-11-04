@@ -7,7 +7,7 @@ The scaffold every Busnes.app server is built from: Go backend, embedded React P
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
 disaster recovery through the suite's KyRecovery.
 
-Published image:
+Published image (Docker Compose 2.24.0 or later):
 
 ```bash
 make ci        # gofmt, vet, race tests, smoke test
