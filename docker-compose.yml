@@ -59,6 +59,7 @@ services:
     # address when one fronts this service, e.g. KY_TRUSTED_PROXIES=172.18.0.2/32 (never a
     # whole bridge range like 172.16.0.0/12, which trusts every other container; 0.0.0.0/0
     # and ::/0 are refused). The entries above win over .env; an overlay's env_file wins over it.
+    # The optional form needs Compose 2.24.0 or later.
     env_file:
       - path: .env
         required: false

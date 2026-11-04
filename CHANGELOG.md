@@ -50,7 +50,9 @@ These are human summaries, not a raw version-control log.
   upgrading: a `KY_ENV`, `KY_COOKIE_*`, `KY_KYSIGNON_*` or `KY_TRUSTED_PROXIES` line left
   there now takes effect, and a `KY_KYSIGNON_HMAC_SECRET` shorter than 16 bytes or an
   invalid `KY_TRUSTED_PROXIES` entry stops the server at startup, as it already did
-  outside compose. An overlay's own `env_file` still wins over `.env`.
+  outside compose. An overlay's own `env_file` wins over `.env`.
+- Compose 2.24.0 or later is now required for the base `docker-compose.yml` (optional
+  `env_file`); older Compose refuses the file. Check with `docker compose version`.
 - A copy restored with the new `restore` command does not deposit until an admin turns
   the schedule back on.
 
