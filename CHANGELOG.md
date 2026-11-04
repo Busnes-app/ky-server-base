@@ -28,33 +28,35 @@ These are human summaries, not a raw version-control log.
 ## Current source
 ### Changes
 
-- `restore` turns scheduled deposits off in the restored database and says so, so a
-  drill or migration run beside the server still in service cannot deposit a stale
-  copy under the same pairing. Turn the schedule back on in Backup & recovery once the
-  restored server is the one in service.
-- The restore runbook deletes the restored sessions before the server first starts,
-  instead of after an admin has signed in, so a session revoked or stolen after the
-  capsule cannot sign in again in between. It no longer asks admins to re-enrol a
-  second factor, which this base no longer has.
-- `docker-compose.yml` passes `.env` to the container (optional `env_file`), so
-  `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_*`, `KY_SSO_AUTO_PROVISION` and every other
-  documented setting can be set there. Before, KyIdentity sign-in configured in `.env`
-  answered "not enabled", and the trusted-proxies warning could only be cleared by
-  editing the tracked compose file. Values the compose file sets itself still win.
+- KyIdentity sign-in applies the role KyIdentity sends, every time: `admin` in the ID
+  token's per-app `roles` makes the account an admin here, any other `roles` makes it a
+  user, and a token without `roles` uses the legacy `role`. A role change signs the
+  account out everywhere else and is audited as `sso.role_changed`. Before, sign-in never
+  changed the role, so an admin demoted in KyIdentity stayed admin here unless the signed
+  directory webhook was configured.
+- SCIM `POST /Users` for someone who already signed in through KyIdentity takes that
+  account over (201 with its existing id) instead of creating a second account (when
+  `externalId` was the KyIdentity subject) or answering 409 forever (when only the
+  `userName` matched). Local accounts are never taken over.
+- On https, the session, CSRF and KyIdentity sign-in cookies are `__Host-` cookies
+  (`__Host-ky_session`, `__Host-ky_csrf`), so a page on another host under the same
+  domain can no longer plant its own session and sign a visitor into the wrong account.
+  Plain HTTP keeps the old names.
 
 ### Upgrade impact
 
 - No migration. Restart onto the new image.
-- Compose: every variable in `.env` now reaches the container on the next
-  `docker compose up -d`, not only the ones the compose file lists. Check `.env` before
-  upgrading: a `KY_ENV`, `KY_COOKIE_*`, `KY_KYSIGNON_*` or `KY_TRUSTED_PROXIES` line left
-  there now takes effect, and a `KY_KYSIGNON_HMAC_SECRET` shorter than 16 bytes or an
-  invalid `KY_TRUSTED_PROXIES` entry stops the server at startup, as it already did
-  outside compose. An overlay's own `env_file` wins over `.env`.
-- Compose 2.24.0 or later is now required for the base `docker-compose.yml` (optional
-  `env_file`); older Compose refuses the file. Check with `docker compose version`.
-- A copy restored with the new `restore` command does not deposit until an admin turns
-  the schedule back on.
+- On https (Secure cookies, the default for an https `KY_APP_URL`), everyone is signed
+  out once by the upgrade and signs in again. Scripts that read the `ky_session` or
+  `ky_csrf` cookie by name on https must use the `__Host-` names.
+- `KY_COOKIE_DOMAIN` together with Secure cookies now stops the server at startup with a
+  message naming it. Remove `KY_COOKIE_DOMAIN` from `.env` before upgrading an https
+  install.
+- KyIdentity: on the next sign-in, accounts take the role KyIdentity sends for this app.
+  Check that this app's `admin` role is assigned in KyIdentity to every admin who signs in
+  through it, or they become users here. Local accounts are unaffected.
+- SCIM: an IdP that creates a user who already signed in through KyIdentity now gets that
+  account (201) and manages it from then on.
 
 ## Maintaining notes
 
@@ -77,6 +79,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-11-04 — ab2c472
+
+Source: [ab2c472fccbce7388c2f420bf557584f2a524100](https://github.com/Busnes-app/ky-server-base/commit/ab2c472fccbce7388c2f420bf557584f2a524100) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/41818132521)
+
+- **Changes:** `restore` turns scheduled deposits off in the restored database and says so, so a drill or migration run beside the server still in service cannot deposit a stale copy under the same pairing. The restore runbook deletes the restored sessions before the server first starts, and no longer asks admins to re-enrol a second factor. `docker-compose.yml` passes `.env` to the container (optional `env_file`), so `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_*`, `KY_SSO_AUTO_PROVISION` and every other documented setting can be set there; values the compose file sets itself still win.
+- **Upgrade impact:** No migration. Compose: every variable in `.env` now reaches the container on the next `docker compose up -d`; check `.env` for leftover `KY_ENV`, `KY_COOKIE_*`, `KY_KYSIGNON_*` or `KY_TRUSTED_PROXIES` lines, which now take effect. Compose 2.24.0 or later is required. A copy restored with `restore` does not deposit until an admin turns the schedule back on.
 
 ### 2026-11-04 — 1354417
 
