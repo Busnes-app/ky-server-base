@@ -103,11 +103,41 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	return users.RecordDirectoryEvent(context.WithoutCancel(ctx), "kysignon", payload.ID, payload.Timestamp)
 }
 
+// AdoptSCIMUser links a SCIM-provisioned account to KyIdentity: the row whose externalId is
+// this subject becomes a "kysignon" row and stays SCIM-managed, so back-channel logout and
+// directory events reach it and the IdP keeps managing it by id. Sign-in and directory events
+// both call it, so neither creates a second row for the same person. ErrNotFound when none;
+// adopted reports whether this call made the link.
+func AdoptSCIMUser(ctx context.Context, users store.UserStore, subject string) (user *store.User, adopted bool, err error) {
+	if subject == "" { // SCIM rows sent without an externalId carry an empty subject
+		return nil, false, store.ErrNotFound
+	}
+	user, err = users.GetUserBySSO(ctx, "scim", subject)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := users.LinkSSOIdentity(ctx, user.ID, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
+		user, err = users.GetUserBySSO(ctx, "kysignon", subject) // a concurrent call linked it first
+		return user, false, err
+	} else if err != nil {
+		return nil, false, err
+	}
+	user.SSOProvider = "kysignon"
+	return user, true, nil
+}
+
 // apply makes the local account match one directory event.
 func (k *KySignOnClient) apply(ctx context.Context, payload KySignOnSyncPayload) error {
 	switch payload.Event {
 	case "user.created", "user.updated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			var adopted bool
+			existing, adopted, err = AdoptSCIMUser(ctx, k.store.Users(), payload.ID)
+			if adopted {
+				_ = k.store.Audit().LogAudit(ctx, &store.AuditRecord{UserID: existing.ID, Action: "sso.scim_account_linked", Resource: existing.Username})
+			}
+		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}

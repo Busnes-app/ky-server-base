@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
+	"github.com/Busnes-app/ky_server_base/internal/sso"
 	"github.com/Busnes-app/ky_server_base/internal/store"
 	"golang.org/x/oauth2"
 )
@@ -117,25 +118,14 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// adoptSCIMUser links a SCIM-provisioned account to its first KyIdentity sign-in: the row whose
-// externalId is this KyIdentity subject becomes a "kysignon" row and stays SCIM-managed, so
-// back-channel logout reaches it and the IdP keeps managing it by id. ErrNotFound when none.
+// adoptSCIMUser links the SCIM-provisioned account whose externalId is this subject (see
+// sso.AdoptSCIMUser) and audits the link. ErrNotFound when none.
 func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, error) {
-	if subject == "" { // SCIM rows sent without an externalId carry an empty subject
-		return nil, store.ErrNotFound
+	user, adopted, err := sso.AdoptSCIMUser(r.Context(), s.store.Users(), subject)
+	if adopted {
+		_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
 	}
-	user, err := s.store.Users().GetUserBySSO(r.Context(), "scim", subject)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.store.Users().LinkSSOIdentity(r.Context(), user.ID, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
-		return s.store.Users().GetUserBySSO(r.Context(), "kysignon", subject) // a concurrent sign-in linked it first
-	} else if err != nil {
-		return nil, err
-	}
-	user.SSOProvider = "kysignon"
-	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
-	return user, nil
+	return user, err
 }
 
 func (s *Server) handleKySignOnSyncWebhook(w http.ResponseWriter, r *http.Request) {

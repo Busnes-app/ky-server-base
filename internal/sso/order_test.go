@@ -127,3 +127,25 @@ func TestFailedWebhookDoesNotMoveTheOrder(t *testing.T) {
 		t.Fatalf("the retried event was not applied: role %q", u.Role)
 	}
 }
+
+// A directory event for a subject SCIM already provisioned adopts that row instead of
+// creating a second account (or failing on its username), as sign-in does.
+func TestKySignOnWebhookAdoptsTheSCIMRow(t *testing.T) {
+	st := openOrderStore(t)
+	ctx := context.Background()
+	scimRow := &store.User{ID: "usr_scim", Username: "alice", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "sub-a", SCIMManaged: true}
+	if err := st.Users().CreateUser(ctx, scimRow); err != nil {
+		t.Fatal(err)
+	}
+	c := sso.NewKySignOnClient(config.SSOConfig{KySignOnHMACSecret: orderSecret}, st)
+	if err := sendEvent(t, c, sso.KySignOnSyncPayload{Event: "user.created", ID: "sub-a", Username: "alice", DisplayName: "Alice A", Timestamp: time.Now().Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.Users().GetUserBySSO(ctx, "kysignon", "sub-a")
+	if err != nil || u.ID != "usr_scim" || !u.SCIMManaged || u.DisplayName != "Alice A" {
+		t.Fatalf("the SCIM row was not adopted: %+v %v", u, err)
+	}
+	if n, _ := st.Users().CountUsers(ctx); n != 1 {
+		t.Fatalf("%d accounts, want 1", n)
+	}
+}

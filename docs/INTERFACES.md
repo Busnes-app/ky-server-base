@@ -174,7 +174,9 @@ Events are ordered per subject: one whose `timestamp` is older than the newest e
 already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
 event cannot undo a newer change; an equal timestamp is applied. A failed event does not
 count as applied, so the sender's retry applies it. An event without `id` returns 401.
-Create/update defaults an empty role to `user` and status to
+A create/update for a subject with no KyIdentity account first adopts the
+SCIM-provisioned account whose `externalId` is that subject, as sign-in does, instead
+of creating a second account. Create/update defaults an empty role to `user` and status to
 `active`; privilege or status changes revoke sessions in the same transaction.
 Deactivation sets `inactive` and revokes sessions; deletion removes the matching
 provider user. Unknown events currently return

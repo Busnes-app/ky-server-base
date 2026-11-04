@@ -31,6 +31,7 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
   a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
   `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
+- `AdoptSCIMUser` is the one adoption routine: the KyIdentity callback and `user.created`/`user.updated` webhook events call it when no `("kysignon", sub)` row exists, so neither path creates a second row for a SCIM-provisioned person.
 - Directory webhook timestamps are accepted only within five minutes, and events are ordered per subject: under the client's `order` mutex an event older than `LastDirectoryEvent` is acknowledged and dropped; otherwise it is applied and only then recorded with `RecordDirectoryEvent` (never moves back), so a failed event is retried by the sender and nothing is ever undone. An event without `id` is refused. Status or role changes revoke the user's sessions in the same transaction (`UpdateUserProfile`); deactivation deletes sessions first, so it also ends them when the row was already inactive and a failure commits nothing.
 
 ## Verification
