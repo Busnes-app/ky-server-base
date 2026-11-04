@@ -365,10 +365,10 @@ Source: [environment loader](../internal/config/config.go). Unless stated otherw
 nonempty string values are trimmed; invalid integer values use their default.
 Booleans accept `true`, `1`, `yes` or `on` (case-insensitive); other explicitly set
 values are false. Environment variables configure the process; there is no `.env`
-reader in the binary. The shipped `docker-compose.yml` forwards from its `.env` only the
-variables it lists (`KY_APP_URL`, `KY_BACKUP_*`, `KY_SESSION_SECRET`,
-`KY_SCIM_TOKEN`, `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_*`, `KY_SSO_AUTO_PROVISION`,
-`KY_SCIM_ALLOW_ADMIN`); anything else goes in an override file.
+reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the container
+(optional `env_file`), so every variable below can be set there; the values its
+`environment` list sets explicitly (`KY_PORT`, `KY_DATA_DIR`, `KY_DB_DRIVER`,
+`KY_SSO_ENABLED`, `KY_SCIM_ENABLED`, ...) win over `.env`.
 
 | Variable | Default | Meaning |
 |---|---|---|

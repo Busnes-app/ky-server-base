@@ -48,24 +48,20 @@ services:
       - KY_BACKUP_KEEP=${KY_BACKUP_KEEP:-7}
       - KY_BACKUP_DEPOSIT_INTERVAL=${KY_BACKUP_DEPOSIT_INTERVAL:-24h}
       - KY_BACKUP_ALLOW_PRIVATE_RECOVERY=${KY_BACKUP_ALLOW_PRIVATE_RECOVERY:-false}
-      # Set KY_TRUSTED_PROXIES in .env to the reverse proxy container's own address when one
-      # fronts this service, e.g. KY_TRUSTED_PROXIES=172.18.0.2/32 (never a whole bridge range
-      # like 172.16.0.0/12, which trusts every other container). 0.0.0.0/0 and ::/0 are refused.
-      - KY_TRUSTED_PROXIES=${KY_TRUSTED_PROXIES:-}
       - KY_SSO_ENABLED=true
       - KY_SCIM_ENABLED=true
       # Read from .env, so rotating either there and running `docker compose up -d` takes
       # effect. Left empty, the server mints a fresh one at every start.
       - KY_SESSION_SECRET=${KY_SESSION_SECRET:-}
       - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:-}
-      # KyIdentity sign-in and directory sync, set in .env (docs/INTERFACES.md).
-      - KY_KYSIGNON_ISSUER=${KY_KYSIGNON_ISSUER:-}
-      - KY_KYSIGNON_CLIENT_ID=${KY_KYSIGNON_CLIENT_ID:-}
-      - KY_KYSIGNON_SECRET=${KY_KYSIGNON_SECRET:-}
-      - KY_KYSIGNON_HMAC_SECRET=${KY_KYSIGNON_HMAC_SECRET:-}
-      # Booleans fall back to the server's own default: an empty value would read as false.
-      - KY_SSO_AUTO_PROVISION=${KY_SSO_AUTO_PROVISION:-true}
-      - KY_SCIM_ALLOW_ADMIN=${KY_SCIM_ALLOW_ADMIN:-false}
+    # Every other setting in docs/INTERFACES.md is read from .env: KY_KYSIGNON_*,
+    # KY_SSO_AUTO_PROVISION, and KY_TRUSTED_PROXIES set to the reverse proxy container's own
+    # address when one fronts this service, e.g. KY_TRUSTED_PROXIES=172.18.0.2/32 (never a
+    # whole bridge range like 172.16.0.0/12, which trusts every other container; 0.0.0.0/0
+    # and ::/0 are refused). The entries above win over .env; an overlay's env_file wins over it.
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups

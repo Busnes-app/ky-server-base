@@ -36,19 +36,21 @@ These are human summaries, not a raw version-control log.
   instead of after an admin has signed in, so a session revoked or stolen after the
   capsule cannot sign in again in between. It no longer asks admins to re-enrol a
   second factor, which this base no longer has.
-- `docker-compose.yml` forwards `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_ISSUER`,
-  `KY_KYSIGNON_CLIENT_ID`, `KY_KYSIGNON_SECRET`, `KY_KYSIGNON_HMAC_SECRET`,
-  `KY_SSO_AUTO_PROVISION` and `KY_SCIM_ALLOW_ADMIN` from `.env`. Before, KyIdentity
-  sign-in configured there answered "not enabled", and the trusted-proxies warning
-  could only be cleared by editing the tracked compose file.
+- `docker-compose.yml` passes `.env` to the container (optional `env_file`), so
+  `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_*`, `KY_SSO_AUTO_PROVISION` and every other
+  documented setting can be set there. Before, KyIdentity sign-in configured in `.env`
+  answered "not enabled", and the trusted-proxies warning could only be cleared by
+  editing the tracked compose file. Values the compose file sets itself still win.
 
 ### Upgrade impact
 
 - No migration. Restart onto the new image.
-- Compose: values for the variables above already in `.env` now reach the container on
-  the next `docker compose up -d`. Check them before upgrading: a
-  `KY_KYSIGNON_HMAC_SECRET` shorter than 16 bytes, or an invalid `KY_TRUSTED_PROXIES`
-  entry, now stops the server at startup, as it already did outside compose.
+- Compose: every variable in `.env` now reaches the container on the next
+  `docker compose up -d`, not only the ones the compose file lists. Check `.env` before
+  upgrading: a `KY_ENV`, `KY_COOKIE_*`, `KY_KYSIGNON_*` or `KY_TRUSTED_PROXIES` line left
+  there now takes effect, and a `KY_KYSIGNON_HMAC_SECRET` shorter than 16 bytes or an
+  invalid `KY_TRUSTED_PROXIES` entry stops the server at startup, as it already did
+  outside compose. An overlay's own `env_file` still wins over `.env`.
 - A copy restored with the new `restore` command does not deposit until an admin turns
   the schedule back on.
 
