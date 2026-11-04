@@ -21,6 +21,8 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [settings, setSettings] = useState<any>(null);
   const [changingPassword, setChangingPassword] = useState(false);
+  // Remounting Login solves a fresh CAPTCHA: the last token was spent on the sign-in.
+  const [loginKey, setLoginKey] = useState(0);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -78,6 +80,7 @@ export const App: React.FC = () => {
       <>
       {notice && <p role="status" style={{ padding: 16 }}>{notice}</p>}
       <Login
+        key={loginKey}
         appName={settings?.app_name || 'Busnes.app'}
         onSuccess={async (u) => {
           // A Secure session cookie is dropped on a plain-HTTP page, so a 200 from login does
@@ -87,6 +90,7 @@ export const App: React.FC = () => {
             setNotice(window.location.protocol === 'http:'
               ? 'Signed in, but this browser did not keep the session: the server only sends its cookie over HTTPS. Open this server at its https:// address (KY_APP_URL).'
               : 'Signed in, but this browser did not keep the session cookie. Check that cookies are allowed for this site.');
+            setLoginKey((k) => k + 1);
             return;
           }
           setNotice('');

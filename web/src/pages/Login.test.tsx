@@ -82,7 +82,7 @@ it('keeps Sign In disabled until the security check is solved', async () => {
 it('explains a session the browser did not keep instead of showing a broken app', async () => {
   const { App } = await import('../App');
   let meCalls = 0;
-  await stubAuth({
+  const fetchMock = await stubAuth({
     '/api/settings': () => json({ app_name: 'Test' }),
     '/api/auth/me': () => { meCalls++; return json({ authenticated: false }); },
     '/api/auth/login': () => json({ authenticated: true, user: { username: 'admin', role: 'admin', sso_provider: 'local' } }),
@@ -94,5 +94,8 @@ it('explains a session the browser did not keep instead of showing a broken app'
   fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
   expect((await screen.findByRole('status')).textContent).toContain('did not keep the session');
   expect(meCalls).toBe(2);
+  // The spent CAPTCHA token is not offered again: the form solves a fresh challenge.
+  await screen.findByText('Security check verified.');
+  expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(2);
   expect(screen.queryByText('Overview')).toBeNull();
 });

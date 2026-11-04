@@ -344,21 +344,14 @@ func (h *userResourceHandler) update(r *http.Request, id string, change func(*st
 		if err := h.checkRole(oldRole, user.Role); err != nil {
 			return protocol.Resource{}, err
 		}
-		// externalId is the subject KyIdentity adoption matches. It changes only on a row that
-		// is still SCIM's own, by its own compare-and-swap, so a write that did not ask for a
-		// change never puts back a stale value; an adopted account keeps its sign-in subject.
+		// externalId is the subject KyIdentity adoption matches. It is written with the profile,
+		// compared against the subject read, and only while the row is SCIM's own: a stale write
+		// never puts back an old value, a refused one changes nothing, and an adopted account
+		// keeps its sign-in subject.
 		if user.SSOProvider != "scim" {
 			user.SSOSubject = oldSubject
-		} else if user.SSOSubject != oldSubject {
-			err = h.store.Users().SetSCIMSubject(r.Context(), id, oldSubject, user.SSOSubject)
-			if errors.Is(err, store.ErrConflict) && attempt < 3 {
-				continue
-			}
-			if err != nil {
-				return protocol.Resource{}, scimStoreError(err, id)
-			}
 		}
-		err = h.store.Users().UpdateUserProfile(r.Context(), user, oldRole, oldStatus)
+		err = h.store.Users().UpdateSCIMProfile(r.Context(), user, oldRole, oldStatus, oldSubject)
 		if errors.Is(err, store.ErrConflict) && attempt < 3 {
 			continue
 		}

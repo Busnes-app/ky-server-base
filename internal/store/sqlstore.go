@@ -275,6 +275,16 @@ WHERE id = ?
 }
 
 func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole, prevStatus string) error {
+	return u.updateProfile(ctx, user, prevRole, prevStatus, nil)
+}
+
+func (u *userStore) UpdateSCIMProfile(ctx context.Context, user *User, prevRole, prevStatus, prevSubject string) error {
+	return u.updateProfile(ctx, user, prevRole, prevStatus, &prevSubject)
+}
+
+// updateProfile is UpdateUserProfile; with prevSubject it also compares the subject read and,
+// while the row is still "scim", writes user.SSOSubject, all in the one statement.
+func (u *userStore) updateProfile(ctx context.Context, user *User, prevRole, prevStatus string, prevSubject *string) error {
 	user.UpdatedAt = time.Now().UTC()
 	tx, err := u.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -284,12 +294,16 @@ func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole,
 	if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, u.store.rebind(`
-UPDATE users SET
-    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
-WHERE id = ? AND role = ? AND status = ?
-`), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.UpdatedAt, user.ID, prevRole, prevStatus)
+	q := `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
+WHERE id = ? AND role = ? AND status = ?`
+	args := []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.ID, prevRole, prevStatus}
+	if prevSubject != nil {
+		q = `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?,
+    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
+WHERE id = ? AND role = ? AND status = ? AND sso_subject = ?`
+		args = []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus, *prevSubject}
+	}
+	res, err := tx.ExecContext(ctx, u.store.rebind(q), args...)
 	if err != nil {
 		return uniqueErr(err)
 	}
@@ -313,17 +327,6 @@ WHERE id = ? AND role = ? AND status = ?
 
 func (u *userStore) LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error {
 	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, subject, fromProvider)
-	if err != nil {
-		return err
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return ErrConflict
-	}
-	return nil
-}
-
-func (u *userStore) SetSCIMSubject(ctx context.Context, id, from, to string) error {
-	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_subject = ?, updated_at = ? WHERE id = ? AND sso_provider = 'scim' AND sso_subject = ?`), to, time.Now().UTC(), id, from)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/password"
@@ -40,6 +41,30 @@ const (
 	loginAccountLimit  = 10
 	loginAccountWindow = 15 * time.Minute
 )
+
+// dummyHash is a real hash of a throwaway password, minted on first use, that unknown names
+// are verified against. Unlike password.DummyVerify it reports ErrBusy, so overload treats
+// known and unknown names alike.
+var (
+	dummyHashMu sync.Mutex
+	dummyHash   string
+)
+
+func dummyVerify(plaintext string) error {
+	dummyHashMu.Lock()
+	h := dummyHash
+	if h == "" {
+		var err error
+		if h, err = password.Hash(crypto.RandomHex(16)); err != nil {
+			dummyHashMu.Unlock()
+			return err
+		}
+		dummyHash = h
+	}
+	dummyHashMu.Unlock()
+	_, err := password.Verify(plaintext, h)
+	return err
+}
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -87,15 +112,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ok := false
 	if user == nil || user.PasswordHash == "" {
-		password.DummyVerify() // an unknown or password-less name costs what a wrong password costs
+		err = dummyVerify(req.Password) // an unknown or password-less name costs what a wrong password costs
 	} else {
 		ok, err = password.Verify(req.Password, user.PasswordHash)
 	}
 	// A disabled account answers like a wrong password, so the status cannot enumerate it.
 	if !ok || user.Status != "active" {
 		// Too many hashes already running (ErrBusy): the server said "not now", the user did
-		// not get the password wrong, so no strike is spent. The answer stays the same 401,
-		// because an unknown name's dummy check cannot report it and a 503 would tell them apart.
+		// not get the password wrong, so no strike is spent, for unknown names alike (their
+		// dummy check reports overload too). The answer stays the same 401.
 		if !errors.Is(err, password.ErrBusy) {
 			s.allowAttempt(accountKey, loginAccountLimit, loginAccountWindow)
 		}

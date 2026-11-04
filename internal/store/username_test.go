@@ -181,17 +181,34 @@ func TestRecordDirectoryEventNeverMovesBack(t *testing.T) {
 }
 
 // Adoption and externalId corrections are compare-and-swaps on the subject read: a stale
-// adoption cannot link a row whose subject has since changed, and a stale correction loses.
+// adoption cannot link a row whose subject has since changed, a stale correction loses, and a
+// refused profile write changes no subject.
 func TestSubjectChangesAreCompareAndSwaps(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	if err := st.Users().CreateUser(ctx, &store.User{ID: "u1", Username: "gina", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "a", SCIMManaged: true}); err != nil {
+	for _, u := range []*store.User{
+		{ID: "u1", Username: "gina", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "a", SCIMManaged: true},
+		{ID: "u2", Username: "hal", Role: "user", Status: "active", SSOProvider: "local"},
+	} {
+		if err := st.Users().CreateUser(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := func(from, to, username string) error {
+		u, _ := st.Users().GetUserByID(ctx, "u1")
+		u.SSOSubject, u.Username = to, username
+		return st.Users().UpdateSCIMProfile(ctx, u, u.Role, u.Status, from)
+	}
+	if err := set("a", "b", "hal"); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("rename onto a taken name: %v", err)
+	}
+	if u, _ := st.Users().GetUserByID(ctx, "u1"); u.SSOSubject != "a" {
+		t.Fatalf("a refused write changed the subject to %q", u.SSOSubject)
+	}
+	if err := set("a", "b", "gina"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Users().SetSCIMSubject(ctx, "u1", "a", "b"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Users().SetSCIMSubject(ctx, "u1", "a", "c"); !errors.Is(err, store.ErrConflict) {
+	if err := set("a", "c", "gina"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale correction: %v, want ErrConflict", err)
 	}
 	if err := st.Users().LinkSSOIdentity(ctx, "u1", "a", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
@@ -200,7 +217,10 @@ func TestSubjectChangesAreCompareAndSwaps(t *testing.T) {
 	if err := st.Users().LinkSSOIdentity(ctx, "u1", "b", "scim", "kysignon"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Users().SetSCIMSubject(ctx, "u1", "b", "d"); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("subject change on an adopted row: %v, want ErrConflict", err)
+	if err := set("b", "d", "gina"); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := st.Users().GetUserBySSO(ctx, "kysignon", "b"); u == nil || u.ID != "u1" {
+		t.Fatalf("an adopted row's subject changed: %+v", u)
 	}
 }
