@@ -70,28 +70,38 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Upsert user
 	user, err := s.store.Users().GetUserBySSO(r.Context(), "kysignon", claims.Subject)
-	if err != nil {
-		if s.config.SSO.AutoProvision {
-			user = &store.User{
-				ID:          fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-				Username:    claims.PreferredUsername,
-				Email:       claims.Email,
-				DisplayName: claims.Name,
-				Role:        "user",
-				Status:      "active",
-				SSOProvider: "kysignon",
-				SSOSubject:  claims.Subject,
-			}
-			if err := s.store.Users().CreateUser(r.Context(), user); err != nil {
-				s.writeError(w, http.StatusInternalServerError, "Failed to provision SSO user")
-				return
-			}
-		} else {
+	if errors.Is(err, store.ErrNotFound) {
+		user, err = s.adoptSCIMUser(r, claims.Subject)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		if !s.config.SSO.AutoProvision {
 			s.writeError(w, http.StatusForbidden, "User account not provisioned")
 			return
 		}
+		user = &store.User{
+			ID:          fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+			Username:    claims.PreferredUsername,
+			Email:       claims.Email,
+			DisplayName: claims.Name,
+			Role:        "user",
+			Status:      "active",
+			SSOProvider: "kysignon",
+			SSOSubject:  claims.Subject,
+		}
+		err = s.store.Users().CreateUser(r.Context(), user)
+		if errors.Is(err, store.ErrAlreadyExists) {
+			s.writeError(w, http.StatusConflict, fmt.Sprintf("An account named %q already exists here and is not linked to this KyIdentity sign-in. Ask an administrator to link or rename it.", claims.PreferredUsername))
+			return
+		}
+	}
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to provision SSO user")
+		return
+	}
+	if user.Status != "active" {
+		s.writeError(w, http.StatusForbidden, "Account is disabled")
+		return
 	}
 
 	_, _, err = s.sessions.IssueSSOSession(r.Context(), w, r, user, claims.SessionID, claims.IssuedAt)
@@ -105,6 +115,25 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// adoptSCIMUser links a SCIM-provisioned account to its first KyIdentity sign-in: the row whose
+// externalId is this KyIdentity subject becomes a "kysignon" row and stays SCIM-managed, so
+// back-channel logout reaches it and the IdP keeps managing it by id. ErrNotFound when none.
+func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, error) {
+	if subject == "" { // SCIM rows sent without an externalId carry an empty subject
+		return nil, store.ErrNotFound
+	}
+	user, err := s.store.Users().GetUserBySSO(r.Context(), "scim", subject)
+	if err != nil {
+		return nil, err
+	}
+	user.SSOProvider = "kysignon"
+	if err := s.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
+		return nil, err
+	}
+	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
+	return user, nil
 }
 
 func (s *Server) handleKySignOnSyncWebhook(w http.ResponseWriter, r *http.Request) {

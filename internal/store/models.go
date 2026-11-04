@@ -15,10 +15,9 @@ type User struct {
 	Status             string     `json:"status"`       // "active", "suspended", "inactive"
 	SSOProvider        string     `json:"sso_provider"` // "local", "kysignon", "oidc", "saml", "scim"
 	SSOSubject         string     `json:"sso_subject,omitempty"`
-	TOTPSecretEnc      string     `json:"-"` // AES-256-GCM encrypted
-	TOTPEnabled        bool       `json:"totp_enabled"`
-	TOTPLastCounter    int64      `json:"-"` // last RFC 6238 counter accepted; refuses replay inside the skew window
-	RecoveryCodesHash  string     `json:"-"` // JSON array of sha256 hashes
+	// SCIMManaged marks an account SCIM created; SCIM can see and change only these. It
+	// survives adoption by a KyIdentity sign-in, which switches SSOProvider to "kysignon".
+	SCIMManaged bool `json:"-"`
 	PushDeviceID       string     `json:"push_device_id,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -37,12 +36,6 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	// SSOSID is the identity provider's sid for an SSO login; empty for local sign-in.
 	SSOSID string `json:"-"`
-}
-
-type MFAChallenge struct {
-	TokenHash string
-	UserID    string
-	ExpiresAt time.Time
 }
 
 // Group represents a SCIM/RBAC user group.

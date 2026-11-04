@@ -19,11 +19,6 @@ type LoginRequest struct {
 	CaptchaToken string `json:"captcha_token,omitempty"`
 }
 
-type MFARequest struct {
-	MFAToken string `json:"mfa_token"`
-	Code     string `json:"code"`
-}
-
 func (s *Server) handlePoWChallenge(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -39,12 +34,20 @@ func (s *Server) handlePoWChallenge(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, challenge)
 }
 
+// Per account and client: a password guess against one account from one client (IPv6 by
+// /64). Keyed on both, so nobody elsewhere can lock the admin out by guessing at it.
+const (
+	loginAccountLimit  = 10
+	loginAccountWindow = 15 * time.Minute
+)
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !s.allowAttempt("login:"+s.requestIP(r), 20, time.Minute) {
+	client := s.limiterIP(r)
+	if !s.allowAttempt("login:"+client, 20, time.Minute) {
 		s.writeError(w, http.StatusTooManyRequests, "Too many login attempts")
 		return
 	}
@@ -61,51 +64,37 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify PoW CAPTCHA if enabled
+	// Verify PoW CAPTCHA if enabled. A solved puzzle buys one attempt.
 	if s.config.Captcha.Provider == "pow" {
-		if req.CaptchaToken == "" || !auth.VerifyPoWSolution(req.CaptchaToken, s.config.Security.SessionSecret) {
+		if req.CaptchaToken == "" || !auth.VerifyPoWSolution(req.CaptchaToken, s.config.Security.SessionSecret, s.powSpent) {
 			s.writeError(w, http.StatusForbidden, "Security check failed. Please complete the CAPTCHA puzzle.")
 			return
 		}
 	}
 
-	user, err := s.store.Users().GetUserByUsername(r.Context(), req.Username)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
-			return
-		}
-		s.writeError(w, http.StatusInternalServerError, "Authentication error")
-		return
-	}
-
-	if user.Status != "active" {
-		s.writeError(w, http.StatusForbidden, "Account is disabled or inactive")
-		return
-	}
-
-	ok, err := password.Verify(req.Password, user.PasswordHash)
-	if err != nil || !ok {
+	// Checked before any password hashing. An exhausted window answers exactly like a wrong
+	// password, for known and unknown names alike. The name is hashed so a key stays small.
+	accountKey := "login-account:" + crypto.SHA256Hex([]byte(strings.ToLower(req.Username)))[:32] + "|" + client
+	if s.attemptsExhausted(accountKey, loginAccountLimit) {
 		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
-	// Check if MFA is required
-	if user.TOTPEnabled {
-		rawChallenge := crypto.RandomHex(32)
-		if err := s.store.Sessions().CreateMFAChallenge(r.Context(), &store.MFAChallenge{
-			TokenHash: crypto.SHA256Hex([]byte(rawChallenge)),
-			UserID:    user.ID,
-			ExpiresAt: time.Now().UTC().Add(5 * time.Minute),
-		}, user.PasswordHash); err != nil {
-			s.writeError(w, http.StatusInternalServerError, "Failed to start MFA verification")
-			return
-		}
-		s.writeJSON(w, http.StatusOK, map[string]any{
-			"mfa_required": true,
-			"mfa_token":    rawChallenge,
-			"methods":      []string{"totp", "recovery_code"},
-		})
+	user, err := s.store.Users().GetUserByUsername(r.Context(), req.Username)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.writeError(w, http.StatusInternalServerError, "Authentication error")
+		return
+	}
+	ok := false
+	if user == nil || user.PasswordHash == "" {
+		password.DummyVerify() // an unknown or password-less name costs what a wrong password costs
+	} else {
+		ok, _ = password.Verify(req.Password, user.PasswordHash)
+	}
+	// A disabled account answers like a wrong password, so the status cannot enumerate it.
+	if !ok || user.Status != "active" {
+		s.allowAttempt(accountKey, loginAccountLimit, loginAccountWindow)
+		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
@@ -119,149 +108,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{
 		UserID:   user.ID,
 		Action:   "auth.login",
-		Resource: "session",
-	})
-
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": true,
-		"user":          user,
-	})
-}
-
-func (s *Server) handleMFATOTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	var req MFARequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-	// Key on the client alone. Nothing caller-supplied may reach the key: a token in the key
-	// lets one client mint unbounded slots and starve every other window. Same shape as the
-	// login limit above, so a client occupies one MFA slot no matter how it spends it.
-	if !s.allowAttempt("mfa:"+s.requestIP(r), 20, time.Minute) {
-		s.writeError(w, http.StatusTooManyRequests, "Too many MFA attempts")
-		return
-	}
-
-	userID, verifiedHash, err := s.store.Sessions().ConsumeMFAChallenge(r.Context(), crypto.SHA256Hex([]byte(req.MFAToken)))
-	if err != nil {
-		s.writeError(w, http.StatusUnauthorized, "Invalid or expired MFA transaction")
-		return
-	}
-	// Per-account, so a botnet spread across many IPs cannot outrun the per-IP window. Each
-	// guess already costs a fresh password login, since the challenge is consumed either way.
-	if !s.allowAttempt("mfa-user:"+userID, 5, 5*time.Minute) {
-		s.writeError(w, http.StatusTooManyRequests, "Too many MFA attempts for this account")
-		return
-	}
-	user, err := s.store.Users().GetUserByID(r.Context(), userID)
-	if err != nil {
-		s.writeError(w, http.StatusUnauthorized, "User not found")
-		return
-	}
-	if user.Status != "active" || !user.TOTPEnabled || user.PasswordHash != verifiedHash {
-		s.writeError(w, http.StatusForbidden, "Account is not eligible for MFA login")
-		return
-	}
-
-	secretBytes, err := crypto.DecryptAESGCM(user.TOTPSecretEnc, s.config.Security.EncryptionKey)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to decrypt MFA secret")
-		return
-	}
-
-	counter, ok := auth.ValidateTOTP(string(secretBytes), req.Code)
-	if !ok {
-		s.writeError(w, http.StatusUnauthorized, "Invalid TOTP verification code")
-		return
-	}
-	if err := s.store.Users().SpendTOTPCounter(r.Context(), user.ID, counter); err != nil {
-		s.writeError(w, http.StatusUnauthorized, "TOTP code already used")
-		return
-	}
-
-	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to issue session")
-		return
-	}
-
-	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{
-		UserID:   user.ID,
-		Action:   "auth.mfa_totp",
-		Resource: "session",
-	})
-
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": true,
-		"user":          user,
-	})
-}
-
-func (s *Server) handleMFARecovery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	var req MFARequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-	// Key on the client alone. Nothing caller-supplied may reach the key: a token in the key
-	// lets one client mint unbounded slots and starve every other window. Same shape as the
-	// login limit above, so a client occupies one MFA slot no matter how it spends it.
-	if !s.allowAttempt("mfa:"+s.requestIP(r), 20, time.Minute) {
-		s.writeError(w, http.StatusTooManyRequests, "Too many MFA attempts")
-		return
-	}
-
-	userID, verifiedHash, err := s.store.Sessions().ConsumeMFAChallenge(r.Context(), crypto.SHA256Hex([]byte(req.MFAToken)))
-	if err != nil {
-		s.writeError(w, http.StatusUnauthorized, "Invalid or expired MFA transaction")
-		return
-	}
-	// Per-account, so a botnet spread across many IPs cannot outrun the per-IP window. Each
-	// guess already costs a fresh password login, since the challenge is consumed either way.
-	if !s.allowAttempt("mfa-user:"+userID, 5, 5*time.Minute) {
-		s.writeError(w, http.StatusTooManyRequests, "Too many MFA attempts for this account")
-		return
-	}
-	user, err := s.store.Users().GetUserByID(r.Context(), userID)
-	if err != nil {
-		s.writeError(w, http.StatusUnauthorized, "User not found")
-		return
-	}
-	if user.Status != "active" || !user.TOTPEnabled || user.PasswordHash != verifiedHash {
-		s.writeError(w, http.StatusForbidden, "Account is not eligible for MFA login")
-		return
-	}
-
-	updatedHashes, ok := auth.RedeemRecoveryCode(req.Code, user.RecoveryCodesHash)
-	if !ok {
-		s.writeError(w, http.StatusUnauthorized, "Invalid or already used recovery code")
-		return
-	}
-
-	if err := s.store.Users().UpdateRecoveryCodes(r.Context(), user.ID, user.RecoveryCodesHash, updatedHashes); err != nil {
-		s.writeError(w, http.StatusUnauthorized, "Recovery code was already used")
-		return
-	}
-
-	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to issue session")
-		return
-	}
-
-	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{
-		UserID:   user.ID,
-		Action:   "auth.mfa_recovery_code",
 		Resource: "session",
 	})
 

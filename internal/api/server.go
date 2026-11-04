@@ -38,6 +38,7 @@ type Server struct {
 	mux        *http.ServeMux
 	attemptsMu sync.Mutex
 	attempts   map[string]attemptWindow
+	powSpent   *auth.PoWSpent
 	// detached counts the requests running on a context deliberately separated from their
 	// connection. http.Server.Shutdown does not know about them, so runServer waits on this
 	// before the store closes.
@@ -123,8 +124,10 @@ type attemptWindow struct {
 // Eviction is deliberately blind to how much of a window is left. Picking the entry nearest to
 // expiry would always sacrifice the shortest windows first, so a caller minting keys with a
 // long window could keep the one-minute login counter from ever reaching its limit. Every key
-// is therefore equally likely to go. The real defence is that no key carries caller-supplied
-// bytes, so filling the map costs an attacker one slot per IP.
+// is therefore equally likely to go. The real defence is that keys carry no unbounded
+// caller-supplied bytes (the login account key holds a fixed-length hash of the name) and every
+// key-minting route sits behind the per-client window, so filling the map costs an attacker
+// many clients (IPv6 /64s).
 const attemptsCap = 10000
 
 func NewServer(cfg *config.Config, st store.Store) *Server {
@@ -146,6 +149,7 @@ func NewServer(cfg *config.Config, st store.Store) *Server {
 		recovery: recovery,
 		mux:      http.NewServeMux(),
 		attempts: make(map[string]attemptWindow),
+		powSpent: auth.NewPoWSpent(),
 	}
 
 	s.routes()
@@ -183,6 +187,15 @@ func (s *Server) makeRoom(now time.Time) {
 	}
 }
 
+// attemptsExhausted reports whether key has already used limit attempts in its live window,
+// without counting this call as one.
+func (s *Server) attemptsExhausted(key string, limit int) bool {
+	s.attemptsMu.Lock()
+	defer s.attemptsMu.Unlock()
+	entry, ok := s.attempts[key]
+	return ok && time.Now().Before(entry.reset) && entry.count >= limit
+}
+
 func bumpWindow(entry attemptWindow, now time.Time, window time.Duration) attemptWindow {
 	if now.After(entry.reset) {
 		entry = attemptWindow{reset: now.Add(window)}
@@ -198,12 +211,16 @@ func (s *Server) requestIP(r *http.Request) string {
 	return auth.ClientIP(r, s.config.Security.TrustedProxies)
 }
 
+// limiterIP is requestIP as a rate-limit key: an IPv6 client is its /64, the block one
+// subscriber holds, so rotating addresses inside it buys no fresh windows.
+func (s *Server) limiterIP(r *http.Request) string {
+	return auth.RateLimitKey(s.requestIP(r))
+}
+
 func (s *Server) routes() {
 	// Auth
 	s.mux.HandleFunc("/api/auth/pow-challenge", s.handlePoWChallenge)
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("/api/auth/mfa/totp", s.handleMFATOTP)
-	s.mux.HandleFunc("/api/auth/mfa/recovery-code", s.handleMFARecovery)
 	s.mux.HandleFunc("/api/auth/logout", s.handleLogout)
 	s.mux.HandleFunc("/api/auth/me", s.handleMe)
 	s.mux.HandleFunc("/api/auth/change-password", s.handleChangePassword)
@@ -230,6 +247,9 @@ func (s *Server) routes() {
 	// Settings & Theme. The read endpoint tiers its own payload by role.
 	s.mux.HandleFunc("/api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("/api/settings/theme", s.requireAdmin(s.handleSetTheme))
+
+	// Directory: the account list behind the Directory & SCIM screen. Read-only.
+	s.mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleListUsers))
 
 	// SCIM 2.0 routes
 	s.scim.RegisterRoutes(s.mux)
@@ -336,7 +356,7 @@ func csrfExempt(path string) bool {
 }
 
 func isSignIn(path string) bool {
-	return path == "/api/auth/login" || strings.HasPrefix(path, "/api/auth/mfa/")
+	return path == "/api/auth/login"
 }
 
 func sameOrigin(origin, appURL string) bool {

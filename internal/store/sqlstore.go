@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,13 @@ func newSQLStore(ctx context.Context, db *sql.DB, driver string) (*SQLStore, err
 
 	if err := migrations.Run(ctx, db, driver); err != nil {
 		return nil, fmt.Errorf("migration failure on driver %s: %w", driver, err)
+	}
+	clashes, err := migrations.EnsureUsernameIndex(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("case-insensitive username index: %w", err)
+	}
+	for _, names := range clashes {
+		log.Printf("[STORE] usernames differ only in letter case: %s. Sign-in picks one of them arbitrarily; rename or remove all but one. New case-variant names are refused.", strings.Join(names, ", "))
 	}
 
 	s := &SQLStore{
@@ -95,17 +103,16 @@ func (u *userStore) CreateUser(ctx context.Context, user *User) error {
 	if user.UpdatedAt.IsZero() {
 		user.UpdatedAt = now
 	}
-	if user.RecoveryCodesHash == "" {
-		user.RecoveryCodesHash = "[]"
+	if err := u.checkUsernameFree(ctx, user.Username, ""); err != nil {
+		return err
 	}
 
 	q := u.store.rebind(`
 INSERT INTO users (
     id, username, email, display_name, password_hash, role, status,
-    sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-    recovery_codes_hash, push_device_id, must_change_password,
+    sso_provider, sso_subject, scim_managed, push_device_id, must_change_password,
     created_at, updated_at, last_login_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 
 	var lastLogin sql.NullTime
@@ -115,16 +122,38 @@ INSERT INTO users (
 
 	_, err := u.store.db.ExecContext(ctx, q,
 		user.ID, user.Username, user.Email, user.DisplayName, user.PasswordHash,
-		user.Role, user.Status, user.SSOProvider, user.SSOSubject,
-		user.TOTPSecretEnc, user.TOTPEnabled, user.RecoveryCodesHash,
+		user.Role, user.Status, user.SSOProvider, user.SSOSubject, user.SCIMManaged,
 		user.PushDeviceID, user.MustChangePassword,
 		user.CreatedAt, user.UpdatedAt, lastLogin,
 	)
+	return uniqueErr(err)
+}
+
+// uniqueErr maps a unique-constraint violation on either backend to ErrAlreadyExists.
+func uniqueErr(err error) error {
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "duplicate key")) {
+		return ErrAlreadyExists
+	}
+	return err
+}
+
+// userColumns is every column scanUser reads. The retired local-MFA columns (totp_*,
+// recovery_codes_hash) stay in the schema with their data but are no longer read or written.
+const userColumns = `id, username, email, display_name, password_hash, role, status,
+       sso_provider, sso_subject, scim_managed, push_device_id, must_change_password,
+       created_at, updated_at, last_login_at`
+
+// checkUsernameFree refuses a name another account already holds in any letter case. The
+// LOWER(username) unique index enforces the same under concurrency once existing data allows
+// it to be built (see ensureUsernameIndex); this check covers installations where it cannot be.
+func (u *userStore) checkUsernameFree(ctx context.Context, username, exceptID string) error {
+	var n int
+	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT COUNT(1) FROM users WHERE LOWER(username) = LOWER(?) AND id <> ?`), username, exceptID).Scan(&n)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "duplicate key") {
-			return ErrAlreadyExists
-		}
 		return err
+	}
+	if n > 0 {
+		return ErrAlreadyExists
 	}
 	return nil
 }
@@ -135,9 +164,8 @@ func (u *userStore) scanUser(row interface{ Scan(...any) error }) (*User, error)
 
 	err := row.Scan(
 		&user.ID, &user.Username, &user.Email, &user.DisplayName, &user.PasswordHash,
-		&user.Role, &user.Status, &user.SSOProvider, &user.SSOSubject,
-		&user.TOTPSecretEnc, &user.TOTPEnabled, &user.RecoveryCodesHash,
-		&user.PushDeviceID, &user.MustChangePassword, &user.TOTPLastCounter,
+		&user.Role, &user.Status, &user.SSOProvider, &user.SSOSubject, &user.SCIMManaged,
+		&user.PushDeviceID, &user.MustChangePassword,
 		&user.CreatedAt, &user.UpdatedAt, &lastLogin,
 	)
 	if err != nil {
@@ -154,10 +182,7 @@ func (u *userStore) scanUser(row interface{ Scan(...any) error }) (*User, error)
 
 func (u *userStore) GetUserByID(ctx context.Context, id string) (*User, error) {
 	q := u.store.rebind(`
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
+SELECT ` + userColumns + `
 FROM users WHERE id = ?
 `)
 	return u.scanUser(u.store.db.QueryRowContext(ctx, q, id))
@@ -165,10 +190,7 @@ FROM users WHERE id = ?
 
 func (u *userStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	q := u.store.rebind(`
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
+SELECT ` + userColumns + `
 FROM users WHERE LOWER(username) = LOWER(?)
 `)
 	return u.scanUser(u.store.db.QueryRowContext(ctx, q, username))
@@ -176,10 +198,7 @@ FROM users WHERE LOWER(username) = LOWER(?)
 
 func (u *userStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	q := u.store.rebind(`
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
+SELECT ` + userColumns + `
 FROM users WHERE LOWER(email) = LOWER(?)
 `)
 	return u.scanUser(u.store.db.QueryRowContext(ctx, q, email))
@@ -187,10 +206,7 @@ FROM users WHERE LOWER(email) = LOWER(?)
 
 func (u *userStore) GetUserBySSO(ctx context.Context, provider, subject string) (*User, error) {
 	q := u.store.rebind(`
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
+SELECT ` + userColumns + `
 FROM users WHERE sso_provider = ? AND sso_subject = ?
 `)
 	return u.scanUser(u.store.db.QueryRowContext(ctx, q, provider, subject))
@@ -203,11 +219,13 @@ func (u *userStore) UpdateUser(ctx context.Context, user *User) error {
 		lastLogin = sql.NullTime{Time: *user.LastLoginAt, Valid: true}
 	}
 
+	if err := u.checkUsernameFree(ctx, user.Username, user.ID); err != nil {
+		return err
+	}
 	q := u.store.rebind(`
 UPDATE users SET
     username = ?, email = ?, display_name = ?, password_hash = ?,
     role = ?, status = ?, sso_provider = ?, sso_subject = ?,
-    totp_secret_enc = ?, totp_enabled = ?, recovery_codes_hash = ?,
     push_device_id = ?, must_change_password = ?, updated_at = ?,
     last_login_at = ?
 WHERE id = ?
@@ -216,12 +234,11 @@ WHERE id = ?
 	res, err := u.store.db.ExecContext(ctx, q,
 		user.Username, user.Email, user.DisplayName, user.PasswordHash,
 		user.Role, user.Status, user.SSOProvider, user.SSOSubject,
-		user.TOTPSecretEnc, user.TOTPEnabled, user.RecoveryCodesHash,
 		user.PushDeviceID, user.MustChangePassword, user.UpdatedAt,
 		lastLogin, user.ID,
 	)
 	if err != nil {
-		return err
+		return uniqueErr(err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
@@ -232,6 +249,9 @@ WHERE id = ?
 
 func (u *userStore) UpdateUserProfile(ctx context.Context, user *User) error {
 	user.UpdatedAt = time.Now().UTC()
+	if err := u.checkUsernameFree(ctx, user.Username, user.ID); err != nil {
+		return err
+	}
 	q := u.store.rebind(`
 UPDATE users SET
     username = ?, email = ?, display_name = ?, role = ?, status = ?,
@@ -243,42 +263,10 @@ WHERE id = ?
 		user.SSOProvider, user.SSOSubject, user.UpdatedAt, user.ID,
 	)
 	if err != nil {
-		return err
+		return uniqueErr(err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return ErrNotFound
-	}
-	return nil
-}
-
-func (u *userStore) UpdateRecoveryCodes(ctx context.Context, userID, oldHashes, newHashes string) error {
-	q := u.store.rebind("UPDATE users SET recovery_codes_hash = ?, updated_at = ? WHERE id = ? AND recovery_codes_hash = ?")
-	res, err := u.store.db.ExecContext(ctx, q, newHashes, time.Now().UTC(), userID, oldHashes)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return ErrAlreadyExists
-	}
-	return nil
-}
-
-func (u *userStore) SpendTOTPCounter(ctx context.Context, userID string, counter int64) error {
-	q := u.store.rebind("UPDATE users SET totp_last_counter = ?, updated_at = ? WHERE id = ? AND totp_last_counter < ?")
-	res, err := u.store.db.ExecContext(ctx, q, counter, time.Now().UTC(), userID, counter)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return ErrAlreadyExists
 	}
 	return nil
 }
@@ -297,6 +285,14 @@ func (u *userStore) DeleteUser(ctx context.Context, id string) error {
 }
 
 func (u *userStore) ListUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error) {
+	return u.listUsers(ctx, offset, limit, search, false)
+}
+
+func (u *userStore) ListSCIMUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error) {
+	return u.listUsers(ctx, offset, limit, search, true)
+}
+
+func (u *userStore) listUsers(ctx context.Context, offset, limit int, search string, scimOnly bool) ([]*User, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -304,42 +300,26 @@ func (u *userStore) ListUsers(ctx context.Context, offset, limit int, search str
 		offset = 0
 	}
 
-	var countQuery, listQuery string
-	var countArgs, listArgs []any
-
+	where := " WHERE 1 = 1"
+	var args []any
+	if scimOnly {
+		where += " AND scim_managed = ?"
+		args = append(args, true)
+	}
 	if strings.TrimSpace(search) != "" {
 		like := "%" + strings.ToLower(strings.TrimSpace(search)) + "%"
-		countQuery = "SELECT COUNT(1) FROM users WHERE LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(email) LIKE ?"
-		countArgs = []any{like, like, like}
-
-		listQuery = `
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
-FROM users
-WHERE LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(email) LIKE ?
-ORDER BY created_at DESC LIMIT ? OFFSET ?`
-		listArgs = []any{like, like, like, limit, offset}
-	} else {
-		countQuery = "SELECT COUNT(1) FROM users"
-		listQuery = `
-SELECT id, username, email, display_name, password_hash, role, status,
-       sso_provider, sso_subject, totp_secret_enc, totp_enabled,
-       recovery_codes_hash, push_device_id, must_change_password,
-       totp_last_counter, created_at, updated_at, last_login_at
-FROM users
-ORDER BY created_at DESC LIMIT ? OFFSET ?`
-		listArgs = []any{limit, offset}
+		where += " AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(email) LIKE ?)"
+		args = append(args, like, like, like)
 	}
 
 	var total int
-	err := u.store.db.QueryRowContext(ctx, u.store.rebind(countQuery), countArgs...).Scan(&total)
+	err := u.store.db.QueryRowContext(ctx, u.store.rebind("SELECT COUNT(1) FROM users"+where), args...).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	rows, err := u.store.db.QueryContext(ctx, u.store.rebind(listQuery), listArgs...)
+	listQuery := "SELECT " + userColumns + " FROM users" + where + " ORDER BY created_at DESC, id LIMIT ? OFFSET ?"
+	rows, err := u.store.db.QueryContext(ctx, u.store.rebind(listQuery), append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -355,6 +335,19 @@ ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	}
 
 	return users, total, rows.Err()
+}
+
+// AdvanceDirectoryEvent records ts as the newest directory event applied for the subject and
+// reports false, recording nothing, when a newer one was already applied. An equal timestamp
+// is accepted: a redelivery of the last event changes nothing.
+func (u *userStore) AdvanceDirectoryEvent(ctx context.Context, provider, subject string, ts int64) (bool, error) {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`INSERT INTO sso_directory_events (provider, subject, last_timestamp) VALUES (?, ?, ?)
+ON CONFLICT (provider, subject) DO UPDATE SET last_timestamp = excluded.last_timestamp WHERE sso_directory_events.last_timestamp <= excluded.last_timestamp`), provider, subject, ts)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {
@@ -491,10 +484,8 @@ func (u *userStore) ResetAdminPassword(ctx context.Context, userID, newHash stri
 }
 
 func (u *userStore) revokePasswordGrants(ctx context.Context, tx *sql.Tx, userID, details, ip string, now time.Time) error {
-	for _, table := range []string{"sessions", "mfa_challenges"} {
-		if _, err := tx.ExecContext(ctx, u.store.rebind("DELETE FROM "+table+" WHERE user_id = ?"), userID); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, u.store.rebind("DELETE FROM sessions WHERE user_id = ?"), userID); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, u.store.rebind(`INSERT INTO audit_records (user_id, action, resource, details, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?)`), userID, "auth.password_changed", "user", details, ip, now)
 	return err
@@ -541,45 +532,6 @@ func (s *sessionStore) CleanExpiredSessions(ctx context.Context) error {
 	return err
 }
 
-func (s *sessionStore) CreateMFAChallenge(ctx context.Context, challenge *MFAChallenge, expectedPasswordHash string) error {
-	return s.store.withPassword(ctx, challenge.UserID, expectedPasswordHash, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, s.store.rebind("INSERT INTO mfa_challenges (token_hash, user_id, expires_at, password_hash) VALUES (?, ?, ?, ?)"), challenge.TokenHash, challenge.UserID, challenge.ExpiresAt, expectedPasswordHash)
-		return err
-	})
-}
-
-func (s *sessionStore) ConsumeMFAChallenge(ctx context.Context, tokenHash string) (string, string, error) {
-	tx, err := s.store.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", "", err
-	}
-	defer tx.Rollback()
-	q := s.store.rebind("SELECT user_id, expires_at, password_hash FROM mfa_challenges WHERE token_hash = ?")
-	var userID, passwordHash string
-	var expiresAt time.Time
-	if err := tx.QueryRowContext(ctx, q, tokenHash).Scan(&userID, &expiresAt, &passwordHash); err != nil {
-		if errorsIs(err, sql.ErrNoRows) {
-			return "", "", ErrNotFound
-		}
-		return "", "", err
-	}
-	if !time.Now().UTC().Before(expiresAt) {
-		return "", "", ErrSessionExpired
-	}
-	deleteQ := s.store.rebind("DELETE FROM mfa_challenges WHERE token_hash = ?")
-	res, err := tx.ExecContext(ctx, deleteQ, tokenHash)
-	if err != nil {
-		return "", "", err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil || rows != 1 {
-		return "", "", ErrNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return "", "", err
-	}
-	return userID, passwordHash, nil
-}
 
 // ---------------------------------------------------------------------
 // Group Store

@@ -22,10 +22,10 @@ authority. The directory-sync webhook uses a signature instead of a login sessio
 
 For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 `ky_session` cookie requires `X-CSRF-Token` to equal the `ky_csrf` cookie. This also
-applies when an Authorization header is present alongside the cookie. Login, MFA
-verification and the signed directory-sync webhook are exempt. A bearer-only client
+applies when an Authorization header is present alongside the cookie. Login and the
+signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
-Login and MFA verification instead refuse an unsafe request carrying
+Login instead refuses an unsafe request carrying
 `Sec-Fetch-Site: cross-site` with 403 `{"error":"Cross-site sign-in refused"}`;
 clients that send no such header are unaffected.
 
@@ -57,37 +57,40 @@ Sources: [auth handlers](../internal/api/auth_handlers.go),
 | Method and path | Input and authority | Successful output |
 |---|---|---|
 | GET `/api/auth/pow-challenge` | Anonymous; no body | 200 challenge object described below |
-| POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies, or an MFA transaction |
-| POST `/api/auth/mfa/totp` | Anonymous JSON: `mfa_token`, `code` | 200 authenticated user and session/CSRF cookies |
-| POST `/api/auth/mfa/recovery-code` | Anonymous JSON: `mfa_token`, `code` | 200 authenticated user and session/CSRF cookies |
+| POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies |
 | GET `/api/auth/me` | Optional session; no body | 200 `{"authenticated":false}` or `{"authenticated":true,"user":User}` |
 | POST `/api/auth/change-password` | Restricted local session; JSON: `current_password`, `new_password`; cookie CSRF applies | 200 `{"password_changed":true,"login_required":true}`; all sessions revoked |
 | POST `/api/auth/logout` | Optional session; no body; cookie CSRF applies | 200 `{"logged_out":true}`; current session revoked and cookies expired |
 
-An ordinary completed login returns `{"authenticated":true,"user":User}`. `User`
+A completed login returns `{"authenticated":true,"user":User}`. `User`
 contains `id`, `username`, `email`, `display_name`, `role`, `status`, `sso_provider`,
-`totp_enabled`, `must_change_password`, `created_at` and `updated_at`; `sso_subject`,
+`must_change_password`, `created_at` and `updated_at`; `sso_subject`,
 `push_device_id` and `last_login_at` appear when set. User timestamps are RFC 3339
 strings. Roles used by the scaffold are `admin`, `user` and `manager`; only `admin`
-authorizes administrator routes. Password hashes, TOTP secrets/counters and recovery
-code hashes are never included.
+authorizes administrator routes. Password hashes are never included.
 
-With TOTP enabled, password login instead returns
-`{"mfa_required":true,"mfa_token":"…","methods":["totp","recovery_code"]}`.
-The transaction lasts five minutes and is consumed by the verification attempt,
-including a wrong code: start a fresh password login to retry. TOTP counters and
-recovery codes are single-use. Login allows 20 attempts per IP per minute; the two
-MFA routes share 20 attempts per IP per minute and five per account per five minutes.
-Invalid credentials/transactions/codes return 401; inactive or ineligible accounts
-and failed CAPTCHA return 403.
+There is no local multi-factor sign-in: MFA is a KyIdentity (SSO) feature, so require it
+there and sign in through KyIdentity. The former `/api/auth/mfa/totp` and
+`/api/auth/mfa/recovery-code` routes and the `totp_enabled` user field are gone. The
+`users.totp_secret_enc`, `totp_enabled`, `totp_last_counter` and `recovery_codes_hash`
+columns and the `mfa_challenges` table are kept with their data but no longer read or
+written; an account that had local TOTP signs in with its password alone.
+
+Login allows 20 attempts per client per minute, and 10 failed attempts per account per
+client per 15 minutes; an IPv6 client counts as its /64. An exhausted account window
+answers the same 401 as a wrong password without checking the password, and only for
+that client, so nobody elsewhere can lock an account out. Unknown names cost the same
+password hashing as known ones. Invalid credentials and inactive or disabled accounts
+both return 401 `{"error":"Invalid credentials"}`; a failed or reused CAPTCHA returns 403.
 
 The PoW challenge has `algorithm:"SHA-256"`, `salt`, `challenge`, `maxnumber`,
 `expires_at` (Unix seconds) and `signature`. Find an integer `number` from 1 through
 `maxnumber` whose lowercase hex SHA-256 of UTF-8 `salt + decimal(number)` equals
 `challenge`. Add `number` to the unchanged challenge object, encode that JSON in
 standard Base64 (padding optional), and submit it as `captcha_token`. The signed
-challenge expires after five minutes. Login verifies it when the configured provider
-is `pow`; no Turnstile/Friendly server-side verification is wired here.
+challenge expires after five minutes and each solved challenge is accepted once: a
+second login with the same token returns 403. Login verifies it when the configured
+provider is `pow`; no Turnstile/Friendly server-side verification is wired here.
 
 Password replacement is specifically for a local account flagged
 `must_change_password`, not a general password-edit endpoint. Otherwise it returns

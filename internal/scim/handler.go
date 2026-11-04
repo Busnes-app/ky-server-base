@@ -25,7 +25,7 @@ type Server struct {
 }
 
 func NewServer(st store.Store, cfg config.SCIMConfig, appURL string) *Server {
-	userHandler := &userResourceHandler{store: st}
+	userHandler := &userResourceHandler{store: st, allowAdmin: cfg.AllowAdmin}
 	groupHandler := &groupResourceHandler{store: st}
 	server, err := protocol.NewServer(&protocol.ServerArgs{
 		ServiceProviderConfig: &protocol.ServiceProviderConfig{
@@ -82,13 +82,45 @@ func writeAuthError(w http.ResponseWriter, status int, detail string) {
 	_ = json.NewEncoder(w).Encode(protocolErrors.ScimError{Status: status, Detail: detail})
 }
 
-type userResourceHandler struct{ store store.Store }
+type userResourceHandler struct {
+	store      store.Store
+	allowAdmin bool
+}
+
+// errAdminGrant refuses a SCIM write that would make an account an administrator.
+var errAdminGrant = protocolErrors.ScimError{ScimType: protocolErrors.ScimTypeInvalidValue, Status: http.StatusBadRequest,
+	Detail: "SCIM may not grant the admin role (KY_SCIM_ALLOW_ADMIN is off)"}
+
+// checkRole refuses a grant of admin, not an account that already holds it: an existing
+// admin can still be renamed, deactivated or demoted through SCIM.
+func (h *userResourceHandler) checkRole(oldRole, newRole string) error {
+	if newRole == "admin" && oldRole != "admin" && !h.allowAdmin {
+		return errAdminGrant
+	}
+	return nil
+}
+
+// managedUser loads an account SCIM may see. Every other account, local and KyIdentity ones
+// included, is reported as not found, so the IdP cannot read, rename, disable or delete it.
+func (h *userResourceHandler) managedUser(r *http.Request, id string) (*store.User, error) {
+	user, err := h.store.Users().GetUserByID(r.Context(), id)
+	if err != nil {
+		return nil, scimStoreError(err, id)
+	}
+	if !user.SCIMManaged {
+		return nil, protocolErrors.ScimErrorResourceNotFound(id)
+	}
+	return user, nil
+}
 
 func (h *userResourceHandler) Create(r *http.Request, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	username, _ := attrs["userName"].(string)
-	user := &store.User{ID: "usr_" + crypto.RandomHex(12), Username: username, Email: primaryValue(attrs["emails"]), DisplayName: stringValue(attrs, "displayName", username), Role: primaryValue(attrs["roles"]), Status: statusFromActive(attrs), SSOProvider: "scim", SSOSubject: stringValue(attrs, "externalId", "")}
+	user := &store.User{ID: "usr_" + crypto.RandomHex(12), Username: username, Email: primaryValue(attrs["emails"]), DisplayName: stringValue(attrs, "displayName", username), Role: primaryValue(attrs["roles"]), Status: statusFromActive(attrs), SSOProvider: "scim", SSOSubject: stringValue(attrs, "externalId", ""), SCIMManaged: true}
 	if user.Role == "" {
 		user.Role = "user"
+	}
+	if err := h.checkRole("", user.Role); err != nil {
+		return protocol.Resource{}, err
 	}
 	if err := h.store.Users().CreateUser(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, user.ID)
@@ -98,9 +130,9 @@ func (h *userResourceHandler) Create(r *http.Request, attrs protocol.ResourceAtt
 }
 
 func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {
-	user, err := h.store.Users().GetUserByID(r.Context(), id)
+	user, err := h.managedUser(r, id)
 	if err != nil {
-		return protocol.Resource{}, scimStoreError(err, id)
+		return protocol.Resource{}, err
 	}
 	return userResource(user), nil
 }
@@ -115,7 +147,7 @@ var equalityFilter = regexp.MustCompile(`(?i)^\s*(userName|emails\.value|emails|
 func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListRequestParams) (protocol.Page, error) {
 	raw := r.URL.Query().Get("filter")
 	if raw == "" {
-		users, total, err := h.store.Users().ListUsers(r.Context(), params.StartIndex-1, params.Count, "")
+		users, total, err := h.store.Users().ListSCIMUsers(r.Context(), params.StartIndex-1, params.Count, "")
 		if err != nil {
 			return protocol.Page{}, err
 		}
@@ -134,13 +166,13 @@ func (h *userResourceHandler) GetAll(r *http.Request, params protocol.ListReques
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return protocol.Page{}, err
 		}
-		if err == nil {
+		if err == nil && user.SCIMManaged {
 			candidates = []*store.User{user}
 		}
 	} else {
 		var total int
 		var err error
-		candidates, total, err = h.store.Users().ListUsers(r.Context(), 0, maxFilterCandidates, match[2])
+		candidates, total, err = h.store.Users().ListSCIMUsers(r.Context(), 0, maxFilterCandidates, match[2])
 		if err != nil {
 			return protocol.Page{}, err
 		}
@@ -179,9 +211,9 @@ func userPage(users []*store.User, total int) protocol.Page {
 }
 
 func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
-	user, err := h.store.Users().GetUserByID(r.Context(), id)
+	user, err := h.managedUser(r, id)
 	if err != nil {
-		return protocol.Resource{}, scimStoreError(err, id)
+		return protocol.Resource{}, err
 	}
 	oldRole, oldStatus := user.Role, user.Status
 	user.Username, _ = attrs["userName"].(string)
@@ -191,6 +223,9 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Role = role
 	}
 	user.Status = statusFromActive(attrs)
+	if err := h.checkRole(oldRole, user.Role); err != nil {
+		return protocol.Resource{}, err
+	}
 	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
 	}
@@ -199,13 +234,16 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 }
 
 func (h *userResourceHandler) Delete(r *http.Request, id string) error {
+	if _, err := h.managedUser(r, id); err != nil {
+		return err
+	}
 	return scimStoreError(h.store.Users().DeleteUser(r.Context(), id), id)
 }
 
 func (h *userResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
-	user, err := h.store.Users().GetUserByID(r.Context(), id)
+	user, err := h.managedUser(r, id)
 	if err != nil {
-		return protocol.Resource{}, scimStoreError(err, id)
+		return protocol.Resource{}, err
 	}
 	oldRole, oldStatus := user.Role, user.Status
 	for _, op := range operations {
@@ -219,6 +257,9 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 			continue
 		}
 		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
+	}
+	if err := h.checkRole(oldRole, user.Role); err != nil {
+		return protocol.Resource{}, err
 	}
 	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -356,7 +397,8 @@ func (h *groupResourceHandler) checkMembers(r *http.Request, old, next []string)
 		if slices.Contains(old, id) {
 			continue
 		}
-		if _, err := h.store.Users().GetUserByID(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+		user, err := h.store.Users().GetUserByID(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !user.SCIMManaged) {
 			return protocolErrors.ScimErrorInvalidValue
 		} else if err != nil {
 			return err

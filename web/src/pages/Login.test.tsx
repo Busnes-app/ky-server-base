@@ -41,25 +41,6 @@ it('solves one CAPTCHA challenge, not a stream of them', async () => {
   expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(1);
 });
 
-// The server spends the MFA transaction on every attempt, so after a wrong code the form must
-// go back to the password step instead of resubmitting a dead transaction.
-it('returns to the password step after a rejected MFA code', async () => {
-  await stubAuth({
-    '/api/auth/login': () => json({ mfa_required: true, mfa_token: 'spent' }),
-    '/api/auth/mfa/totp': () => json({ error: 'Invalid TOTP verification code' }, 401),
-  });
-  const { container } = render(<Login onSuccess={vi.fn()} appName="Test" />);
-  await screen.findByText('Security check verified.');
-  fireEvent.change(container.querySelector('input[type="text"]')!, { target: { value: 'admin' } });
-  fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'correct horse battery' } });
-  fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
-  fireEvent.change(await screen.findByPlaceholderText('123456'), { target: { value: '000000' } });
-  fireEvent.click(screen.getByRole('button', { name: /verify/i }));
-  expect(await screen.findByText(/Invalid TOTP verification code\. Sign in again to retry\./)).toBeTruthy();
-  expect(screen.queryByPlaceholderText('123456')).toBeNull();
-  expect(screen.getByRole('button', { name: /sign in/i })).toBeTruthy();
-});
-
 // A token can expire while the tab sleeps; a failed sign-in solves a fresh one for the retry.
 it('solves a fresh CAPTCHA after a failed sign-in', async () => {
   const fetchMock = await stubAuth({ '/api/auth/login': () => json({ error: 'Invalid credentials' }, 401) });

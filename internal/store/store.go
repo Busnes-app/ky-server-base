@@ -37,16 +37,17 @@ type UserStore interface {
 	UpdateUser(ctx context.Context, u *User) error
 	// UpdateUserProfile writes only username, email, display name, role, status and SSO
 	// identity, so a directory sync working from a stale read cannot undo a concurrent
-	// password reset, MFA change or recovery-code spend.
+	// password reset.
 	UpdateUserProfile(ctx context.Context, u *User) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
-	UpdateRecoveryCodes(ctx context.Context, userID, oldHashes, newHashes string) error
-	// SpendTOTPCounter records counter as used. It returns ErrAlreadyExists when counter is
-	// not greater than the stored one, which is how a replayed code inside the skew window fails.
-	SpendTOTPCounter(ctx context.Context, userID string, counter int64) error
 	DeleteUser(ctx context.Context, id string) error
 	ListUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
+	// ListSCIMUsers is ListUsers restricted to accounts SCIM created (SCIMManaged).
+	ListSCIMUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
+	// AdvanceDirectoryEvent records ts as the newest directory-sync event applied for the
+	// subject; false means a newer event was already applied and this one must be dropped.
+	AdvanceDirectoryEvent(ctx context.Context, provider, subject string, ts int64) (bool, error)
 	CountUsers(ctx context.Context) (int, error)
 }
 
@@ -62,8 +63,6 @@ type SessionStore interface {
 	// EndSSOSession ends every session of an SSO login and fences its sid until fenceUntil.
 	EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error
 	CleanExpiredSessions(ctx context.Context) error
-	CreateMFAChallenge(ctx context.Context, challenge *MFAChallenge, expectedPasswordHash string) error
-	ConsumeMFAChallenge(ctx context.Context, tokenHash string) (userID, passwordHash string, err error)
 }
 
 // GroupStore defines repository operations for SCIM and RBAC groups.

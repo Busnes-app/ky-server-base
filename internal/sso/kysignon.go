@@ -76,6 +76,19 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.Timestamp == 0 || time.Since(time.Unix(payload.Timestamp, 0)).Abs() > 5*time.Minute {
 		return errors.New("webhook timestamp is missing or expired")
 	}
+	// Per-subject ordering: an event older than the newest one applied for this subject is a
+	// replay or arrived late, and applying it would undo a newer change (a demotion, say).
+	// It is acknowledged and dropped, so the sender does not retry it.
+	if payload.ID == "" {
+		return errors.New("webhook event names no subject")
+	}
+	fresh, err := k.store.Users().AdvanceDirectoryEvent(ctx, "kysignon", payload.ID, payload.Timestamp)
+	if err != nil {
+		return err
+	}
+	if !fresh {
+		return nil
+	}
 
 	switch payload.Event {
 	case "user.created", "user.updated":

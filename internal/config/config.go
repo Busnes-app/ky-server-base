@@ -78,6 +78,9 @@ type SSOConfig struct {
 type SCIMConfig struct {
 	Enabled     bool   `json:"enabled"`
 	BearerToken string `json:"bearer_token"`
+	// AllowAdmin lets SCIM grant the admin role. Off by default: the IdP's token must not be
+	// able to mint administrators of this app.
+	AllowAdmin bool `json:"allow_admin"`
 }
 
 // BackupConfig holds parameters for KyBackup capsules & recovery drills.
@@ -213,6 +216,7 @@ func LoadFromEnv() (*Config, error) {
 		SCIM: SCIMConfig{
 			Enabled:     getEnvBool("KY_SCIM_ENABLED", true),
 			BearerToken: getEnv("KY_SCIM_TOKEN", generateRandomHex(24)),
+			AllowAdmin:  getEnvBool("KY_SCIM_ALLOW_ADMIN", false),
 		},
 		Backup: BackupConfig{
 			Dir:                  getEnv("KY_BACKUP_DIR", ""),

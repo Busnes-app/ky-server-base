@@ -86,3 +86,13 @@ func isTrusted(addr netip.Addr, trusted []netip.Prefix) bool {
 	}
 	return false
 }
+
+// RateLimitKey is the address a rate limit counts: an IPv6 address is reduced to its /64, the
+// block a single subscriber is normally given, and anything else is returned unchanged.
+func RateLimitKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() || addr.Is4In6() {
+		return ip
+	}
+	return netip.PrefixFrom(addr, 64).Masked().String()
+}
