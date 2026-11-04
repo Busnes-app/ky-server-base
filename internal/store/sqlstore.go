@@ -532,7 +532,6 @@ func (s *sessionStore) CleanExpiredSessions(ctx context.Context) error {
 	return err
 }
 
-
 // ---------------------------------------------------------------------
 // Group Store
 // ---------------------------------------------------------------------

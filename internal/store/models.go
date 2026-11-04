@@ -6,18 +6,18 @@ import (
 
 // User represents an identity within the system.
 type User struct {
-	ID                 string     `json:"id"`
-	Username           string     `json:"username"`
-	Email              string     `json:"email"`
-	DisplayName        string     `json:"display_name"`
-	PasswordHash       string     `json:"-"`            // Never serialized to JSON
-	Role               string     `json:"role"`         // "admin", "user", "manager"
-	Status             string     `json:"status"`       // "active", "suspended", "inactive"
-	SSOProvider        string     `json:"sso_provider"` // "local", "kysignon", "oidc", "saml", "scim"
-	SSOSubject         string     `json:"sso_subject,omitempty"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	DisplayName  string `json:"display_name"`
+	PasswordHash string `json:"-"`            // Never serialized to JSON
+	Role         string `json:"role"`         // "admin", "user", "manager"
+	Status       string `json:"status"`       // "active", "suspended", "inactive"
+	SSOProvider  string `json:"sso_provider"` // "local", "kysignon", "oidc", "saml", "scim"
+	SSOSubject   string `json:"sso_subject,omitempty"`
 	// SCIMManaged marks an account SCIM created; SCIM can see and change only these. It
 	// survives adoption by a KyIdentity sign-in, which switches SSOProvider to "kysignon".
-	SCIMManaged bool `json:"-"`
+	SCIMManaged        bool       `json:"-"`
 	PushDeviceID       string     `json:"push_device_id,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
 	CreatedAt          time.Time  `json:"created_at"`
