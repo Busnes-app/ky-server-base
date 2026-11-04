@@ -204,12 +204,13 @@ ls -A data | wc -l
 With `0` confirmed, copy the restored files in. Before the server starts, delete the
 restored sessions: they are database rows, so every session cookie minted before the capsule,
 including one revoked or stolen since, would sign in again the moment the server listens.
-Everyone signs in again. Then start:
+Everyone signs in again. Then start; the chain stops before the start if any step fails
+(install the `sqlite3` CLI first if the host lacks it):
 
 ```bash
-sudo cp -a restored/data/. data/ && sudo chmod 600 data/*
-sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;'
-docker compose up -d
+sudo cp -a restored/data/. data/ && sudo chmod 600 data/* \
+  && sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;' \
+  && docker compose up -d
 ```
 
 `restore` has already turned scheduled deposits off in the restored copy and said so: it may
