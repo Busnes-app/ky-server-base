@@ -109,16 +109,23 @@ func TestWaitForBackupWorkWaitsBothAtOnce(t *testing.T) {
 	}
 }
 
-// RESTORE.md rotates these by editing .env and running `docker compose up -d`; that only
-// works if the base service forwards them.
+// RESTORE.md rotates the secrets by editing .env and running `docker compose up -d`, and the
+// KyIdentity and proxy settings are set there too; that only works if the base service
+// forwards them.
 func TestComposeForwardsRotatableSecrets(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"KY_SESSION_SECRET", "KY_SCIM_TOKEN"} {
+	for _, name := range []string{"KY_SESSION_SECRET", "KY_SCIM_TOKEN", "KY_TRUSTED_PROXIES",
+		"KY_KYSIGNON_ISSUER", "KY_KYSIGNON_CLIENT_ID", "KY_KYSIGNON_SECRET", "KY_KYSIGNON_HMAC_SECRET"} {
 		if !regexp.MustCompile(`(?m)^\s*- ` + name + `=\$\{` + name + `:-\}\s*$`).Match(raw) {
 			t.Errorf("docker-compose.yml does not forward %s from .env", name)
+		}
+	}
+	for name, def := range map[string]string{"KY_SSO_AUTO_PROVISION": "true", "KY_SCIM_ALLOW_ADMIN": "false"} {
+		if !regexp.MustCompile(`(?m)^\s*- ` + name + `=\$\{` + name + `:-` + def + `\}\s*$`).Match(raw) {
+			t.Errorf("docker-compose.yml does not forward %s from .env with default %s", name, def)
 		}
 	}
 }
