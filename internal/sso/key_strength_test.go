@@ -17,16 +17,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/config"
-	appcrypto "github.com/Busnes-app/ky_server_base/internal/crypto"
 	"github.com/Busnes-app/ky_server_base/internal/sso"
-	"github.com/Busnes-app/ky_server_base/internal/store"
-	"github.com/Busnes-app/ky_server_base/internal/testdb"
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
@@ -120,29 +116,6 @@ func signedIDToken(t *testing.T, key *rsa.PrivateKey, issuer string) string {
 		t.Fatal(err)
 	}
 	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
-}
-
-func TestDirectorySyncRefusesShortHMACKey(t *testing.T) {
-	st, err := store.Open(context.Background(), testdb.Config(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	secret := strings.Repeat("x", 15)
-	client := sso.NewKySignOnClient(config.SSOConfig{KySignOnHMACSecret: secret}, st)
-	body, err := json.Marshal(sso.KySignOnSyncPayload{
-		Event: "user.created", ID: "short-key-subject", Username: "weak-key-user",
-		Email: "weak@example.invalid", Status: "active", Role: "user", Timestamp: time.Now().Unix(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.HandleSyncWebhook(context.Background(), body, appcrypto.ComputeHMACSHA256(body, secret)); err == nil || !strings.Contains(err.Error(), "16") {
-		t.Fatalf("short HMAC result: %v", err)
-	}
-	if _, err := st.Users().GetUserBySSO(context.Background(), "kysignon", "short-key-subject"); err == nil {
-		t.Fatal("short-key webhook created a user")
-	}
 }
 
 func TestOIDCStrongModeRequiresHTTPSMetadata(t *testing.T) {

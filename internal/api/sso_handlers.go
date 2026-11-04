@@ -3,10 +3,10 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
+	"github.com/Busnes-app/ky_server_base/internal/auth"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
 	"github.com/Busnes-app/ky_server_base/internal/sso"
 	"github.com/Busnes-app/ky_server_base/internal/store"
@@ -25,23 +25,24 @@ func (s *Server) handleKySignOnLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store verifier in short-lived cookie
+	// Store verifier and nonce in short-lived cookies (__Host- on https, so Path=/).
+	host, secure := s.config.Security.HostCookies, s.config.Security.CookieSecure
 	http.SetCookie(w, &http.Cookie{
-		Name:     "ky_pkce_" + state,
+		Name:     auth.CookieName("ky_pkce_"+state, host),
 		Value:    verifier,
 		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   s.config.Security.CookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
-		Name:     "ky_nonce_" + state,
+		Name:     auth.CookieName("ky_nonce_"+state, host),
 		Value:    nonce,
-		Path:     "/api/sso/kysignon/callback",
+		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   s.config.Security.CookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -52,13 +53,13 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 
-	cookie, err := r.Cookie("ky_pkce_" + state)
+	cookie, err := r.Cookie(auth.CookieName("ky_pkce_"+state, s.config.Security.HostCookies))
 	if err != nil || cookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO state")
 		return
 	}
 	verifier := cookie.Value
-	nonceCookie, err := r.Cookie("ky_nonce_" + state)
+	nonceCookie, err := r.Cookie(auth.CookieName("ky_nonce_"+state, s.config.Security.HostCookies))
 	if err != nil || nonceCookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO nonce")
 		return
@@ -71,6 +72,7 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	mappedRole, roleSent := claims.LocalRole()
 	user, err := s.store.Users().GetUserBySSO(r.Context(), "kysignon", claims.Subject)
 	if errors.Is(err, store.ErrNotFound) {
 		user, err = s.adoptSCIMUser(r, claims.Subject)
@@ -80,12 +82,16 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 			s.writeError(w, http.StatusForbidden, "User account not provisioned")
 			return
 		}
+		role := "user"
+		if roleSent {
+			role = mappedRole
+		}
 		user = &store.User{
 			ID:          fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
 			Username:    claims.PreferredUsername,
 			Email:       claims.Email,
 			DisplayName: claims.Name,
-			Role:        "user",
+			Role:        role,
 			Status:      "active",
 			SSOProvider: "kysignon",
 			SSOSubject:  claims.Subject,
@@ -103,6 +109,21 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	if user.Status != "active" {
 		s.writeError(w, http.StatusForbidden, "Account is disabled")
 		return
+	}
+	// The role follows KyIdentity on every sign-in; the change revokes the user's other
+	// sessions in the same transaction and writes no other field, so it cannot undo a
+	// concurrent SCIM edit. A token without role claims leaves it alone.
+	if roleSent && user.Role != mappedRole {
+		prevRole := user.Role
+		user.Role = mappedRole
+		if err := s.store.Users().UpdateUserRole(r.Context(), user, prevRole); errors.Is(err, store.ErrConflict) {
+			s.writeError(w, http.StatusConflict, "Your account changed while you were signing in. Sign in again.")
+			return
+		} else if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "Failed to update the account role")
+			return
+		}
+		_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.role_changed", Resource: user.Username, Details: fmt.Sprintf("from=%s to=%s", prevRole, mappedRole), IPAddress: s.requestIP(r)})
 	}
 
 	_, _, err = s.sessions.IssueSSOSession(r.Context(), w, r, user, claims.SessionID, claims.IssuedAt)
@@ -126,31 +147,6 @@ func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, er
 		_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
 	}
 	return user, err
-}
-
-func (s *Server) handleKySignOnSyncWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	sig := r.Header.Get("X-KySignOn-Signature")
-	if sig == "" {
-		sig = r.Header.Get("X-Signature-SHA256")
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-
-	if err := s.kysignon.HandleSyncWebhook(r.Context(), body, sig); err != nil {
-		s.writeError(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]bool{"synced": true})
 }
 
 // ssoLogoutFence outlives the 5-minute login callback window, so a logout that lands

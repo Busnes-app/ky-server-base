@@ -304,7 +304,7 @@ jobs:
           curl -sf -D profile-headers.txt -X POST -H 'Content-Type: application/json' \
             -d '{"username":"admin","password":"CiSmokeAdminPass123!"}' \
             "$base/api/auth/login" | grep -q '"authenticated":true'
-          grep -iE '^Set-Cookie: ky_session=.*; Secure' profile-headers.txt
+          grep -iE '^Set-Cookie: __Host-ky_session=.*; Secure' profile-headers.txt
           docker exec ky_strong_ci /app/ky_server_base backup-drill > profile-drill.txt
           cat profile-drill.txt
           grep -q 'Status: *PASSED' profile-drill.txt

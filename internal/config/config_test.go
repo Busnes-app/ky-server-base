@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"bytes"
+	"log"
 	"os"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 
 func TestConfigRefusesShortHMACSecrets(t *testing.T) {
 	t.Setenv("KY_DATA_DIR", t.TempDir())
-	for _, name := range []string{"KY_SESSION_SECRET", "KY_KYSIGNON_HMAC_SECRET"} {
+	for _, name := range []string{"KY_SESSION_SECRET"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, strings.Repeat("x", 15))
 			if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), name) {
@@ -160,7 +161,6 @@ func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
 		{"https://app.example.com", "", true},
 		{"HTTPS://app.example.com", "", true},
 		{"http://localhost:8080", "", false},
-		{"https://app.example.com", "false", false}, // an explicit setting still wins
 		{"http://localhost:8080", "true", true},
 	} {
 		t.Setenv("KY_APP_URL", tc.url)
@@ -176,5 +176,62 @@ func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
 		if cfg.Security.CookieSecure != tc.want {
 			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q: CookieSecure=%v, want %v", tc.url, tc.explicit, cfg.Security.CookieSecure, tc.want)
 		}
+	}
+}
+
+// An https KY_APP_URL has __Host- cookies: they must be Secure and take no Domain, so
+// KY_COOKIE_SECURE=false and KY_COOKIE_DOMAIN are refused there; plain HTTP keeps the bare
+// names and may set a domain.
+func TestHostCookiesOnHTTPS(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	t.Setenv("KY_APP_URL", "https://app.example.com")
+	t.Setenv("KY_COOKIE_SECURE", "false")
+	if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "KY_COOKIE_SECURE") {
+		t.Errorf("https with KY_COOKIE_SECURE=false: %v, want refused", err)
+	}
+	for _, tc := range []struct {
+		url, secure  string
+		host, refuse bool
+	}{
+		{"https://app.example.com", "", true, true},
+		{"http://app.example.com", "true", false, false},
+		{"http://app.example.com", "", false, false},
+	} {
+		t.Setenv("KY_APP_URL", tc.url)
+		if tc.secure == "" {
+			os.Unsetenv("KY_COOKIE_SECURE")
+		} else {
+			t.Setenv("KY_COOKIE_SECURE", tc.secure)
+		}
+		os.Unsetenv("KY_COOKIE_DOMAIN")
+		cfg, err := config.LoadFromEnv()
+		if err != nil || cfg.Security.HostCookies != tc.host {
+			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q: HostCookies=%v err=%v, want %v", tc.url, tc.secure, cfg != nil && cfg.Security.HostCookies, err, tc.host)
+		}
+		t.Setenv("KY_COOKIE_DOMAIN", "example.com")
+		_, err = config.LoadFromEnv()
+		if refused := err != nil && strings.Contains(err.Error(), "KY_COOKIE_DOMAIN"); refused != tc.refuse {
+			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q with KY_COOKIE_DOMAIN: err %v, want refused=%v", tc.url, tc.secure, err, tc.refuse)
+		}
+	}
+}
+
+func TestRetiredKyIdentityHMACSettingIsAcceptedWithWarning(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	for _, secret := range []string{"x", strings.Repeat("private-value", 4)} {
+		t.Run(secret[:1], func(t *testing.T) {
+			t.Setenv("KY_KYSIGNON_HMAC_SECRET", secret)
+			var logs bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(previous)
+			cfg, err := config.LoadFromEnv()
+			if err != nil || cfg.SSO.KySignOnHMACSecret != secret {
+				t.Fatalf("legacy setting rejected: %v", err)
+			}
+			if !strings.Contains(logs.String(), "deprecated and ignored") || !strings.Contains(logs.String(), "/scim/v2") || strings.Contains(logs.String(), secret) {
+				t.Fatalf("missing migration warning or leaked secret: %q", logs.String())
+			}
+		})
 	}
 }

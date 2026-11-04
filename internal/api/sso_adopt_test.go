@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/api"
 	"github.com/Busnes-app/ky_server_base/internal/store"
@@ -53,5 +54,59 @@ func TestKyIdentitySignInAdoptsTheSCIMAccount(t *testing.T) {
 	// A deprovisioned account is refused plainly, not with a 500.
 	if w := ssoLogin(t, srv, f, "hal", "sid-h"); w.Code != http.StatusForbidden {
 		t.Fatalf("inactive account: %d %s, want 403", w.Code, w.Body.String())
+	}
+}
+
+// The role follows KyIdentity's per-app `roles` on every sign-in (legacy `role` when there
+// are no `roles`); a change revokes the other sessions; a token with neither leaves the
+// role alone.
+func TestKyIdentitySignInAppliesTheMappedRole(t *testing.T) {
+	srv, st, cfg := setupTestServer(t)
+	f := newFakeKySignOn(t)
+	cfg.SSO.KySignOnIssuer, cfg.SSO.KySignOnClientID, cfg.SSO.AutoProvision = f.issuer, "client", true
+	srv = api.NewServer(cfg, st)
+	ctx := context.Background()
+	login := func(sid string, extra map[string]any) *http.Cookie {
+		t.Helper()
+		w := ssoLoginClaims(t, srv, f, "ivy", sid, time.Now(), extra)
+		c := sessionCookie(w)
+		if w.Code != http.StatusFound || c == nil {
+			t.Fatalf("sign-in %s: %d %s", sid, w.Code, w.Body.String())
+		}
+		return c
+	}
+	role := func() string {
+		t.Helper()
+		u, err := st.Users().GetUserBySSO(ctx, "kysignon", "ivy")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.Role
+	}
+
+	first := login("s1", map[string]any{"roles": []string{"editor", "admin"}})
+	if role() != "admin" {
+		t.Fatalf("auto-provisioned role %q, want admin from roles", role())
+	}
+	// An IdP-wide admin without the app's admin role is a user here.
+	second := login("s2", map[string]any{"roles": []string{}, "role": "admin"})
+	if role() != "user" || signedIn(srv, first) || !signedIn(srv, second) {
+		t.Fatalf("demotion: role %q, old session kept %v, new session %v", role(), signedIn(srv, first), signedIn(srv, second))
+	}
+	// No roles claim: the legacy role applies.
+	third := login("s3", map[string]any{"role": "admin"})
+	if role() != "admin" || signedIn(srv, second) {
+		t.Fatalf("legacy role: %q, old session kept %v", role(), signedIn(srv, second))
+	}
+	// Neither claim: unchanged, and no session is revoked.
+	login("s4", nil)
+	if role() != "admin" || !signedIn(srv, third) {
+		t.Fatalf("no role claims: role %q, other session kept %v", role(), signedIn(srv, third))
+	}
+	// A malformed roles claim (null, or not an array) fails the sign-in; nothing changes.
+	for _, bad := range []any{nil, "admin"} {
+		if w := ssoLoginClaims(t, srv, f, "ivy", "s5", time.Now(), map[string]any{"roles": bad, "role": "user"}); w.Code != http.StatusUnauthorized || role() != "admin" {
+			t.Fatalf("roles %v: %d, role %q", bad, w.Code, role())
+		}
 	}
 }

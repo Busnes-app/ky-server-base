@@ -100,6 +100,12 @@ func ssoLogin(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string) *
 // ssoLoginAt is ssoLogin with an ID token the provider issued at iat.
 func ssoLoginAt(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string, iat time.Time) *httptest.ResponseRecorder {
 	t.Helper()
+	return ssoLoginClaims(t, srv, f, sub, sid, iat, nil)
+}
+
+// ssoLoginClaims is ssoLoginAt with extra ID-token claims.
+func ssoLoginClaims(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string, iat time.Time, extra map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/sso/kysignon/login", nil))
 	loc, err := url.Parse(w.Header().Get("Location"))
@@ -107,7 +113,11 @@ func ssoLoginAt(t *testing.T, srv *api.Server, f *fakeKySignOn, sub, sid string,
 		t.Fatalf("login redirect: %d %s", w.Code, w.Body.String())
 	}
 	q := loc.Query()
-	f.idToken = f.sign(t, "", map[string]any{"sub": sub, "sid": sid, "nonce": q.Get("nonce"), "preferred_username": sub, "iat": iat.Unix()})
+	claims := map[string]any{"sub": sub, "sid": sid, "nonce": q.Get("nonce"), "preferred_username": sub, "iat": iat.Unix()}
+	for k, v := range extra {
+		claims[k] = v
+	}
+	f.idToken = f.sign(t, "", claims)
 	req := httptest.NewRequest(http.MethodGet, "/api/sso/kysignon/callback?code=c&state="+q.Get("state"), nil)
 	for _, c := range w.Result().Cookies() {
 		req.AddCookie(c)

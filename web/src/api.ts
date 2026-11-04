@@ -6,7 +6,8 @@ function cookieValue(name: string): string {
 
 export function secureFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  const csrf = cookieValue('ky_csrf');
+  // On https the server names it __Host-ky_csrf (a sibling host cannot plant it).
+  const csrf = cookieValue('__Host-ky_csrf') || cookieValue('ky_csrf');
   if (csrf) headers.set('X-CSRF-Token', csrf);
   return fetch(input, { ...init, headers });
 }

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Busnes-app/ky-primitives/password"
 	"github.com/Busnes-app/ky_server_base/internal/api"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/crypto"
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
@@ -196,5 +198,34 @@ func TestAdminUserListIsPagedAndCarriesNoSecrets(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &page)
 	if len(page.Users) != 1 || page.Limit != 200 {
 		t.Fatalf("second page: %d rows, limit %d", len(page.Users), page.Limit)
+	}
+}
+
+// A legacy signed delivery must not create a user after webhook retirement; the removed
+// path also loses its credentialed-write CSRF exemption.
+func TestRetiredKyIdentityWebhookCannotSynchronize(t *testing.T) {
+	_, st, cfg := setupTestServer(t)
+	cfg.SSO.KySignOnHMACSecret = "legacy-secret-for-webhook-test"
+	srv := api.NewServer(cfg, st)
+	body, err := json.Marshal(map[string]any{"event": "user.created", "id": "retired-subject", "username": "retired-user", "role": "admin", "timestamp": time.Now().Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/sso/kysignon/sync", bytes.NewReader(body))
+	req.Header.Set("X-KySignOn-Signature", crypto.ComputeHMACSHA256(body, cfg.SSO.KySignOnHMACSecret))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if bytes.Contains(w.Body.Bytes(), []byte(`"synced":true`)) {
+		t.Fatal("retired webhook acknowledged synchronization")
+	}
+	if _, err := st.Users().GetUserBySSO(context.Background(), "kysignon", "retired-subject"); err != store.ErrNotFound {
+		t.Fatalf("retired webhook changed the directory: %v", err)
+	}
+	req = httptest.NewRequest("POST", "/api/sso/kysignon/sync", bytes.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "cookie-without-csrf"})
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("retired webhook kept CSRF exemption: %d", w.Code)
 	}
 }

@@ -17,11 +17,10 @@ instance or every derived product has been verified, or a FIPS certification.
   string's bytes, not hex-decoded. Startup refuses a supplied value below 16
   bytes, and production still requires an explicit durable value. For a new
   instance, generate it with `openssl rand -hex 32` and save it privately.
-- If directory-sync webhooks are enabled, coordinate a new independent random
-  `KY_KYSIGNON_HMAC_SECRET` with the sender when the existing one is too short.
-  A nonempty value below 16 bytes fails startup, and webhook use checks the same
-  floor even for a programmatically constructed client. Empty leaves sync
-  unconfigured. Do not print either secret in logs or put it in source control.
+- Migrate any old KyIdentity directory webhook to its SCIM connector at `/scim/v2`
+  ([Interfaces](INTERFACES.md#federation-and-directory-synchronization)).
+  `KY_KYSIGNON_HMAC_SECRET` is accepted but ignored with a startup warning;
+  it no longer authenticates any route. Keep the SCIM bearer token private.
 - Check the IdP's JWKS: every RSA member must have at least 2048 modulus bits.
   A newly fetched set containing a smaller RSA key is refused, including a weak
   key retained beside a strong key. Replace/retire weak signing keys at the IdP;

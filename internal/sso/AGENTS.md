@@ -4,11 +4,9 @@
 Provides unified Single Sign-On federation for KySignOn, Generic OpenID Connect (Google, Microsoft Entra ID, Okta, Keycloak), and SAML 2.0 Service Provider (SP).
 
 ## Ownership
-Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 signed directory sync webhooks, and SAML metadata publication.
+Owns the application adapters around OAuth/OIDC login, verified back-channel logout and SAML metadata publication. KyIdentity directory synchronization belongs to the SCIM connector, not a webhook.
 
 ## Local Contracts
-- `KySignOnClient.HandleSyncWebhook` refuses keys below `crypto.MinHMACKeyBytes`
-  and verifies HMAC-SHA256 signatures before modifying local user state.
 - PKCE with `S256` is enforced on all OAuth/OIDC authorization requests.
 - ID tokens require provider signature, issuer, audience, expiry, and one-time nonce verification before claims are trusted.
 - OAuth discovery, authorization URLs, PKCE parameters, code exchange, key
@@ -20,9 +18,6 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   parsing; case variants must never substitute another modulus for this check.
 - Discovery and token exchange use a client with a 10 s timeout in every mode
   (`strongOIDCContext`), because discovery holds the provider mutex.
-- Directory deprovisioning (`user.deactivated`, `user.deleted`) ignores only
-  `store.ErrNotFound`; any other lookup error fails the webhook. Updates use
-  `UpdateUserProfile`, a compare-and-swap on the role and status read.
 - When `fips140.Enabled()`, issuer/authorization/token/JWKS endpoints require
   HTTPS without URL credentials; discovery/token redirects are refused. Preserve
   caller TLS trust roots and ordinary verification. This mode is process-wide.
@@ -31,13 +26,16 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
   a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
   `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
-- `AdoptSCIMUser` is the one adoption routine: the KyIdentity callback and `user.created`/`user.updated` webhook events call it when no `("kysignon", sub)` row exists, so neither path creates a second row for a SCIM-provisioned person.
-- Directory webhook timestamps are accepted only within five minutes, and events are ordered per subject: under the client's `order` mutex an event older than `LastDirectoryEvent` is acknowledged and dropped; otherwise it is recorded with `RecordDirectoryEvent` (never moves back) and then applied, so no failure between the two lets an older event undo a committed newer one; a failed event is retried by the sender with the same timestamp (equal is applied) and nothing is ever undone. An event without `id` is refused. Status or role changes revoke the user's sessions in the same transaction (`UpdateUserProfile`); deactivation deletes sessions first, so it also ends them when the row was already inactive and a failure commits nothing.
+- `IdentityClaims.Roles` is KyIdentity's per-app `roles` claim (nil when absent; a non-array is an invalid token). `LocalRole` maps it: `admin` in `roles` is admin, otherwise user; without `roles` the legacy `role`; with neither, `ok` is false and the stored role stays.
+- `AdoptSCIMUser` links a SCIM account whose externalId equals the KyIdentity
+  callback's subject before provisioning, retaining its SCIM management and id.
+- A present empty per-app `roles` array means user even with global `role: admin`.
+  Operators must assign the app's explicit `admin` role in KyIdentity before upgrading.
 
 ## Verification
 - `go test -v ./internal/sso/...` (`TestVerifyLogoutToken` holds one rejection case per logout-token rule)
 - Repeat with `GODEBUG=fips140=on`: RSA-1024/2047 refusal, strong token/cache/nonce
-  behavior, no short-key sync mutation, bounded/malformed/redirected JWKS, HTTPS
+  behavior, bounded/malformed/redirected JWKS, HTTPS
   metadata policy and refusal of a trusted RSA-1024 TLS peer.
 - `TestOIDCJWKMemberParsingMatchesVerifier` uses real RSA signatures in both
   adapters to check case variants, member order, and strong-key acceptance.

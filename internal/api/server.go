@@ -228,7 +228,6 @@ func (s *Server) routes() {
 	// SSO
 	s.mux.HandleFunc("/api/sso/kysignon/login", s.handleKySignOnLogin)
 	s.mux.HandleFunc("/api/sso/kysignon/callback", s.handleKySignOnCallback)
-	s.mux.HandleFunc("/api/sso/kysignon/sync", s.handleKySignOnSyncWebhook)
 	s.mux.HandleFunc("POST /api/sso/kysignon/backchannel-logout", s.handleKySignOnBackchannelLogout)
 	s.mux.HandleFunc("/saml/metadata", s.handleSAMLMetadata)
 
@@ -319,7 +318,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isUnsafeMethod(r.Method) && hasSessionCookie(r) && !csrfExempt(r.URL.Path) && !auth.ValidateCSRF(r) {
+	if isUnsafeMethod(r.Method) && s.hasSessionCookie(r) && !csrfExempt(r.URL.Path) && !auth.ValidateCSRF(r, s.config.Security.HostCookies) {
 		s.writeError(w, http.StatusForbidden, "Invalid CSRF token")
 		return
 	}
@@ -349,13 +348,13 @@ func isUnsafeMethod(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
-func hasSessionCookie(r *http.Request) bool {
-	cookie, err := r.Cookie(auth.SessionCookieName)
+func (s *Server) hasSessionCookie(r *http.Request) bool {
+	cookie, err := r.Cookie(auth.CookieName(auth.SessionCookieName, s.config.Security.HostCookies))
 	return err == nil && cookie.Value != ""
 }
 
 func csrfExempt(path string) bool {
-	return isSignIn(path) || path == "/api/sso/kysignon/sync"
+	return isSignIn(path)
 }
 
 func isSignIn(path string) bool {

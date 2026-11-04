@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,9 +29,11 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (Store, error) {
 }
 
 func openSQLite(ctx context.Context, dsn string) (Store, error) {
-	filePath := dsn
-	if idx := strings.Index(dsn, "?"); idx != -1 {
-		filePath = dsn[:idx]
+	filePath, _, _ := strings.Cut(strings.TrimPrefix(dsn, "file:"), "?")
+	// A server URL here (postgres://...) would quietly become a SQLite file named after it,
+	// outside the data volume. The DSN is not echoed: it may carry a password.
+	if strings.Contains(filePath, "://") {
+		return nil, errors.New("KY_DB_DSN is a server URL but the database driver is sqlite: set KY_DB_DRIVER=postgres for PostgreSQL (under compose, in docker-compose.yml or an overlay: it pins sqlite), or give a SQLite file path")
 	}
 
 	dir := filepath.Dir(filePath)

@@ -15,7 +15,7 @@ ties them together and points at the evidence. Paths are relative to the reposit
    replayed, forged or read from storage.
 2. **Only administrators reach privileged functions**, and an account still on its bootstrap
    password reaches nothing but the password change.
-3. **Federated identity is accepted only when it verifies**: OIDC tokens and directory webhooks
+3. **Federated identity is accepted only when it verifies**: OIDC tokens and SCIM bearer credentials
    are checked before any claim or change is trusted.
 4. **Secrets at rest stay sealed** from anyone who copies the database without the key.
 5. **Backups can be opened only by the recovery custodians**, never by this server or KyRecovery.
@@ -28,7 +28,7 @@ ties them together and points at the evidence. Paths are relative to the reposit
 | Anonymous internet client | Send any request through the reverse proxy | Take over an account, guess passwords, exhaust resources |
 | Signed-in ordinary user | Use their own session | Reach admin routes or other users' data |
 | Malicious web page in the user's browser | Make cross-site requests with the user's cookies | Act as the user (CSRF), inject script |
-| Forged identity provider or directory | Send tokens or webhooks | Sign in as someone, change roles |
+| Forged identity provider or directory | Send tokens or provisioning requests | Sign in as someone, change roles |
 | Someone with the database file or a backup | Read the SQLite file or a `pg_dump` | Sessions, recovery tokens, retired TOTP secrets |
 | Network attacker at KyRecovery pairing | Answer the pairing request | Substitute a recovery key whose shares they hold |
 
@@ -42,13 +42,17 @@ Out of scope: an attacker who runs code on the host or holds both the database a
    (`internal/auth`, `ClientIP`). A list entry that trusts every address is refused at startup
    (`internal/config/config.go`).
 2. **Server → identity providers.** OIDC goes through `golang.org/x/oauth2` and `coreos/go-oidc`
-   with PKCE S256 and a nonce (`internal/sso/oauth.go`). KySignOn directory webhooks are
-   HMAC-SHA256 signed with at least 16 key bytes and accepted only within five minutes (`internal/sso/kysignon.go`). KySignOn
+   with PKCE S256 and a nonce (`internal/sso/oauth.go`). The incompatible directory webhook is retired; KyIdentity uses the SCIM
+   connector below. KyIdentity
    back-channel logout tokens are verified like ID tokens plus the logout-token claims
    (`internal/sso/backchannel.go`). No SAML
    assertion route is exposed.
 3. **SCIM clients → server.** A bearer token compared in constant time; SCIM sees only the accounts it
-   created and cannot grant admin unless `KY_SCIM_ALLOW_ADMIN` (`internal/scim/handler.go`).
+   created or safely adopted from KyIdentity and cannot grant admin unless `KY_SCIM_ALLOW_ADMIN` (`internal/scim/handler.go`).
+   Adoption matches the immutable subject first; a username match with a different
+   nonempty `externalId` returns 409 without mutation. Local rows are never adopted.
+   Sign-in maps a present per-app `roles` claim independently of the global role;
+   `roles: []` is an ordinary user.
 4. **Server → its database.** Secrets (the KyRecovery token, retired TOTP secrets) are AES-256-GCM
    sealed; sessions are stored only as SHA-256 hashes; passwords as Argon2id hashes from `ky-primitives/password`.
 5. **Server → KyRecovery.** Capsules are sealed to the suite recovery key before they leave
@@ -64,7 +68,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
   trust-everything proxy list; forwarded headers are ignored until a proxy is named; private
   KyRecovery destinations are refused unless `KY_BACKUP_ALLOW_PRIVATE_RECOVERY` is set.
 - **Complete mediation.** Session lookup on every request rejects inactive accounts and deletes
-  their session; a webhook status or role change revokes the user's sessions.
+  their session; a SCIM status or role change revokes the user's sessions.
 - **Economy of mechanism.** Eight direct Go modules; OAuth/OIDC and SCIM come from maintained
   libraries rather than local parsers.
 - **Open design.** Only published algorithms (Argon2id, AES-256-GCM, HMAC-SHA-256, SHA-256,
@@ -76,13 +80,13 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 |---|---|---|
 | Password guessing, credential stuffing | Argon2id hashes; at least 12 characters; login limited to 20 a minute per client and 10 failures per account per client per 15 minutes (IPv6 by /64, keyed by `ClientIP`), checked before hashing and answered like a wrong password; unknown names cost a dummy verification; a solved PoW buys one attempt. MFA is KyIdentity's | `internal/api/auth_handlers.go`, `internal/auth/pow.go`, `internal/auth/policy.go`, `TestLoginPerAccountWindow` |
 | Session theft | Random 32-byte token, only its SHA-256 stored; `HttpOnly`, `SameSite=Lax`, `Secure` when configured | `internal/auth/session.go`, `internal/store/sqlstore.go` |
-| CSRF | Credentialed writes need the CSRF cookie echoed in a header, compared in constant time; CORS admits only the exact `KY_APP_URL` origin. Sign-in (no token yet) refuses `Sec-Fetch-Site` cross-site/same-site and any `Origin` other than the request host or `KY_APP_URL` | `internal/auth/session.go`, `internal/api/server.go`, `TestCookieAuthenticatedWriteRequiresCSRF`, `TestForeignOriginSignInIsRefusedWithoutFetchMetadata` |
+| CSRF | Credentialed writes need the CSRF cookie echoed in a header, compared in constant time; CORS admits only the exact `KY_APP_URL` origin. Sign-in (no token yet) refuses `Sec-Fetch-Site` cross-site/same-site and any `Origin` other than the request host or `KY_APP_URL`. On https every cookie is `__Host-`, so a sibling host cannot plant a session, CSRF or SSO state cookie (login CSRF by cookie injection) | `internal/auth/session.go`, `internal/api/server.go`, `TestCookieAuthenticatedWriteRequiresCSRF`, `TestForeignOriginSignInIsRefusedWithoutFetchMetadata`, `TestHTTPSCookiesAreHostCookies` |
 | Broken access control | Admin wrapper on every privileged route; per-role tests for each | `internal/api/server.go`, `internal/api/authz_test.go` |
 | Forged federated identity | ID token signature, issuer, audience, expiry and one-time nonce verified; PKCE S256 | `internal/sso/oauth.go` |
 | Session outliving its identity-provider login | Back-channel logout token verified (signature, issuer, audience, expiry, logout event, no nonce) before ending every session of its `sid`, or of its subject issued before it; the `sid` or the subject's cutoff is fenced so an in-flight callback cannot revive it | `internal/sso/backchannel.go`, `internal/store/sqlstore.go`, `TestVerifyLogoutToken`, `TestBackchannelLogoutEndsTheSSOLogin` |
-| Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; configured HMAC keys require 16 bytes and sync checks again before mutation | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
+| Undersized imported signing keys | JWKS RSA moduli below 2048 bits are rejected before the upstream verifier caches them; session signing secrets require 16 bytes; the retired webhook setting is ignored | `internal/sso/jwks_strength.go`, `internal/config/config.go`, `internal/sso/key_strength_test.go` |
 | Weak TLS peers or HTTP IdP downgrade | Supported process profile enables Go's verified-chain key policy, requires HTTPS OIDC endpoints and refuses redirects; normal trust/hostname verification remains required | [Strong profile](STRONG-CRYPTO.md), `internal/sso/oauth.go`, `TestOIDCStrongModeRejectsWeakTLSPeer` |
-| Forged or replayed directory webhook | HMAC-SHA256 checked in constant time before any change; five-minute window; per-subject ordering drops an event older than the last one applied | `internal/sso/kysignon.go`, `internal/crypto/crypto.go`, `TestKySignOnWebhookDropsOlderEventsPerSubject` |
+| Identity confusion after username reuse | SCIM refuses adoption when a nonempty externalId differs from the KyIdentity subject; local rows stay excluded | `internal/scim/handler.go`, `TestSCIMCreateTakesOverTheKyIdentityAccount` |
 | SQL injection | Parameterised statements throughout (`?`, rebound per driver); the only `Sprintf` builds the SQLite DSN | `internal/store` |
 | Cross-site scripting, clickjacking | React escaping with no `dangerouslySetInnerHTML`; CSP `script-src 'self'`, `frame-ancestors 'none'`; `X-Frame-Options: DENY` | `web/src`, `internal/api/server.go` |
 | Oversized requests | Request bodies capped at 1 MiB, smaller on backup routes | `internal/api/server.go`, `internal/api/backup_handlers.go` |

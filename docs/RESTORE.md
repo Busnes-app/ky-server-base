@@ -177,8 +177,11 @@ restored one at first open, mixing two databases.
 
 ```bash
 docker compose down
-ls -A data | wc -l
+sudo ls -A data | wc -l
 ```
+
+(`data/` is root-owned, mode 0700 after an earlier restore, so list it as root: an unprivileged
+`ls` there prints `0` for a full directory.)
 
 That must print `0`. If it does not, the old directory still holds data, and you keep a copy
 of it before anything else: it holds every change made after the capsule was sealed, and it
@@ -197,18 +200,23 @@ old live directory in the clear, with the same key the capsule holds; it is remo
 Only with the copy confirmed, empty the directory. This is irreversible:
 
 ```bash
-sudo rm -rf data/* data/.[!.]*
-ls -A data | wc -l
+sudo sh -c 'rm -rf data/* data/.[!.]*'
+sudo ls -A data | wc -l
 ```
 
 With `0` confirmed, copy the restored files in. Before the server starts, delete the
 restored sessions: they are database rows, so every session cookie minted before the capsule,
 including one revoked or stolen since, would sign in again the moment the server listens.
-Everyone signs in again. Then start; the chain stops before the start if any step fails
-(install the `sqlite3` CLI first if the host lacks it):
+Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
+runs as root and refuses an `encryption.key` it does not own, so hand them to root (or to the
+UID of a `user:` override, if you run one; on rootless Docker or Podman, where container root
+is your own UID, leave out the `chown`). The `chmod` comes first: `cp -a` gives `data/` the
+restored directory's mode 0700, so once root owns it your shell can no longer list
+`data/*`. Then start; the chain stops before the start if any step fails (install the
+`sqlite3` CLI first if the host lacks it):
 
 ```bash
-sudo cp -a restored/data/. data/ && sudo chmod 600 data/* \
+sudo cp -a restored/data/. data/ && sudo chmod 600 data/* && sudo chown -R 0:0 data \
   && sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;' \
   && docker compose up -d
 ```

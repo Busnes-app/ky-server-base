@@ -3,7 +3,9 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -53,7 +55,10 @@ type SecurityConfig struct {
 	EncryptionKey []byte `json:"-"` // 32 bytes for AES-256-GCM; never serialised
 	CookieSecure  bool   `json:"cookie_secure"`
 	CookieDomain  string `json:"cookie_domain"`
-	SessionTTL    time.Duration
+	// HostCookies: an https KY_APP_URL (always with Secure cookies) names every cookie with
+	// the __Host- prefix (auth.CookieName), so no other host under the domain can plant one.
+	HostCookies bool `json:"host_cookies"`
+	SessionTTL  time.Duration
 	// TrustedProxies is the parsed KY_TRUSTED_PROXIES allowlist. Only a request whose peer
 	// address falls inside it may speak for a client other than itself.
 	TrustedProxies []netip.Prefix `json:"-"`
@@ -65,7 +70,7 @@ type SSOConfig struct {
 	KySignOnIssuer      string `json:"kysignon_issuer"`
 	KySignOnClientID    string `json:"kysignon_client_id"`
 	KySignOnSecret      string `json:"kysignon_secret"`
-	KySignOnHMACSecret  string `json:"kysignon_hmac_secret"`
+	KySignOnHMACSecret  string `json:"kysignon_hmac_secret"` // Deprecated: accepted but ignored.
 	GenericOIDCIssuer   string `json:"generic_oidc_issuer"`
 	GenericOIDCClientID string `json:"generic_oidc_client_id"`
 	GenericOIDCSecret   string `json:"generic_oidc_secret"`
@@ -145,8 +150,8 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("KY_SESSION_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
 	}
 	kysignonHMAC := getEnv("KY_KYSIGNON_HMAC_SECRET", "")
-	if kysignonHMAC != "" && len(kysignonHMAC) < crypto.MinHMACKeyBytes {
-		return nil, fmt.Errorf("KY_KYSIGNON_HMAC_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
+	if kysignonHMAC != "" {
+		log.Print("WARNING: KY_KYSIGNON_HMAC_SECRET is deprecated and ignored; the KyIdentity directory webhook was removed. Configure the KyIdentity SCIM connector at /scim/v2 instead.")
 	}
 
 	encryptionKey, ok, err := keyfile.FromEnv("KY_ENCRYPTION_KEY", 32)
@@ -178,6 +183,18 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("KY_TRUSTED_PROXIES: %w", err)
 	}
 
+	// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
+	cookieSecure := getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://"))
+	cookieDomain := getEnv("KY_COOKIE_DOMAIN", "")
+	https := strings.HasPrefix(strings.ToLower(appURL), "https://")
+	// On https the cookies are __Host- cookies, which browsers accept only Secure.
+	if https && !cookieSecure {
+		return nil, errors.New("KY_COOKIE_SECURE is false or empty: not allowed with an https KY_APP_URL, whose cookies are __Host- cookies and must be Secure; remove KY_COOKIE_SECURE")
+	}
+	if https && cookieDomain != "" {
+		return nil, errors.New("KY_COOKIE_DOMAIN: not allowed with an https KY_APP_URL: there the cookies are __Host- cookies, which browsers refuse with a Domain, so that no other host under that domain can set them; leave KY_COOKIE_DOMAIN empty")
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Host:         host,
@@ -197,11 +214,11 @@ func LoadFromEnv() (*Config, error) {
 			ConnMaxLifetime: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
-			SessionSecret: sessionSecret,
-			EncryptionKey: encryptionKey,
-			// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
-			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://")),
-			CookieDomain:   getEnv("KY_COOKIE_DOMAIN", ""),
+			SessionSecret:  sessionSecret,
+			EncryptionKey:  encryptionKey,
+			CookieSecure:   cookieSecure,
+			CookieDomain:   cookieDomain,
+			HostCookies:    https,
 			SessionTTL:     7 * 24 * time.Hour,
 			TrustedProxies: trustedProxies,
 		},
