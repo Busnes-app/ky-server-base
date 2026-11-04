@@ -207,11 +207,13 @@ including one revoked or stolen since, would sign in again the moment the server
 Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
 runs as root and refuses an `encryption.key` it does not own, so hand them to root (or to the
 UID of a `user:` override, if you run one; on rootless Docker or Podman, where container root
-is your own UID, leave out the `chown`). Then start; the chain stops before the start if
-any step fails (install the `sqlite3` CLI first if the host lacks it):
+is your own UID, leave out the `chown`). The `chmod` comes first: `cp -a` gives `data/` the
+restored directory's mode 0700, so once root owns it your shell can no longer list
+`data/*`. Then start; the chain stops before the start if any step fails (install the
+`sqlite3` CLI first if the host lacks it):
 
 ```bash
-sudo cp -a restored/data/. data/ && sudo chown -R 0:0 data && sudo chmod 600 data/* \
+sudo cp -a restored/data/. data/ && sudo chmod 600 data/* && sudo chown -R 0:0 data \
   && sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;' \
   && docker compose up -d
 ```

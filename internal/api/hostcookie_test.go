@@ -97,23 +97,3 @@ func TestHTTPSCookiesAreHostCookies(t *testing.T) {
 		t.Fatalf("SSO sign-in on https: %d %s", w.Code, w.Body)
 	}
 }
-
-// Without host cookies, a sign-in expires any __Host-ky_csrf left from host-cookie mode: the
-// web app prefers it, so it would shadow the new token and fail every write with 403.
-func TestBareCookieSignInExpiresAStaleHostCSRFCookie(t *testing.T) {
-	srv, st, _ := setupTestServer(t)
-	hash, _ := password.Hash("SuperSecretPass123!")
-	if err := st.Users().CreateUser(context.Background(), &store.User{ID: "usr_i", Username: "ida", PasswordHash: hash, Role: "user", Status: "active", SSOProvider: "local"}); err != nil {
-		t.Fatal(err)
-	}
-	body, _ := json.Marshal(map[string]string{"username": "ida", "password": "SuperSecretPass123!"})
-	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body)))
-	var expired bool
-	for _, c := range w.Result().Cookies() {
-		expired = expired || (c.Name == "__Host-ky_csrf" && c.MaxAge < 0 && c.Secure && c.Path == "/")
-	}
-	if w.Code != http.StatusOK || !expired {
-		t.Fatalf("login %d did not expire __Host-ky_csrf: %v", w.Code, w.Result().Cookies())
-	}
-}

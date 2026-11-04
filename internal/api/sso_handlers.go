@@ -112,11 +112,12 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// The role follows KyIdentity on every sign-in; the change revokes the user's other
-	// sessions in the same transaction. A token without role claims leaves it alone.
+	// sessions in the same transaction and writes no other field, so it cannot undo a
+	// concurrent SCIM edit. A token without role claims leaves it alone.
 	if roleSent && user.Role != mappedRole {
 		prevRole := user.Role
 		user.Role = mappedRole
-		if err := s.store.Users().UpdateUserProfile(r.Context(), user, prevRole, user.Status); errors.Is(err, store.ErrConflict) {
+		if err := s.store.Users().UpdateUserRole(r.Context(), user, prevRole); errors.Is(err, store.ErrConflict) {
 			s.writeError(w, http.StatusConflict, "Your account changed while you were signing in. Sign in again.")
 			return
 		} else if err != nil {

@@ -21,8 +21,8 @@ const (
 
 var ErrPasswordChangeRequired = errors.New("password change required")
 
-// CookieName is the name a cookie has on this server: with host cookies (an https app URL
-// and Secure cookies, config.SecurityConfig.HostCookies) it carries the __Host- prefix, which
+// CookieName is the name a cookie has on this server: with host cookies (an https app URL,
+// config.SecurityConfig.HostCookies) it carries the __Host- prefix, which
 // the browser accepts only from this host (Secure, Path=/, no Domain), so a sibling subdomain
 // cannot plant a session, CSRF or SSO state cookie. Otherwise the bare name.
 func CookieName(name string, host bool) string {
@@ -104,13 +104,6 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 		SameSite: http.SameSiteLaxMode,
 		Domain:   sm.config.CookieDomain,
 	})
-
-	if !sm.config.HostCookies {
-		// The web app prefers __Host-ky_csrf; one left from host-cookie mode (https with
-		// Secure cookies, since switched off) would shadow this token and fail every write.
-		// Browsers drop this Secure Set-Cookie on plain HTTP, where JS cannot see it anyway.
-		http.SetCookie(w, &http.Cookie{Name: CookieName(CSRFCookieName, true), Value: "", Path: "/", MaxAge: -1, Secure: true, SameSite: http.SameSiteLaxMode})
-	}
 
 	return sess, rawToken, nil
 }

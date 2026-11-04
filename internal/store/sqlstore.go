@@ -274,34 +274,56 @@ WHERE id = ?
 	return uniqueErr(tx.Commit())
 }
 
+const profileSet = `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?`
+
 func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole, prevStatus string) error {
-	return u.updateProfile(ctx, user, prevRole, prevStatus, nil)
-}
-
-func (u *userStore) UpdateSCIMProfile(ctx context.Context, user *User, prevRole, prevStatus, prevSubject string) error {
-	return u.updateProfile(ctx, user, prevRole, prevStatus, &prevSubject)
-}
-
-// updateProfile is UpdateUserProfile; with prevSubject it also compares the subject read and,
-// while the row is still "scim", writes user.SSOSubject, all in the one statement.
-func (u *userStore) updateProfile(ctx context.Context, user *User, prevRole, prevStatus string, prevSubject *string) error {
 	user.UpdatedAt = time.Now().UTC()
+	return u.updateProfile(ctx, user, prevRole, prevStatus, true, profileSet+`
+WHERE id = ? AND role = ? AND status = ?`,
+		user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.ID, prevRole, prevStatus)
+}
+
+// UpdateSCIMProfile is UpdateUserProfile that also compares the subject read and, while the row is
+// still "scim", writes user.SSOSubject, all in the one statement.
+func (u *userStore) UpdateSCIMProfile(ctx context.Context, user *User, prevRole, prevStatus, prevSubject string) error {
+	user.UpdatedAt = time.Now().UTC()
+	return u.updateProfile(ctx, user, prevRole, prevStatus, true, profileSet+`,
+    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
+WHERE id = ? AND role = ? AND status = ? AND sso_subject = ?`,
+		user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus, prevSubject)
+}
+
+func (u *userStore) TakeOverForSCIM(ctx context.Context, user *User, prevRole, prevStatus string) error {
+	user.UpdatedAt = time.Now().UTC()
+	if err := u.updateProfile(ctx, user, prevRole, prevStatus, true, profileSet+`, scim_managed = ?
+WHERE id = ? AND role = ? AND status = ? AND sso_provider = 'kysignon' AND sso_subject = ? AND scim_managed = ?`,
+		user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, true, user.ID, prevRole, prevStatus, user.SSOSubject, false); err != nil {
+		return err
+	}
+	user.SCIMManaged = true
+	return nil
+}
+
+func (u *userStore) UpdateUserRole(ctx context.Context, user *User, prevRole string) error {
+	user.UpdatedAt = time.Now().UTC()
+	return u.updateProfile(ctx, user, prevRole, user.Status, false, `UPDATE users SET role = ?, updated_at = ?
+WHERE id = ? AND role = ? AND status = ?`, user.Role, user.UpdatedAt, user.ID, prevRole, user.Status)
+}
+
+// updateProfile runs one compare-and-swap UPDATE of user's row (q, args) in a transaction:
+// the name check first when checkName, ErrConflict when no row matched (ErrNotFound when the
+// row is gone), and the user's sessions deleted in the same transaction when role or status
+// changed from prevRole/prevStatus.
+func (u *userStore) updateProfile(ctx context.Context, user *User, prevRole, prevStatus string, checkName bool, q string, args ...any) error {
 	tx, err := u.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
-		return err
-	}
-	q := `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
-WHERE id = ? AND role = ? AND status = ?`
-	args := []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.ID, prevRole, prevStatus}
-	if prevSubject != nil {
-		q = `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?,
-    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
-WHERE id = ? AND role = ? AND status = ? AND sso_subject = ?`
-		args = []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus, *prevSubject}
+	if checkName {
+		if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
+			return err
+		}
 	}
 	res, err := tx.ExecContext(ctx, u.store.rebind(q), args...)
 	if err != nil {
@@ -327,17 +349,6 @@ WHERE id = ? AND role = ? AND status = ? AND sso_subject = ?`
 
 func (u *userStore) LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error {
 	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, subject, fromProvider)
-	if err != nil {
-		return err
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		return ErrConflict
-	}
-	return nil
-}
-
-func (u *userStore) SetSCIMManaged(ctx context.Context, id, subject string, managed bool) error {
-	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET scim_managed = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = 'kysignon' AND scim_managed = ?`), managed, time.Now().UTC(), id, subject, !managed)
 	if err != nil {
 		return err
 	}

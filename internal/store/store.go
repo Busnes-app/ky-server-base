@@ -47,10 +47,15 @@ type UserStore interface {
 	// LinkSSOIdentity moves an account from fromProvider to toProvider, keeping its subject;
 	// ErrConflict when the account is no longer on fromProvider or no longer has subject.
 	LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error
-	// SetSCIMManaged marks a KyIdentity account SCIM-managed (SCIM taking over an account
-	// KyIdentity sign-in created), or with managed false undoes a take-over that failed;
-	// ErrConflict unless the account is a "kysignon" row with that subject in the other state.
-	SetSCIMManaged(ctx context.Context, id, subject string, managed bool) error
+	// TakeOverForSCIM is UpdateUserProfile that also marks the account SCIM-managed, in the
+	// same statement, and applies only while it is an unmanaged "kysignon" row with subject
+	// u.SSOSubject (ErrConflict otherwise): SCIM taking over an account KyIdentity sign-in
+	// created, all or nothing.
+	TakeOverForSCIM(ctx context.Context, u *User, prevRole, prevStatus string) error
+	// UpdateUserRole writes only the role, as a compare-and-swap on prevRole and u.Status,
+	// deleting the user's sessions in the same transaction when it changes; a concurrent
+	// profile edit is never written back.
+	UpdateUserRole(ctx context.Context, u *User, prevRole string) error
 	// UpdateSCIMProfile is UpdateUserProfile that also compares the subject read
 	// (prevSubject, ErrConflict otherwise) and, while the account is still "scim", writes
 	// u.SSOSubject (the SCIM externalId) in the same statement.

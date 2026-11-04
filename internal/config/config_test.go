@@ -160,7 +160,6 @@ func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
 		{"https://app.example.com", "", true},
 		{"HTTPS://app.example.com", "", true},
 		{"http://localhost:8080", "", false},
-		{"https://app.example.com", "false", false}, // an explicit setting still wins
 		{"http://localhost:8080", "true", true},
 	} {
 		t.Setenv("KY_APP_URL", tc.url)
@@ -179,16 +178,21 @@ func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
 	}
 }
 
-// An https KY_APP_URL takes no KY_COOKIE_DOMAIN (its cookies are __Host- cookies, which take
-// no Domain, whenever they are Secure); plain HTTP keeps the bare names and may set a domain.
+// An https KY_APP_URL has __Host- cookies: they must be Secure and take no Domain, so
+// KY_COOKIE_SECURE=false and KY_COOKIE_DOMAIN are refused there; plain HTTP keeps the bare
+// names and may set a domain.
 func TestHostCookiesOnHTTPS(t *testing.T) {
 	t.Setenv("KY_DATA_DIR", t.TempDir())
+	t.Setenv("KY_APP_URL", "https://app.example.com")
+	t.Setenv("KY_COOKIE_SECURE", "false")
+	if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "KY_COOKIE_SECURE") {
+		t.Errorf("https with KY_COOKIE_SECURE=false: %v, want refused", err)
+	}
 	for _, tc := range []struct {
 		url, secure  string
 		host, refuse bool
 	}{
 		{"https://app.example.com", "", true, true},
-		{"https://app.example.com", "false", false, true},
 		{"http://app.example.com", "true", false, false},
 		{"http://app.example.com", "", false, false},
 	} {

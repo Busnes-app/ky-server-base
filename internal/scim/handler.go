@@ -170,28 +170,26 @@ func (h *userResourceHandler) kyIdentityAccount(r *http.Request, subject, userna
 	return nil, nil
 }
 
-// takeOver answers a create for a person who already signed in through KyIdentity: their
-// account becomes SCIM-managed (keeping its id and KyIdentity subject) and the create's
-// attributes are applied as a PUT would apply them. Local accounts never reach here.
+// takeOver answers a create for a person who already signed in through KyIdentity: in one
+// statement their account becomes SCIM-managed (keeping its id and KyIdentity subject) and
+// takes the create's attributes as a PUT would, or nothing changes. Local accounts never
+// reach here.
 func (h *userResourceHandler) takeOver(r *http.Request, user *store.User, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
-	if roles, sent := attrs["roles"]; sent {
-		if err := h.checkRole(user.Role, roleValue(roles)); err != nil {
-			return protocol.Resource{}, err
-		}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	oldRole, oldStatus, subject := user.Role, user.Status, user.SSOSubject
+	replaceUser(user, attrs)
+	user.SSOSubject = subject
+	if err := h.checkRole(oldRole, user.Role); err != nil {
+		return protocol.Resource{}, err
 	}
-	if err := h.store.Users().SetSCIMManaged(r.Context(), user.ID, user.SSOSubject, true); errors.Is(err, store.ErrConflict) {
-		return protocol.Resource{}, protocolErrors.ScimErrorUniqueness
+	if err := h.store.Users().TakeOverForSCIM(r.Context(), user, oldRole, oldStatus); errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+		return protocol.Resource{}, protocolErrors.ScimErrorUniqueness // changed or taken meanwhile; the IdP retries
 	} else if err != nil {
-		return protocol.Resource{}, err
-	}
-	res, err := h.Replace(r, user.ID, attrs)
-	if err != nil {
-		// A refused create (a taken userName, say) leaves the account as it was.
-		_ = h.store.Users().SetSCIMManaged(r.Context(), user.ID, user.SSOSubject, false)
-		return protocol.Resource{}, err
+		return protocol.Resource{}, scimStoreError(err, user.ID)
 	}
 	_ = h.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "scim.user.adopt", Resource: user.Username})
-	return res, nil
+	return userResource(user), nil
 }
 
 func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {
@@ -277,16 +275,21 @@ func userPage(users []*store.User, total int) protocol.Page {
 
 func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	return h.update(r, id, func(user *store.User) error {
-		user.Username, _ = attrs["userName"].(string)
-		user.Email = primaryValue(attrs["emails"])
-		user.DisplayName = stringValue(attrs, "displayName", user.Username)
-		if roles, sent := attrs["roles"]; sent {
-			user.Role = roleValue(roles)
-		}
-		user.Status = statusFromActive(attrs)
-		user.SSOSubject = stringValue(attrs, "externalId", user.SSOSubject)
+		replaceUser(user, attrs)
 		return nil
 	})
+}
+
+// replaceUser applies a PUT (or a take-over create) to user: an omitted roles keeps the role.
+func replaceUser(user *store.User, attrs protocol.ResourceAttributes) {
+	user.Username, _ = attrs["userName"].(string)
+	user.Email = primaryValue(attrs["emails"])
+	user.DisplayName = stringValue(attrs, "displayName", user.Username)
+	if roles, sent := attrs["roles"]; sent {
+		user.Role = roleValue(roles)
+	}
+	user.Status = statusFromActive(attrs)
+	user.SSOSubject = stringValue(attrs, "externalId", user.SSOSubject)
 }
 
 func (h *userResourceHandler) Delete(r *http.Request, id string) error {
