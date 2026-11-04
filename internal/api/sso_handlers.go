@@ -27,9 +27,9 @@ func (s *Server) handleKySignOnLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store verifier and nonce in short-lived cookies (__Host- on https, so Path=/).
-	secure := s.config.Security.CookieSecure
+	host, secure := s.config.Security.HostCookies, s.config.Security.CookieSecure
 	http.SetCookie(w, &http.Cookie{
-		Name:     auth.CookieName("ky_pkce_"+state, secure),
+		Name:     auth.CookieName("ky_pkce_"+state, host),
 		Value:    verifier,
 		Path:     "/",
 		MaxAge:   300,
@@ -38,7 +38,7 @@ func (s *Server) handleKySignOnLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
-		Name:     auth.CookieName("ky_nonce_"+state, secure),
+		Name:     auth.CookieName("ky_nonce_"+state, host),
 		Value:    nonce,
 		Path:     "/",
 		MaxAge:   300,
@@ -54,13 +54,13 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 
-	cookie, err := r.Cookie(auth.CookieName("ky_pkce_"+state, s.config.Security.CookieSecure))
+	cookie, err := r.Cookie(auth.CookieName("ky_pkce_"+state, s.config.Security.HostCookies))
 	if err != nil || cookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO state")
 		return
 	}
 	verifier := cookie.Value
-	nonceCookie, err := r.Cookie(auth.CookieName("ky_nonce_"+state, s.config.Security.CookieSecure))
+	nonceCookie, err := r.Cookie(auth.CookieName("ky_nonce_"+state, s.config.Security.HostCookies))
 	if err != nil || nonceCookie.Value == "" {
 		s.writeError(w, http.StatusBadRequest, "Invalid or expired SSO nonce")
 		return

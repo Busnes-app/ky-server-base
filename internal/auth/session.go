@@ -21,12 +21,12 @@ const (
 
 var ErrPasswordChangeRequired = errors.New("password change required")
 
-// CookieName is the name a cookie has on this server: with Secure (https) cookies it carries
-// the __Host- prefix, which the browser accepts only from this host (Secure, Path=/, no
-// Domain), so a sibling subdomain cannot plant a session, CSRF or SSO state cookie.
-// Plain HTTP keeps the bare name.
-func CookieName(name string, secure bool) string {
-	if secure {
+// CookieName is the name a cookie has on this server: with host cookies (an https app URL
+// and Secure cookies, config.SecurityConfig.HostCookies) it carries the __Host- prefix, which
+// the browser accepts only from this host (Secure, Path=/, no Domain), so a sibling subdomain
+// cannot plant a session, CSRF or SSO state cookie. Otherwise the bare name.
+func CookieName(name string, host bool) string {
+	if host {
 		return "__Host-" + name
 	}
 	return name
@@ -82,7 +82,7 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 
 	// Set HttpOnly session cookie
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName(SessionCookieName, sm.config.CookieSecure),
+		Name:     CookieName(SessionCookieName, sm.config.HostCookies),
 		Value:    rawToken,
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
@@ -95,7 +95,7 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 	// Generate CSRF token for state-modifying endpoints
 	csrfToken := crypto.RandomHex(24)
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName(CSRFCookieName, sm.config.CookieSecure),
+		Name:     CookieName(CSRFCookieName, sm.config.HostCookies),
 		Value:    csrfToken,
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
@@ -104,6 +104,13 @@ func (sm *SessionManager) issue(ctx context.Context, w http.ResponseWriter, r *h
 		SameSite: http.SameSiteLaxMode,
 		Domain:   sm.config.CookieDomain,
 	})
+
+	if !sm.config.HostCookies {
+		// The web app prefers __Host-ky_csrf; one left from host-cookie mode (https with
+		// Secure cookies, since switched off) would shadow this token and fail every write.
+		// Browsers drop this Secure Set-Cookie on plain HTTP, where JS cannot see it anyway.
+		http.SetCookie(w, &http.Cookie{Name: CookieName(CSRFCookieName, true), Value: "", Path: "/", MaxAge: -1, Secure: true, SameSite: http.SameSiteLaxMode})
+	}
 
 	return sess, rawToken, nil
 }
@@ -120,7 +127,7 @@ func (sm *SessionManager) AuthenticateRequest(r *http.Request) (*store.User, *st
 
 	// 2. Fallback to HttpOnly cookie
 	if rawToken == "" {
-		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.CookieSecure)); err == nil && cookie.Value != "" {
+		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.HostCookies)); err == nil && cookie.Value != "" {
 			rawToken = cookie.Value
 		}
 	}
@@ -158,8 +165,8 @@ func (sm *SessionManager) AuthenticateRequest(r *http.Request) (*store.User, *st
 }
 
 // ValidateCSRF compares the X-CSRF-Token header with the CSRF cookie (named per CookieName).
-func ValidateCSRF(r *http.Request, secure bool) bool {
-	cookie, err := r.Cookie(CookieName(CSRFCookieName, secure))
+func ValidateCSRF(r *http.Request, host bool) bool {
+	cookie, err := r.Cookie(CookieName(CSRFCookieName, host))
 	if err != nil || cookie.Value == "" {
 		return false
 	}
@@ -174,7 +181,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 		rawToken = ""
 	}
 	if rawToken == "" {
-		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.CookieSecure)); err == nil {
+		if cookie, err := r.Cookie(CookieName(SessionCookieName, sm.config.HostCookies)); err == nil {
 			rawToken = cookie.Value
 		}
 	}
@@ -185,7 +192,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName(SessionCookieName, sm.config.CookieSecure),
+		Name:     CookieName(SessionCookieName, sm.config.HostCookies),
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),
@@ -196,7 +203,7 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, w http.ResponseWrit
 	})
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName(CSRFCookieName, sm.config.CookieSecure),
+		Name:     CookieName(CSRFCookieName, sm.config.HostCookies),
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),

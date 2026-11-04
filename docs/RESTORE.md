@@ -206,7 +206,8 @@ restored sessions: they are database rows, so every session cookie minted before
 including one revoked or stolen since, would sign in again the moment the server listens.
 Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
 runs as root and refuses an `encryption.key` it does not own, so hand them to root (or to the
-UID of a `user:` override, if you run one). Then start; the chain stops before the start if
+UID of a `user:` override, if you run one; on rootless Docker or Podman, where container root
+is your own UID, leave out the `chown`). Then start; the chain stops before the start if
 any step fails (install the `sqlite3` CLI first if the host lacks it):
 
 ```bash

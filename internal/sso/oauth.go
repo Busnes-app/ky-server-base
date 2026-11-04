@@ -159,8 +159,8 @@ func claimsFromIDToken(idToken *oidc.IDToken) (*IdentityClaims, error) {
 		return nil, ErrInvalidIDToken
 	}
 	var roles []string
-	if len(raw.Roles) > 0 && string(raw.Roles) != "null" {
-		if err := json.Unmarshal(raw.Roles, &roles); err != nil {
+	if len(raw.Roles) > 0 { // present: it must be an array (null too is malformed)
+		if err := json.Unmarshal(raw.Roles, &roles); err != nil || string(raw.Roles) == "null" {
 			return nil, ErrInvalidIDToken
 		}
 		if roles == nil {

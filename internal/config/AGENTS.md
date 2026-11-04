@@ -10,7 +10,7 @@ Owns environment variable parsing, configuration validation, default fallbacks, 
 - `LoadFromEnv() (*Config, error)` must supply safe, valid defaults for all subsystems.
 - Never log plaintext secrets or sensitive tokens.
 - `KY_TRUSTED_PROXIES` is a comma-separated list of reverse-proxy IPs or CIDRs, empty by default, parsed once at startup into `[]netip.Prefix`; an unparsable entry fails startup. Only a request whose peer address is in the list may speak for another client through `X-Forwarded-For`. `0.0.0.0/0` and `::/0` are refused at startup; list only the proxy's own address or subnet.
-- `KY_COOKIE_DOMAIN` together with Secure cookies (`KY_COOKIE_SECURE`, defaulting to true for an https `KY_APP_URL` or production) fails startup: Secure cookies are `__Host-` cookies, which take no Domain.
+- `KY_COOKIE_DOMAIN` with an https `KY_APP_URL` fails startup. `Security.HostCookies` (https `KY_APP_URL` and `CookieSecure`) selects `__Host-` cookie names, which take no Domain; a plain-HTTP URL keeps bare names even with Secure cookies (`KY_ENV=production`).
 - Production startup requires an explicit, durable `KY_SESSION_SECRET`. The encryption key comes from `KY_ENCRYPTION_KEY` when set, otherwise from the keyfile at `<DataDir>/encryption.key`, which `keyfile.LoadOrCreate` mints on first start; either is a valid production configuration.
 - A supplied session signing secret, and any nonempty `KY_KYSIGNON_HMAC_SECRET`,
   require at least `crypto.MinHMACKeyBytes` (16) bytes before keyfile side effects.

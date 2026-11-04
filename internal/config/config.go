@@ -54,7 +54,10 @@ type SecurityConfig struct {
 	EncryptionKey []byte `json:"-"` // 32 bytes for AES-256-GCM; never serialised
 	CookieSecure  bool   `json:"cookie_secure"`
 	CookieDomain  string `json:"cookie_domain"`
-	SessionTTL    time.Duration
+	// HostCookies: an https KY_APP_URL with Secure cookies names every cookie with the
+	// __Host- prefix (auth.CookieName), so no other host under the domain can plant one.
+	HostCookies bool `json:"host_cookies"`
+	SessionTTL  time.Duration
 	// TrustedProxies is the parsed KY_TRUSTED_PROXIES allowlist. Only a request whose peer
 	// address falls inside it may speak for a client other than itself.
 	TrustedProxies []netip.Prefix `json:"-"`
@@ -182,8 +185,9 @@ func LoadFromEnv() (*Config, error) {
 	// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
 	cookieSecure := getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://"))
 	cookieDomain := getEnv("KY_COOKIE_DOMAIN", "")
-	if cookieSecure && cookieDomain != "" {
-		return nil, errors.New("KY_COOKIE_DOMAIN: not allowed with Secure (https) cookies: they are __Host- cookies, which browsers refuse with a Domain, so that no other host under that domain can set them; leave KY_COOKIE_DOMAIN empty")
+	https := strings.HasPrefix(strings.ToLower(appURL), "https://")
+	if https && cookieDomain != "" {
+		return nil, errors.New("KY_COOKIE_DOMAIN: not allowed with an https KY_APP_URL: there the cookies are __Host- cookies, which browsers refuse with a Domain, so that no other host under that domain can set them; leave KY_COOKIE_DOMAIN empty")
 	}
 
 	cfg := &Config{
@@ -209,6 +213,7 @@ func LoadFromEnv() (*Config, error) {
 			EncryptionKey:  encryptionKey,
 			CookieSecure:   cookieSecure,
 			CookieDomain:   cookieDomain,
+			HostCookies:    https && cookieSecure,
 			SessionTTL:     7 * 24 * time.Hour,
 			TrustedProxies: trustedProxies,
 		},

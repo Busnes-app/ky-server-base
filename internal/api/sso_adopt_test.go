@@ -103,4 +103,10 @@ func TestKyIdentitySignInAppliesTheMappedRole(t *testing.T) {
 	if role() != "admin" || !signedIn(srv, third) {
 		t.Fatalf("no role claims: role %q, other session kept %v", role(), signedIn(srv, third))
 	}
+	// A malformed roles claim (null, or not an array) fails the sign-in; nothing changes.
+	for _, bad := range []any{nil, "admin"} {
+		if w := ssoLoginClaims(t, srv, f, "ivy", "s5", time.Now(), map[string]any{"roles": bad, "role": "user"}); w.Code != http.StatusUnauthorized || role() != "admin" {
+			t.Fatalf("roles %v: %d, role %q", bad, w.Code, role())
+		}
+	}
 }

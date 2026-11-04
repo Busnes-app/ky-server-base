@@ -38,10 +38,11 @@ These are human summaries, not a raw version-control log.
   account over (201 with its existing id) instead of creating a second account (when
   `externalId` was the KyIdentity subject) or answering 409 forever (when only the
   `userName` matched). Local accounts are never taken over.
-- On https, the session, CSRF and KyIdentity sign-in cookies are `__Host-` cookies
-  (`__Host-ky_session`, `__Host-ky_csrf`), so a page on another host under the same
-  domain can no longer plant its own session and sign a visitor into the wrong account.
-  Plain HTTP keeps the old names.
+- With an https `KY_APP_URL` (and Secure cookies, the default there), the session, CSRF
+  and KyIdentity sign-in cookies are `__Host-` cookies (`__Host-ky_session`,
+  `__Host-ky_csrf`), so a page on another host under the same domain can no longer plant
+  its own session and sign a visitor into the wrong account. A plain-HTTP `KY_APP_URL`
+  keeps the old names.
 - A SQLite `KY_DB_DSN` that is a server URL (such as a `postgres://` URL in `.env`, while
   compose pins `KY_DB_DRIVER=sqlite`) stops the server at startup. Before, it quietly
   created a SQLite file named after the URL outside the data volume, and the data was lost
@@ -54,20 +55,23 @@ These are human summaries, not a raw version-control log.
 ### Upgrade impact
 
 - No migration. Restart onto the new image.
-- On https (Secure cookies, the default for an https `KY_APP_URL`), everyone is signed
-  out once by the upgrade and signs in again. Scripts that read the `ky_session` or
+- With an https `KY_APP_URL`, everyone is signed out once by the upgrade and signs in
+  again. Scripts that read the `ky_session` or
   `ky_csrf` cookie by name on https must use the `__Host-` names.
-- `KY_COOKIE_DOMAIN` together with Secure cookies now stops the server at startup with a
-  message naming it. Remove `KY_COOKIE_DOMAIN` from `.env` before upgrading an https
-  install.
+- `KY_COOKIE_DOMAIN` with an https `KY_APP_URL` now stops the server, and every CLI
+  command, at startup with a message naming it. Remove `KY_COOKIE_DOMAIN` from `.env`
+  before upgrading an https install.
 - KyIdentity: on the next sign-in, accounts take the role KyIdentity sends for this app.
   Check that this app's `admin` role is assigned in KyIdentity to every admin who signs in
   through it, or they become users here. Local accounts are unaffected.
 - SCIM: an IdP that creates a user who already signed in through KyIdentity now gets that
-  account (201) and manages it from then on.
+  account (201) and manages it from then on: matched by `externalId` = KyIdentity subject,
+  else by `userName`. An `externalId` already managed under another name is 409.
 - A SQLite install whose `KY_DB_DSN` is a `scheme://` URL now refuses to start; it was
-  never writing to the data volume. Set `KY_DB_DRIVER=postgres` in the compose file or an
-  overlay for PostgreSQL.
+  never writing to the data volume. Before upgrading such an install, copy its database out
+  of the running container: it sits under a directory named after the URL in `/app`
+  (`docker compose exec app ls -R /app`), and `docker compose cp` copies it; then set `KY_DB_DRIVER=postgres` in the
+  compose file or an overlay for PostgreSQL.
 
 ## Maintaining notes
 

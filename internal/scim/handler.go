@@ -125,31 +125,49 @@ func (h *userResourceHandler) Create(r *http.Request, attrs protocol.ResourceAtt
 	if user.Role == "" {
 		user.Role = "user"
 	}
+	if existing, err := h.kyIdentityAccount(r, user.SSOSubject, username); err != nil {
+		return protocol.Resource{}, err
+	} else if existing != nil {
+		return h.takeOver(r, existing, attrs)
+	}
 	if err := h.checkRole("", user.Role); err != nil {
 		return protocol.Resource{}, err
 	}
-	if user.SSOSubject != "" {
-		existing, err := h.store.Users().GetUserBySSO(r.Context(), "kysignon", user.SSOSubject)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return protocol.Resource{}, err
-		}
-		if err == nil && !existing.SCIMManaged {
-			return h.takeOver(r, existing, attrs)
-		}
-	}
-	err := h.store.Users().CreateUser(r.Context(), user)
-	if errors.Is(err, store.ErrAlreadyExists) && user.SSOSubject == "" {
-		// Without an externalId, the account KyIdentity sign-in created under this name.
-		existing, lookupErr := h.store.Users().GetUserByUsername(r.Context(), username)
-		if lookupErr == nil && existing.SSOProvider == "kysignon" && !existing.SCIMManaged {
-			return h.takeOver(r, existing, attrs)
-		}
-	}
-	if err != nil {
+	if err := h.store.Users().CreateUser(r.Context(), user); err != nil {
 		return protocol.Resource{}, scimStoreError(err, user.ID)
 	}
 	_ = h.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "scim.user.create", Resource: user.Username})
 	return userResource(user), nil
+}
+
+// kyIdentityAccount finds the account KyIdentity sign-in created for the person a create
+// names: by externalId = KyIdentity subject first, else by userName when that account is not
+// SCIM's yet. nil when there is none. An externalId whose account SCIM already manages is a
+// uniqueness conflict, never a second account.
+func (h *userResourceHandler) kyIdentityAccount(r *http.Request, subject, username string) (*store.User, error) {
+	if subject != "" {
+		existing, err := h.store.Users().GetUserBySSO(r.Context(), "kysignon", subject)
+		if err == nil {
+			if existing.SCIMManaged {
+				return nil, protocolErrors.ScimErrorUniqueness
+			}
+			return existing, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	existing, err := h.store.Users().GetUserByUsername(r.Context(), username)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if existing.SSOProvider == "kysignon" && !existing.SCIMManaged {
+		return existing, nil
+	}
+	return nil, nil
 }
 
 // takeOver answers a create for a person who already signed in through KyIdentity: their
@@ -161,13 +179,19 @@ func (h *userResourceHandler) takeOver(r *http.Request, user *store.User, attrs 
 			return protocol.Resource{}, err
 		}
 	}
-	if err := h.store.Users().ClaimForSCIM(r.Context(), user.ID, user.SSOSubject); errors.Is(err, store.ErrConflict) {
+	if err := h.store.Users().SetSCIMManaged(r.Context(), user.ID, user.SSOSubject, true); errors.Is(err, store.ErrConflict) {
 		return protocol.Resource{}, protocolErrors.ScimErrorUniqueness
 	} else if err != nil {
 		return protocol.Resource{}, err
 	}
+	res, err := h.Replace(r, user.ID, attrs)
+	if err != nil {
+		// A refused create (a taken userName, say) leaves the account as it was.
+		_ = h.store.Users().SetSCIMManaged(r.Context(), user.ID, user.SSOSubject, false)
+		return protocol.Resource{}, err
+	}
 	_ = h.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "scim.user.adopt", Resource: user.Username})
-	return h.Replace(r, user.ID, attrs)
+	return res, nil
 }
 
 func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {

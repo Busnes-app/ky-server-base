@@ -179,19 +179,18 @@ func TestCookieSecureFollowsHTTPSAppURL(t *testing.T) {
 	}
 }
 
-// Secure (https) cookies are __Host- cookies, which take no Domain: KY_COOKIE_DOMAIN with
-// them stops startup; plain HTTP (or an explicit KY_COOKIE_SECURE=false) still allows it.
-func TestCookieDomainIsRefusedWithSecureCookies(t *testing.T) {
+// An https KY_APP_URL takes no KY_COOKIE_DOMAIN (its cookies are __Host- cookies, which take
+// no Domain, whenever they are Secure); plain HTTP keeps the bare names and may set a domain.
+func TestHostCookiesOnHTTPS(t *testing.T) {
 	t.Setenv("KY_DATA_DIR", t.TempDir())
-	t.Setenv("KY_COOKIE_DOMAIN", "example.com")
 	for _, tc := range []struct {
-		url, secure string
-		refused     bool
+		url, secure  string
+		host, refuse bool
 	}{
-		{"https://app.example.com", "", true},
-		{"http://app.example.com", "true", true},
-		{"http://app.example.com", "", false},
-		{"https://app.example.com", "false", false},
+		{"https://app.example.com", "", true, true},
+		{"https://app.example.com", "false", false, true},
+		{"http://app.example.com", "true", false, false},
+		{"http://app.example.com", "", false, false},
 	} {
 		t.Setenv("KY_APP_URL", tc.url)
 		if tc.secure == "" {
@@ -199,9 +198,15 @@ func TestCookieDomainIsRefusedWithSecureCookies(t *testing.T) {
 		} else {
 			t.Setenv("KY_COOKIE_SECURE", tc.secure)
 		}
-		_, err := config.LoadFromEnv()
-		if refused := err != nil && strings.Contains(err.Error(), "KY_COOKIE_DOMAIN"); refused != tc.refused {
-			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q: err %v, want refused=%v", tc.url, tc.secure, err, tc.refused)
+		os.Unsetenv("KY_COOKIE_DOMAIN")
+		cfg, err := config.LoadFromEnv()
+		if err != nil || cfg.Security.HostCookies != tc.host {
+			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q: HostCookies=%v err=%v, want %v", tc.url, tc.secure, cfg != nil && cfg.Security.HostCookies, err, tc.host)
+		}
+		t.Setenv("KY_COOKIE_DOMAIN", "example.com")
+		_, err = config.LoadFromEnv()
+		if refused := err != nil && strings.Contains(err.Error(), "KY_COOKIE_DOMAIN"); refused != tc.refuse {
+			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q with KY_COOKIE_DOMAIN: err %v, want refused=%v", tc.url, tc.secure, err, tc.refuse)
 		}
 	}
 }
