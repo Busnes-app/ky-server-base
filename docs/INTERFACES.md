@@ -366,7 +366,7 @@ nonempty string values are trimmed; invalid integer values use their default.
 Booleans accept `true`, `1`, `yes` or `on` (case-insensitive); other explicitly set
 values are false. Environment variables configure the process; there is no `.env`
 reader in the binary. The shipped `docker-compose.yml` forwards from its `.env` only the
-variables it lists (`KY_APP_URL`, the `KY_BACKUP_*` schedule, `KY_SESSION_SECRET`,
+variables it lists (`KY_APP_URL`, `KY_BACKUP_*`, `KY_SESSION_SECRET`,
 `KY_SCIM_TOKEN`, `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_*`, `KY_SSO_AUTO_PROVISION`,
 `KY_SCIM_ALLOW_ADMIN`); anything else goes in an override file.
 

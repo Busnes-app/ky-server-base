@@ -28,44 +28,29 @@ These are human summaries, not a raw version-control log.
 ## Current source
 ### Changes
 
-- KyIdentity directory webhooks are ordered per subject: an event older than the last
-  one applied for that `id` is acknowledged and dropped, so a replayed or late event
-  can no longer re-promote, reactivate or recreate an account. A webhook event without
-  `id` is refused (401). A `user.created`/`user.updated` event for a subject SCIM
-  already provisioned adopts that account, as sign-in does, instead of creating a
-  second one.
-- Any local account can change its own password from the key button in the header,
-  after confirming the current one; every session is signed out. Before, only an
-  account flagged for replacement could.
-- SCIM: a PUT with an empty `roles` value, or a roles replace with an empty value, sets
-  the role to `user` (an admin kept the role and its sessions before). `externalId` sent after
-  creation is stored until a KyIdentity sign-in adopts the account (it was dropped
-  with 200). Concurrent group PATCHes no longer drop each other's members, and renaming
-  a group onto a taken name is 409 `uniqueness` instead of 500.
-- Sign-in: a browser `Origin` that is neither the server's host nor `KY_APP_URL` is
-  refused like a cross-site request, closing login CSRF over plain HTTP where browsers
-  send no `Sec-Fetch-Site`. After a sign-in the web app checks that the browser kept the
-  session, and says to open the https address when a Secure cookie was dropped on a
-  plain-HTTP page.
-- Backups refuse a database snapshot too large for a capsule (413) before reading it
-  into memory.
-- Startup warns when `KY_APP_URL` is https and `KY_TRUSTED_PROXIES` is empty.
-- CI: the `reuse` licensing check now gates image publication.
+- `restore` turns scheduled deposits off in the restored database and says so, so a
+  drill or migration run beside the server still in service cannot deposit a stale
+  copy under the same pairing. Turn the schedule back on in Backup & recovery once the
+  restored server is the one in service.
+- The restore runbook deletes the restored sessions before the server first starts,
+  instead of after an admin has signed in, so a session revoked or stolen after the
+  capsule cannot sign in again in between. It no longer asks admins to re-enrol a
+  second factor, which this base no longer has.
+- `docker-compose.yml` forwards `KY_TRUSTED_PROXIES`, `KY_KYSIGNON_ISSUER`,
+  `KY_KYSIGNON_CLIENT_ID`, `KY_KYSIGNON_SECRET`, `KY_KYSIGNON_HMAC_SECRET`,
+  `KY_SSO_AUTO_PROVISION` and `KY_SCIM_ALLOW_ADMIN` from `.env`. Before, KyIdentity
+  sign-in configured there answered "not enabled", and the trusted-proxies warning
+  could only be cleared by editing the tracked compose file.
 
 ### Upgrade impact
 
-- Migration 10 runs on start and adds the `sso_directory_events` table. No data
-  changes.
-- KyIdentity: a directory event carrying an older `timestamp` than one already taken
-  for the same subject is now ignored (still 200). A failed event must be retried by
-  the sender; older events for that subject are ignored until it is. Events without `id` get 401.
-- SCIM: an IdP that sends an empty `roles` value now demotes the user to `user`; a PUT
-  that omits `roles` keeps the role as before. `externalId` updates now take effect on accounts that
-  have not signed in through KyIdentity yet.
-- Login: requests from a browser page on another origin get 403; API clients that send
-  no `Origin` are unaffected.
-- `POST /api/auth/change-password` now works for every local account (it answered 409
-  unless the account was flagged); federated accounts still get 409.
+- No migration. Restart onto the new image.
+- Compose: values for the variables above already in `.env` now reach the container on
+  the next `docker compose up -d`. Check them before upgrading: a
+  `KY_KYSIGNON_HMAC_SECRET` shorter than 16 bytes, or an invalid `KY_TRUSTED_PROXIES`
+  entry, now stops the server at startup, as it already did outside compose.
+- A copy restored with the new `restore` command does not deposit until an admin turns
+  the schedule back on.
 
 ## Maintaining notes
 
@@ -88,6 +73,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-11-04 — 1354417
+
+Source: [13544179d898057cc4a90de26f8e95ff8b3b4a1b](https://github.com/Busnes-app/ky-server-base/commit/13544179d898057cc4a90de26f8e95ff8b3b4a1b) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/41789647162)
+
+- **Changes:** KyIdentity directory webhooks are ordered per subject: an event older than the last one applied for that `id` is acknowledged and dropped, so a replayed or late event can no longer re-promote, reactivate or recreate an account. A webhook event without `id` is refused (401). A `user.created`/`user.updated` event for a subject SCIM already provisioned adopts that account, as sign-in does, instead of creating a second one. Any local account can change its own password from the key button in the header, after confirming the current one; every session is signed out. Before, only an account flagged for replacement could. SCIM: a PUT with an empty `roles` value, or a roles replace with an empty value, sets the role to `user` (an admin kept the role and its sessions before). `externalId` sent after creation is stored until a KyIdentity sign-in adopts the account (it was dropped with 200). Concurrent group PATCHes no longer drop each other's members, and renaming a group onto a taken name is 409 `uniqueness` instead of 500. Sign-in: a browser `Origin` that is neither the server's host nor `KY_APP_URL` is refused like a cross-site request, closing login CSRF over plain HTTP where browsers send no `Sec-Fetch-Site`. After a sign-in the web app checks that the browser kept the session, and says to open the https address when a Secure cookie was dropped on a plain-HTTP page. Backups refuse a database snapshot too large for a capsule (413) before reading it into memory. Startup warns when `KY_APP_URL` is https and `KY_TRUSTED_PROXIES` is empty. CI: the `reuse` licensing check now gates image publication.
+- **Upgrade impact:** Migration 10 runs on start and adds the `sso_directory_events` table. No data changes. KyIdentity: a directory event carrying an older `timestamp` than one already taken for the same subject is now ignored (still 200). A failed event must be retried by the sender; older events for that subject are ignored until it is. Events without `id` get 401. SCIM: an IdP that sends an empty `roles` value now demotes the user to `user`; a PUT that omits `roles` keeps the role as before. `externalId` updates now take effect on accounts that have not signed in through KyIdentity yet. Login: requests from a browser page on another origin get 403; API clients that send no `Origin` are unaffected. `POST /api/auth/change-password` now works for every local account (it answered 409 unless the account was flagged); federated accounts still get 409.
 
 ### 2026-11-04 — da9f246
 
