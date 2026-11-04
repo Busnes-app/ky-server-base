@@ -31,7 +31,7 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
   a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
   `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
-- Directory webhook timestamps are accepted only within five minutes and are ordered per subject: under `WithDirectoryLock` an event older than `LastDirectoryEvent` is acknowledged and dropped, otherwise it is applied and only then recorded with `AdvanceDirectoryEvent`, so a failed event never advances the order. Status or role changes revoke the user's sessions in the same transaction (`UpdateUserProfile`); deactivation also deletes sessions when the row was already inactive, so a retry still ends them.
+- Directory webhook timestamps are accepted only within five minutes and are ordered per subject: under `WithDirectoryLock` an event older than `LastDirectoryEvent` is acknowledged and dropped; otherwise the order advances first (so no interruption leaves an applied event unrecorded), the event is applied, and a failed apply puts the order back with `SetDirectoryEvent` and returns the error so the sender retries. Status or role changes revoke the user's sessions in the same transaction (`UpdateUserProfile`); deactivation also deletes sessions when the row was already inactive, so a retry still ends them.
 
 ## Verification
 - `go test -v ./internal/sso/...` (`TestVerifyLogoutToken` holds one rejection case per logout-token rule)

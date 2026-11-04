@@ -22,7 +22,7 @@ type SQLStore struct {
 	groups   *groupStore
 	audit    *auditStore
 	settings *settingsStore
-	// dirMu serializes directory events on SQLite, which only this process opens for writes.
+	// dirMu serializes directory-sync events (WithDirectoryLock).
 	dirMu sync.Mutex
 }
 
@@ -165,12 +165,12 @@ func (u *userStore) checkUsernameFree(ctx context.Context, tx *sql.Tx, username,
 			return err
 		}
 	}
-	var current string
-	err := tx.QueryRowContext(ctx, u.store.rebind(`SELECT username FROM users WHERE id = ?`), id).Scan(&current)
-	if err != nil && !errorsIs(err, sql.ErrNoRows) {
+	// The database's LOWER decides "same name", exactly as the clash query and the index do.
+	var own int
+	if err := tx.QueryRowContext(ctx, u.store.rebind(`SELECT COUNT(1) FROM users WHERE id = ? AND LOWER(username) = LOWER(?)`), id, username).Scan(&own); err != nil {
 		return err
 	}
-	if err == nil && strings.EqualFold(current, username) {
+	if own > 0 {
 		return nil
 	}
 	var n int
@@ -413,25 +413,24 @@ func (u *userStore) LastDirectoryEvent(ctx context.Context, provider, subject st
 	return ts, err
 }
 
-// WithDirectoryLock uses a session advisory lock on PostgreSQL (key space 1; usernames use 2),
-// held on a dedicated connection, so replicas sharing the database serialize too.
+// WithDirectoryLock serializes directory events in this process. It holds no database
+// connection, so it cannot starve the pool. One server process per database is the supported
+// deployment (the backup scheduler assumes it too).
 func (u *userStore) WithDirectoryLock(ctx context.Context, provider, subject string, fn func() error) error {
-	if u.store.driver != "postgres" {
-		u.store.dirMu.Lock()
-		defer u.store.dirMu.Unlock()
-		return fn()
-	}
-	conn, err := u.store.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	key := provider + "/" + subject
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(1, hashtext($1))`, key); err != nil {
-		return err
-	}
-	defer conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(1, hashtext($1))`, key)
+	u.store.dirMu.Lock()
+	defer u.store.dirMu.Unlock()
 	return fn()
+}
+
+// SetDirectoryEvent puts the recorded timestamp back to ts, but only while it is still
+// current: it undoes an AdvanceDirectoryEvent whose event then failed to apply.
+func (u *userStore) SetDirectoryEvent(ctx context.Context, provider, subject string, current, ts int64) error {
+	if ts == 0 {
+		_, err := u.store.db.ExecContext(ctx, u.store.rebind(`DELETE FROM sso_directory_events WHERE provider = ? AND subject = ? AND last_timestamp = ?`), provider, subject, current)
+		return err
+	}
+	_, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE sso_directory_events SET last_timestamp = ? WHERE provider = ? AND subject = ? AND last_timestamp = ?`), ts, provider, subject, current)
+	return err
 }
 
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {

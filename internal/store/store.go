@@ -58,8 +58,11 @@ type UserStore interface {
 	AdvanceDirectoryEvent(ctx context.Context, provider, subject string, ts int64) (bool, error)
 	// LastDirectoryEvent is the newest timestamp AdvanceDirectoryEvent recorded, 0 if none.
 	LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error)
-	// WithDirectoryLock runs fn holding a lock on the subject that every server process
-	// sharing the database honours, so one subject's directory events apply one at a time.
+	// SetDirectoryEvent sets the recorded timestamp back from current to ts (0 removes it),
+	// only while current is still recorded.
+	SetDirectoryEvent(ctx context.Context, provider, subject string, current, ts int64) error
+	// WithDirectoryLock runs fn holding this process's directory-event lock, so events apply
+	// one at a time.
 	WithDirectoryLock(ctx context.Context, provider, subject string, fn func() error) error
 	CountUsers(ctx context.Context) (int, error)
 }

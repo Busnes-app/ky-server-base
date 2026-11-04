@@ -110,6 +110,18 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--danger)' }}>
           <AlertCircle size={16} />
           <span>{errorMsg}</span>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => {
+              setStatus('working');
+              setProgress(0);
+              setRound((r) => r + 1);
+            }}
+          >
+            Try again
+          </button>
         </div>
       )}
     </div>

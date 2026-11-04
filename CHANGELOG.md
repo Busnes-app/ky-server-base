@@ -42,6 +42,7 @@ These are human summaries, not a raw version-control log.
   same-site`) is refused like cross-site.
 - The login CAPTCHA no longer needs WebCrypto, so signing in over plain HTTP on a LAN
   address (the default compose install) works; before, it failed with 403 every time.
+  Sign In waits until the check is solved, and a failed check offers Try again.
 - KyIdentity sign-in adopts the SCIM-provisioned account whose `externalId` is the
   KyIdentity subject instead of failing with a 500; a username collision is 409 and a
   disabled account 403.

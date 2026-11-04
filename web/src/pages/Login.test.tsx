@@ -53,6 +53,21 @@ it('solves a fresh CAPTCHA after a failed sign-in', async () => {
   await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(2));
 });
 
+// Sign In waits for a token, so a failed security check must offer its own retry.
+it('retries a failed security check without a reload', async () => {
+  let calls = 0;
+  const challenge = { algorithm: 'SHA-256', salt: 's', challenge: await sha256Hex('s1'), maxnumber: 1, expires_at: 0, signature: 'x' };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) !== '/api/auth/pow-challenge') throw new Error(`unexpected fetch ${String(input)}`);
+    calls++;
+    return calls === 1 ? json({ error: 'down' }, 503) : json(challenge);
+  }));
+  render(<Login onSuccess={vi.fn()} appName="Test" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+  await screen.findByText('Security check verified.');
+  expect((screen.getByRole('button', { name: /sign in/i }) as HTMLButtonElement).disabled).toBe(false);
+});
+
 // At the default difficulty the solve takes about a second; Enter before that would be refused.
 it('keeps Sign In disabled until the security check is solved', async () => {
   await stubAuth({});

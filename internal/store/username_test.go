@@ -92,6 +92,21 @@ func TestExistingCaseVariantsSkipTheIndex(t *testing.T) {
 	if err := st.Users().UpdateUserProfile(ctx, u2, u2.Role, u2.Status); err != nil {
 		t.Fatalf("case change of an existing pair member's own name: %v", err)
 	}
+	// "Own name" is decided by the database's LOWER, not Go's Unicode folding: EqualFold("ſ",
+	// "s") is true, but renaming ſ to s beside S would add a new clash while the index is off.
+	for _, u := range []*store.User{
+		{ID: "u4", Username: "ſ", Role: "user", Status: "active", SSOProvider: "local"},
+		{ID: "u5", Username: "S", Role: "user", Status: "active", SSOProvider: "local"},
+	} {
+		if err := st.Users().CreateUser(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u4, _ := st.Users().GetUserByID(ctx, "u4")
+	u4.Username = "s"
+	if err := st.Users().UpdateUserProfile(ctx, u4, u4.Role, u4.Status); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("rename to a case variant of another account: %v", err)
+	}
 }
 
 // Adoption moves an account's provider; a profile write from a read taken before it must not
