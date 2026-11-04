@@ -323,9 +323,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusForbidden, "Invalid CSRF token")
 		return
 	}
-	// Sign-in carries no CSRF token, so a cross-site form could log the victim into the
-	// attacker's account. Browsers label such posts; API clients send no Sec-Fetch-Site.
-	if isUnsafeMethod(r.Method) && isSignIn(r.URL.Path) && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+	// Sign-in carries no CSRF token, so a form on another site -- or on a sibling subdomain,
+	// which the browser labels same-site -- could log the victim into the attacker's account.
+	// Only the app's own pages are same-origin; API clients send no Sec-Fetch-Site.
+	if site := r.Header.Get("Sec-Fetch-Site"); isUnsafeMethod(r.Method) && isSignIn(r.URL.Path) && (site == "cross-site" || site == "same-site") {
 		s.writeError(w, http.StatusForbidden, "Cross-site sign-in refused")
 		return
 	}
