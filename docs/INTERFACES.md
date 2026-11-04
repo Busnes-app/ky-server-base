@@ -361,7 +361,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_SCIM_TOKEN` | Fresh random 24-byte hex on each load | Provisioning bearer credential; set explicitly for a stable integration |
 | `KY_CAPTCHA_PROVIDER` | `pow` | Login PoW check; `none` disables it; other provider verification is not wired |
 | `KY_CAPTCHA_SITE_KEY`, `KY_CAPTCHA_SECRET_KEY` | Empty | Reserved provider configuration; not used by the current PoW verifier |
-| `KY_CAPTCHA_POW_DIFFICULTY` | `4` | Maximum puzzle candidate number; nonpositive values fall back to 20000 |
+| `KY_CAPTCHA_POW_DIFFICULTY` | `500000` | Maximum puzzle candidate number; nonpositive values fall back to the default. The default solves in about one second (median) in a desktop browser |
 | `KY_BACKUP_DIR` | Empty | Optional local sealed-capsule destination |
 | `KY_BACKUP_KEEP` | `7` | Local retention count; must be at least one |
 | `KY_BACKUP_DEPOSIT_INTERVAL` | `24h` | Go duration; zero disables; minimum nonzero `15m`; malformed/negative values fail startup |

@@ -104,6 +104,11 @@ type CaptchaConfig struct {
 	DifficultyPoW int    `json:"difficulty_pow"`
 }
 
+// DefaultPoWDifficulty is the CAPTCHA puzzle size (candidates to search). Chosen by measuring
+// the login page in Chromium on a mid-range laptop CPU (Ryzen 7 5700U, ~260k hashes/s in the
+// page's JavaScript SHA-256): the median solve is about one second.
+const DefaultPoWDifficulty = 500000
+
 // MinDepositInterval is the shortest schedule accepted: each run snapshots the whole database
 // and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
 const MinDepositInterval = 15 * time.Minute
@@ -228,7 +233,7 @@ func LoadFromEnv() (*Config, error) {
 			Provider:      getEnv("KY_CAPTCHA_PROVIDER", "pow"),
 			SiteKey:       getEnv("KY_CAPTCHA_SITE_KEY", ""),
 			SecretKey:     getEnv("KY_CAPTCHA_SECRET_KEY", ""),
-			DifficultyPoW: getEnvInt("KY_CAPTCHA_POW_DIFFICULTY", 4),
+			DifficultyPoW: getEnvInt("KY_CAPTCHA_POW_DIFFICULTY", DefaultPoWDifficulty),
 		},
 	}
 

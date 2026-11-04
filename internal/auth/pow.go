@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
 )
 
@@ -36,10 +37,10 @@ type PoWSolution struct {
 	Signature string `json:"signature"`
 }
 
-// GeneratePoWChallenge creates a puzzle of given difficulty (e.g. 5000 to 50000 max iterations).
+// GeneratePoWChallenge creates a puzzle of the given difficulty (maximum candidate number).
 func GeneratePoWChallenge(difficulty int, signingSecret string) (*PoWChallenge, error) {
 	if difficulty <= 0 {
-		difficulty = 20000
+		difficulty = config.DefaultPoWDifficulty
 	}
 
 	saltBytes := make([]byte, 16)

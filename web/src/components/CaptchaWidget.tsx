@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { sha256Hex } from './sha256';
 
 interface CaptchaProps {
   onToken: (token: string) => void;
@@ -31,20 +32,13 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
         if (!resp.ok) throw new Error('Failed to fetch security challenge');
         const chal: Challenge = await resp.json();
 
-        const enc = new TextEncoder();
         const max = chal.maxnumber;
         let solved = false;
+        let lastYield = performance.now();
 
         for (let i = 1; i <= max; i++) {
-          if (cancelled) return;
-          const target = `${chal.salt}${i}`;
-          const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(target));
-          if (cancelled) return;
-          const hashHex = Array.from(new Uint8Array(hashBuf))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join('');
-
-          if (hashHex === chal.challenge) {
+          // Not crypto.subtle: it is missing outside secure contexts (plain HTTP on a LAN address).
+          if (sha256Hex(`${chal.salt}${i}`) === chal.challenge) {
             const sol = {
               algorithm: chal.algorithm,
               salt: chal.salt,
@@ -63,9 +57,12 @@ export const CaptchaWidget: React.FC<CaptchaProps> = ({ onToken }) => {
             break;
           }
 
-          if (i % 2000 === 0) {
+          // Yield to the page about every 50 ms; a timer per small batch costs more than the hashing.
+          if (i % 1000 === 0 && performance.now() - lastYield > 50) {
             setProgress(Math.round((i / max) * 100));
-            await new Promise((r) => setTimeout(r, 0)); // yield loop
+            await new Promise((r) => setTimeout(r, 0));
+            if (cancelled) return;
+            lastYield = performance.now();
           }
         }
 
