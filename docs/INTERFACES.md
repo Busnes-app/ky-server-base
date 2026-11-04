@@ -382,7 +382,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
 | `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header |
 | `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
-| `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup |
+| `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup. Set it behind a reverse proxy, or every client counts as the proxy for sign-in limits; startup logs a warning when `KY_APP_URL` is https and this is empty |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
 | `KY_KYSIGNON_CLIENT_ID` | Empty | Registered KySignOn client ID |

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -70,6 +71,11 @@ func runServer() {
 	}
 	if cfg.Backup.AllowPrivateRecovery {
 		log.Printf("[BACKUP] KY_BACKUP_ALLOW_PRIVATE_RECOVERY is on: RFC1918 and CGNAT destinations admitted; loopback, link-local and other reserved addresses remain refused (HTTPS still required)")
+	}
+	// An https app URL usually means a TLS proxy in front. Without KY_TRUSTED_PROXIES every
+	// visitor shares the proxy's address, so sign-in limits and lockouts apply to all of them.
+	if strings.HasPrefix(strings.ToLower(cfg.Server.AppURL), "https://") && len(cfg.Security.TrustedProxies) == 0 {
+		log.Printf("[SECURITY] KY_APP_URL is https but KY_TRUSTED_PROXIES is empty: behind a reverse proxy every client counts as the proxy's address, so one client's failed sign-ins lock the account for everyone. Set KY_TRUSTED_PROXIES to the proxy's address.")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
