@@ -22,7 +22,7 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   (`strongOIDCContext`), because discovery holds the provider mutex.
 - Directory deprovisioning (`user.deactivated`, `user.deleted`) ignores only
   `store.ErrNotFound`; any other lookup error fails the webhook. Updates use
-  `UpdateUserProfile`.
+  `UpdateUserProfile`, a compare-and-swap on the role and status read.
 - When `fips140.Enabled()`, issuer/authorization/token/JWKS endpoints require
   HTTPS without URL credentials; discovery/token redirects are refused. Preserve
   caller TLS trust roots and ordinary verification. This mode is process-wide.
@@ -31,7 +31,7 @@ Owns the application adapters around OAuth/OIDC login, KySignOn HMAC-SHA256 sign
   `iat`, `sub` or `sid`, the back-channel logout event as a JSON object and no `nonce`;
   a present `typ` must be `logout+jwt`. Every failure is `ErrInvalidLogoutToken`.
   `IdentityClaims.SessionID` and `IssuedAt` carry the ID token `sid` and `iat` so sessions can be ended by them.
-- Directory webhook timestamps are accepted only within five minutes; status or role changes revoke the user's sessions.
+- Directory webhook timestamps are accepted only within five minutes; there is no per-subject ordering yet. Status or role changes revoke the user's sessions in the same transaction (`UpdateUserProfile`); deactivation also deletes sessions when the row was already inactive, so a retry still ends them.
 
 ## Verification
 - `go test -v ./internal/sso/...` (`TestVerifyLogoutToken` holds one rejection case per logout-token rule)

@@ -92,7 +92,7 @@ func FuzzVerifyPoWSolution(f *testing.F) {
 	want := auth.PoWSolution{Algorithm: "SHA-256", Salt: salt, Challenge: hex.EncodeToString(sum[:]), Number: number, MaxNumber: maxNumber, ExpiresAt: expires}
 	want.Signature = crypto.ComputeHMACSHA256([]byte(fmt.Sprintf("%s:%s:%d:%d", salt, want.Challenge, maxNumber, expires)), secret)
 	genuine, _ := json.Marshal(want)
-	if !auth.VerifyPoWSolution(base64.StdEncoding.EncodeToString(genuine), secret) {
+	if !auth.VerifyPoWSolution(base64.StdEncoding.EncodeToString(genuine), secret, nil) {
 		f.Fatal("the fixed challenge no longer verifies; the signing payload changed")
 	}
 	wrongNumber := want
@@ -108,7 +108,7 @@ func FuzzVerifyPoWSolution(f *testing.F) {
 	f.Add("")
 	f.Add("e30=")
 	f.Fuzz(func(t *testing.T, submission string) {
-		if !auth.VerifyPoWSolution(submission, secret) {
+		if !auth.VerifyPoWSolution(submission, secret, nil) {
 			return
 		}
 		data, err := base64.StdEncoding.DecodeString(submission)

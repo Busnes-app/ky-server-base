@@ -30,12 +30,10 @@ instance or every derived product has been verified, or a FIPS certification.
   The floor parses the envelope and case-sensitive JWK members with the same
   rules as the signature verifier, checking the actual modulus it will use.
 
-TOTP secrets are generated as 20 random decoded bytes. The pinned shared library
-now refuses authentication with fewer than 16 decoded bytes, including an old
-short secret already stored in a sealed record. Keep that record and the database;
-do not pad its secret or replace the encryption key. Use a previously enrolled
-recovery method or an authorized administrator MFA reset, then enroll a fresh
-issuer-generated secret. This rule applies in every process mode.
+This server has no local multi-factor sign-in. MFA is a KyIdentity feature: require
+it in KyIdentity and sign in through KyIdentity, which owns the TOTP key-length rules.
+Stored local TOTP secrets are kept, sealed and unused; do not replace the encryption
+key on their account.
 
 An undersized configured signing secret can no longer start the server after
 this update, even outside the optional TLS profile. Rotate it deliberately;
@@ -57,7 +55,7 @@ or fixed-size Ed25519 certificate keys across the verified chain, including
 trusted roots. It applies to this server's Go HTTPS connections, including
 OIDC and KyRecovery; a private CA or pin does not waive the floor. Keep normal
 verification enabled. The profile uses `on`, not the diagnostic `only` mode;
-Argon2id, HMAC-SHA1 TOTP and the fixed X-Wing/AES-256-GCM recovery format remain.
+Argon2id and the fixed X-Wing/AES-256-GCM recovery format remain.
 
 For a process installation, retain its existing environment and add:
 

@@ -8,18 +8,11 @@ interface LoginProps {
   appName: string;
 }
 
-interface MFAChallenge {
-  mfa_token: string;
-}
-
 export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [captchaToken, setCaptchaToken] = useState<string>('');
   const [captchaRound, setCaptchaRound] = useState<number>(0);
-  const [mfaChallenge, setMfaChallenge] = useState<MFAChallenge | null>(null);
-  const [mfaCode, setMfaCode] = useState<string>('');
-  const [isRecoveryCode, setIsRecoveryCode] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
@@ -44,11 +37,6 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
         throw new Error(data.error || 'Login failed');
       }
 
-      if (data.mfa_required) {
-        setMfaChallenge(data);
-        return;
-      }
-
       if (data.authenticated) {
         onSuccess(data.user);
       }
@@ -57,42 +45,6 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
       // The token may have expired while the tab slept; solve a fresh one for the retry.
       setCaptchaToken('');
       setCaptchaRound((n) => n + 1);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMFASubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!mfaChallenge) return;
-    setError('');
-    setLoading(true);
-
-    try {
-      const endpoint = isRecoveryCode ? '/api/auth/mfa/recovery-code' : '/api/auth/mfa/totp';
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mfa_token: mfaChallenge.mfa_token,
-          code: mfaCode.trim(),
-        }),
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || 'MFA verification failed');
-      }
-
-      if (data.authenticated) {
-        onSuccess(data.user);
-      }
-    } catch (err) {
-      // The server spends the MFA transaction on every attempt, so a retry needs a new sign-in.
-      setMfaChallenge(null);
-      setMfaCode('');
-      setIsRecoveryCode(false);
-      setError(`${err instanceof Error ? err.message : 'Invalid verification code'}. Sign in again to retry.`);
     } finally {
       setLoading(false);
     }
@@ -153,87 +105,49 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, appName }) => {
             </div>
           )}
 
-          {mfaChallenge ? (
-            <form onSubmit={handleMFASubmit}>
-              <h2 style={{ fontSize: '18px', marginBottom: '8px' }}>Two-Factor Verification</h2>
-              <p style={{ color: 'var(--ink)', fontSize: '13px', marginBottom: '16px' }}>
-                {isRecoveryCode ? 'Enter one of your single-use recovery codes.' : 'Enter the 6-digit code from your authenticator app.'}
-              </p>
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: 'var(--ink)', marginBottom: '6px' }}>Username</label>
+              <input
+                type="text"
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="admin"
+                required
+              />
+            </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: 'var(--ink)', marginBottom: '6px' }}>
-                  {isRecoveryCode ? 'Recovery Code' : 'Authenticator Code'}
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value)}
-                  placeholder={isRecoveryCode ? 'XXXX-XXXX' : '123456'}
-                  style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', letterSpacing: '2px', textAlign: 'center' }}
-                  required
-                />
-              </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: 'var(--ink)', marginBottom: '6px' }}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+              />
+            </div>
 
-              <button type="submit" style={{ width: '100%', justifyContent: 'center' }} disabled={loading}>
-                {loading ? 'Verifying...' : 'Verify & Sign In'}
-              </button>
+            <CaptchaWidget key={captchaRound} onToken={setCaptchaToken} />
 
-              <div style={{ textAlign: 'center', marginTop: '16px' }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '12px' }}
-                  onClick={() => setIsRecoveryCode(!isRecoveryCode)}
-                >
-                  {isRecoveryCode ? 'Use Authenticator App' : 'Use a Recovery Code'}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={handleLogin}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: 'var(--ink)', marginBottom: '6px' }}>Username</label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
-                  required
-                />
-              </div>
+            {/* Disabled until the security check is solved (about a second): submitting earlier is refused. */}
+            <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading || !captchaToken}>
+              <LogIn size={16} />
+              <span>{loading ? 'Signing in...' : 'Sign In'}</span>
+            </button>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: 'var(--ink)', marginBottom: '6px' }}>Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                />
-              </div>
-
-              <CaptchaWidget key={captchaRound} onToken={setCaptchaToken} />
-
-              <button type="submit" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }} disabled={loading}>
-                <LogIn size={16} />
-                <span>{loading ? 'Signing in...' : 'Sign In'}</span>
-              </button>
-
-              <div style={{ marginTop: '20px', borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
-                <a
-                  href="/api/sso/kysignon/login"
-                  className="btn btn-secondary"
-                  style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}
-                >
-                  <Key size={16} style={{ color: 'var(--accent)' }} />
-                  <span>Continue with Single Sign On</span>
-                </a>
-              </div>
-            </form>
-          )}
+            <div style={{ marginTop: '20px', borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
+              <a
+                href="/api/sso/kysignon/login"
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}
+              >
+                <Key size={16} style={{ color: 'var(--accent)' }} />
+                <span>Continue with Single Sign On</span>
+              </a>
+            </div>
+          </form>
         </div>
       </div>
     </div>

@@ -41,25 +41,6 @@ it('solves one CAPTCHA challenge, not a stream of them', async () => {
   expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(1);
 });
 
-// The server spends the MFA transaction on every attempt, so after a wrong code the form must
-// go back to the password step instead of resubmitting a dead transaction.
-it('returns to the password step after a rejected MFA code', async () => {
-  await stubAuth({
-    '/api/auth/login': () => json({ mfa_required: true, mfa_token: 'spent' }),
-    '/api/auth/mfa/totp': () => json({ error: 'Invalid TOTP verification code' }, 401),
-  });
-  const { container } = render(<Login onSuccess={vi.fn()} appName="Test" />);
-  await screen.findByText('Security check verified.');
-  fireEvent.change(container.querySelector('input[type="text"]')!, { target: { value: 'admin' } });
-  fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'correct horse battery' } });
-  fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
-  fireEvent.change(await screen.findByPlaceholderText('123456'), { target: { value: '000000' } });
-  fireEvent.click(screen.getByRole('button', { name: /verify/i }));
-  expect(await screen.findByText(/Invalid TOTP verification code\. Sign in again to retry\./)).toBeTruthy();
-  expect(screen.queryByPlaceholderText('123456')).toBeNull();
-  expect(screen.getByRole('button', { name: /sign in/i })).toBeTruthy();
-});
-
 // A token can expire while the tab sleeps; a failed sign-in solves a fresh one for the retry.
 it('solves a fresh CAPTCHA after a failed sign-in', async () => {
   const fetchMock = await stubAuth({ '/api/auth/login': () => json({ error: 'Invalid credentials' }, 401) });
@@ -70,4 +51,29 @@ it('solves a fresh CAPTCHA after a failed sign-in', async () => {
   fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
   await screen.findByText('Invalid credentials');
   await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/auth/pow-challenge')).toHaveLength(2));
+});
+
+// Sign In waits for a token, so a failed security check must offer its own retry.
+it('retries a failed security check without a reload', async () => {
+  let calls = 0;
+  const challenge = { algorithm: 'SHA-256', salt: 's', challenge: await sha256Hex('s1'), maxnumber: 1, expires_at: 0, signature: 'x' };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) !== '/api/auth/pow-challenge') throw new Error(`unexpected fetch ${String(input)}`);
+    calls++;
+    return calls === 1 ? json({ error: 'down' }, 503) : json(challenge);
+  }));
+  render(<Login onSuccess={vi.fn()} appName="Test" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+  await screen.findByText('Security check verified.');
+  expect((screen.getByRole('button', { name: /sign in/i }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+// At the default difficulty the solve takes about a second; Enter before that would be refused.
+it('keeps Sign In disabled until the security check is solved', async () => {
+  await stubAuth({});
+  render(<Login onSuccess={vi.fn()} appName="Test" />);
+  const button = screen.getByRole('button', { name: /sign in/i }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  await screen.findByText('Security check verified.');
+  expect(button.disabled).toBe(false);
 });

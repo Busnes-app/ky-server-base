@@ -302,6 +302,54 @@ ALTER TABLE device_pairings ADD COLUMN IF NOT EXISTS sso_sid TEXT NOT NULL DEFAU
 		SQLite:   `DROP TABLE IF EXISTS device_pairings;`,
 		Postgres: `DROP TABLE IF EXISTS device_pairings;`,
 	},
+	{
+		// scim_managed scopes SCIM to the accounts it created, and stays set when a KyIdentity
+		// sign-in adopts one.
+		Version: 9,
+		Name:    "scim_scope",
+		SQLite: `ALTER TABLE users ADD COLUMN scim_managed INTEGER NOT NULL DEFAULT 0;
+UPDATE users SET scim_managed = 1 WHERE sso_provider = 'scim';`,
+		Postgres: `ALTER TABLE users ADD COLUMN IF NOT EXISTS scim_managed BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE users SET scim_managed = TRUE WHERE sso_provider = 'scim';`,
+	},
+}
+
+// EnsureUsernameIndex builds the case-insensitive unique index on usernames when existing
+// data allows it. Lookups already compare LOWER(username), so two rows differing only in case
+// make sign-in pick one arbitrarily. When such rows exist nothing is renamed: the index is
+// skipped, every clash is returned for the caller to log, and the store refuses new
+// case-variant names itself. It runs on every start, so the index appears once an operator
+// resolves the clashes.
+func EnsureUsernameIndex(ctx context.Context, db *sql.DB) (clashes [][]string, err error) {
+	rows, err := db.QueryContext(ctx, `SELECT username FROM users WHERE LOWER(username) IN
+ (SELECT LOWER(username) FROM users GROUP BY LOWER(username) HAVING COUNT(1) > 1) ORDER BY LOWER(username), username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	groups := map[string]int{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		key := strings.ToLower(name)
+		i, ok := groups[key]
+		if !ok {
+			i = len(clashes)
+			groups[key] = i
+			clashes = append(clashes, nil)
+		}
+		clashes[i] = append(clashes[i], name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(clashes) > 0 {
+		return clashes, nil
+	}
+	_, err = db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci ON users (LOWER(username))`)
+	return nil, err
 }
 
 // Run executes all pending migrations for the specified database driver.

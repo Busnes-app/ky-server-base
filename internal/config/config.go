@@ -78,6 +78,9 @@ type SSOConfig struct {
 type SCIMConfig struct {
 	Enabled     bool   `json:"enabled"`
 	BearerToken string `json:"bearer_token"`
+	// AllowAdmin lets SCIM grant the admin role. Off by default: the IdP's token must not be
+	// able to mint administrators of this app.
+	AllowAdmin bool `json:"allow_admin"`
 }
 
 // BackupConfig holds parameters for KyBackup capsules & recovery drills.
@@ -100,6 +103,11 @@ type CaptchaConfig struct {
 	SecretKey     string `json:"secret_key"`
 	DifficultyPoW int    `json:"difficulty_pow"`
 }
+
+// DefaultPoWDifficulty is the CAPTCHA puzzle size (candidates to search). Chosen by measuring
+// the login page in Chromium on a mid-range laptop CPU (Ryzen 7 5700U, ~260k hashes/s in the
+// page's JavaScript SHA-256): the median solve is about one second.
+const DefaultPoWDifficulty = 500000
 
 // MinDepositInterval is the shortest schedule accepted: each run snapshots the whole database
 // and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
@@ -189,9 +197,10 @@ func LoadFromEnv() (*Config, error) {
 			ConnMaxLifetime: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
-			SessionSecret:  sessionSecret,
-			EncryptionKey:  encryptionKey,
-			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production"),
+			SessionSecret: sessionSecret,
+			EncryptionKey: encryptionKey,
+			// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
+			CookieSecure:   getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://")),
 			CookieDomain:   getEnv("KY_COOKIE_DOMAIN", ""),
 			SessionTTL:     7 * 24 * time.Hour,
 			TrustedProxies: trustedProxies,
@@ -212,6 +221,7 @@ func LoadFromEnv() (*Config, error) {
 		SCIM: SCIMConfig{
 			Enabled:     getEnvBool("KY_SCIM_ENABLED", true),
 			BearerToken: getEnv("KY_SCIM_TOKEN", generateRandomHex(24)),
+			AllowAdmin:  getEnvBool("KY_SCIM_ALLOW_ADMIN", false),
 		},
 		Backup: BackupConfig{
 			Dir:                  getEnv("KY_BACKUP_DIR", ""),
@@ -223,7 +233,7 @@ func LoadFromEnv() (*Config, error) {
 			Provider:      getEnv("KY_CAPTCHA_PROVIDER", "pow"),
 			SiteKey:       getEnv("KY_CAPTCHA_SITE_KEY", ""),
 			SecretKey:     getEnv("KY_CAPTCHA_SECRET_KEY", ""),
-			DifficultyPoW: getEnvInt("KY_CAPTCHA_POW_DIFFICULTY", 4),
+			DifficultyPoW: getEnvInt("KY_CAPTCHA_POW_DIFFICULTY", DefaultPoWDifficulty),
 		},
 	}
 

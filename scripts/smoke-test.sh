@@ -98,6 +98,9 @@ check "anonymous cannot set the schedule" "$(status -X PUT "$BASE/api/backup/sch
 check "anonymous cannot unpair" "$(status -X DELETE "$BASE/api/backup/pairing")" "401"
 check "QR device pairing is gone" \
   "$(if curl -s -X POST -H 'Content-Type: application/json' -d '{"secret":"x"}' "$BASE/api/devices/pair/verify" | grep -q 'pairing'; then echo present; else echo gone; fi)" "gone"
+check "local MFA sign-in is gone" \
+  "$(if curl -s -X POST -H 'Content-Type: application/json' -d '{"mfa_token":"x","code":"000000"}' "$BASE/api/auth/mfa/totp" | grep -q 'MFA'; then echo present; else echo gone; fi)" "gone"
+check "anonymous cannot list accounts" "$(status "$BASE/api/admin/users")" "401"
 check "anonymous cannot set site theme" "$(status -X POST -H 'Content-Type: application/json' -d '{"theme":"oled"}' "$BASE/api/settings/theme")" "401"
 check "scim rejects wrong bearer" "$(status -H 'Authorization: Bearer wrong' "$BASE/scim/v2/Users")" "401"
 stop_server

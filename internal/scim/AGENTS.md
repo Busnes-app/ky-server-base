@@ -9,10 +9,14 @@ Owns local persistence adapters and bearer authentication; the library owns `/sc
 ## Local Contracts
 - Content-Type for all SCIM endpoints must be `application/scim+json`.
 - Requests must be authenticated with the configured bearer token.
+- SCIM is scoped to `SCIMManaged` accounts (`managedUser`, `ListSCIMUsers`): any other id is 404 and cannot be a group member. `checkRole` refuses granting `admin` unless `KY_SCIM_ALLOW_ADMIN`; an existing admin can still be changed.
+- User PUT/PATCH go through `update`, which retries on `store.ErrConflict` so a write from a stale read never restores a role or status.
 - User de-provisioning via `PATCH` with `active: false` updates user status to `inactive`.
 - A user `eq` filter matches the named attribute exactly: `userName` through `GetUserByUsername`; `emails`/`displayName` through the store's LIKE search as a candidate narrower, capped at `maxFilterCandidates` (`tooMany` beyond it).
-- Group member ids are checked before any write, and only the membership difference is written.
-- User writes go through `UpdateUserProfile`, never `UpdateUser`, so SCIM cannot rewrite credential or MFA columns from a stale read.
+- A group filter is `displayName eq` (through `GetGroupByName`) or `externalId eq`; anything else is `invalidFilter`, never an unfiltered page.
+- User PATCH: filtered `emails`/`roles` paths apply only when `selects` matches the value `userResource` emits; only an unmatched emails/roles replace is `noTarget`. Paths into unstored attributes are ignored, never refused.
+- Group PATCH applies `add`/`remove`/`replace` to the current membership. Member sub-attribute paths and member filters other than remove `members[value eq "id"]` are `invalidPath` before any write. Member ids are checked before any write, and only the membership difference is written.
+- User writes go through `UpdateUserProfile`, never `UpdateUser`, so SCIM cannot rewrite credential columns from a stale read.
 - SCIM protocol models and parsing must come from `github.com/elimity-com/scim`; do not add parallel local request/response implementations.
 
 ## Verification

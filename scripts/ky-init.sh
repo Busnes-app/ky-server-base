@@ -23,9 +23,25 @@ fi
 
 mkdir -p "$TARGET_DIR"
 
-# Copy files excluding git, dist, node_modules, binaries, and local data
+# Copy files excluding git, dist, node_modules, binaries, local data, secrets
+# (.env holds the base deployment's session/SCIM/SSO secrets) and agent/test artifacts
 rsync -av --progress "$BASE_DIR/" "$TARGET_DIR/" \
     --exclude='.git' \
+    --include='.env.example' \
+    --exclude='.env' \
+    --exclude='.env.*' \
+    --exclude='.claude' \
+    --exclude='.codex' \
+    --exclude='.superpowers' \
+    --exclude='.browser' \
+    --exclude='coverage.out' \
+    --exclude='web/test-results' \
+    --exclude='web/playwright-report' \
+    --exclude='*.db' \
+    --exclude='*.db-wal' \
+    --exclude='*.db-shm' \
+    --exclude='*.key' \
+    --exclude='*.log' \
     --exclude='web/node_modules' \
     --exclude='web/dist' \
     --exclude='data' \
@@ -58,6 +74,15 @@ if [ -f "docker-compose.yml" ]; then
     sed -i "s|KY_APP_NAME=Busnes.app Base|KY_APP_NAME=${APP_NAME}|g" docker-compose.yml
 fi
 
+# Point image and repository coordinates (compose image, attestation --repo/--cert-identity,
+# CI checks, docs) at the new repository; ghcr.io names are lowercase. CHANGELOG.md and
+# docs/superpowers/ are history of the base and keep its coordinates.
+APP_LC="$(printf '%s' "$APP_NAME" | tr '[:upper:]' '[:lower:]')"
+find . -type f \( -name 'docker-compose*.yml' -o -name '*.md' -o -path './.github/*' \) \
+    ! -path './docs/superpowers/*' ! -path './CHANGELOG.md' \
+    -exec sed -i -e "s|busnes-app/ky-server-base|busnes-app/${APP_LC}|g" \
+                 -e "s|Busnes-app/ky-server-base|Busnes-app/${APP_NAME}|g" {} +
+
 echo "📦 Running go mod tidy..."
 go mod tidy
 
@@ -66,4 +91,4 @@ echo ""
 echo "To get started:"
 echo "  cd ${TARGET_DIR}"
 echo "  make all"
-echo "  ./${APP_NAME}"
+echo "  ./ky_server_base   # binary name set by the Makefile"

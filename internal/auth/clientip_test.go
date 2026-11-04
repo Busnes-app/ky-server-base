@@ -150,3 +150,17 @@ func TestParseTrustedProxiesRejectsGarbage(t *testing.T) {
 		t.Errorf("parsed %v, want [192.0.2.1/32 10.0.0.0/8 10.0.0.1/32]", got)
 	}
 }
+
+func TestRateLimitKeyGroupsIPv6By64(t *testing.T) {
+	for in, want := range map[string]string{
+		"2001:db8:1:2:aaaa::1":   "2001:db8:1:2::/64",
+		"2001:db8:1:2:ffff::999": "2001:db8:1:2::/64",
+		"2001:db8:1:3::1":        "2001:db8:1:3::/64",
+		"203.0.113.5":            "203.0.113.5",
+		"not-an-ip":              "not-an-ip",
+	} {
+		if got := auth.RateLimitKey(in); got != want {
+			t.Errorf("RateLimitKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

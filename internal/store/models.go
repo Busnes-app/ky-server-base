@@ -6,19 +6,18 @@ import (
 
 // User represents an identity within the system.
 type User struct {
-	ID                 string     `json:"id"`
-	Username           string     `json:"username"`
-	Email              string     `json:"email"`
-	DisplayName        string     `json:"display_name"`
-	PasswordHash       string     `json:"-"`            // Never serialized to JSON
-	Role               string     `json:"role"`         // "admin", "user", "manager"
-	Status             string     `json:"status"`       // "active", "suspended", "inactive"
-	SSOProvider        string     `json:"sso_provider"` // "local", "kysignon", "oidc", "saml", "scim"
-	SSOSubject         string     `json:"sso_subject,omitempty"`
-	TOTPSecretEnc      string     `json:"-"` // AES-256-GCM encrypted
-	TOTPEnabled        bool       `json:"totp_enabled"`
-	TOTPLastCounter    int64      `json:"-"` // last RFC 6238 counter accepted; refuses replay inside the skew window
-	RecoveryCodesHash  string     `json:"-"` // JSON array of sha256 hashes
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	DisplayName  string `json:"display_name"`
+	PasswordHash string `json:"-"`            // Never serialized to JSON
+	Role         string `json:"role"`         // "admin", "user", "manager"
+	Status       string `json:"status"`       // "active", "suspended", "inactive"
+	SSOProvider  string `json:"sso_provider"` // "local", "kysignon", "oidc", "saml", "scim"
+	SSOSubject   string `json:"sso_subject,omitempty"`
+	// SCIMManaged marks an account SCIM created; SCIM can see and change only these. It
+	// survives adoption by a KyIdentity sign-in, which switches SSOProvider to "kysignon".
+	SCIMManaged        bool       `json:"-"`
 	PushDeviceID       string     `json:"push_device_id,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -37,12 +36,6 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	// SSOSID is the identity provider's sid for an SSO login; empty for local sign-in.
 	SSOSID string `json:"-"`
-}
-
-type MFAChallenge struct {
-	TokenHash string
-	UserID    string
-	ExpiresAt time.Time
 }
 
 // Group represents a SCIM/RBAC user group.

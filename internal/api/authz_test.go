@@ -138,6 +138,7 @@ func TestPrivilegedEndpointsRequireAdmin(t *testing.T) {
 		{"PUT", "/api/backup/schedule"},
 		{"GET", "/api/backup/status"},
 		{"POST", "/api/settings/theme"},
+		{"GET", "/api/admin/users"},
 	}
 
 	for _, tc := range cases {
@@ -159,5 +160,41 @@ func TestPrivilegedEndpointsRequireAdmin(t *testing.T) {
 				t.Errorf("admin was blocked: got %d", got)
 			}
 		})
+	}
+}
+
+// The Directory page lists every account through the admin route, paged and without secrets.
+func TestAdminUserListIsPagedAndCarriesNoSecrets(t *testing.T) {
+	srv, st, _ := setupTestServer(t)
+	admin := loginAs(t, srv, st, "alice", "admin")
+	for _, u := range []*store.User{
+		{ID: "usr_s", Username: "scimmy", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "ext-secret-subject", SCIMManaged: true},
+		{ID: "usr_k", Username: "kyid", Role: "user", Status: "inactive", SSOProvider: "kysignon", SSOSubject: "k"},
+	} {
+		if err := st.Users().CreateUser(context.Background(), u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := do(t, srv, "GET", "/api/admin/users?limit=2", admin)
+	var page struct {
+		Users []map[string]any `json:"users"`
+		Total int              `json:"total"`
+		Limit int              `json:"limit"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if page.Total != 3 || len(page.Users) != 2 || page.Limit != 2 {
+		t.Fatalf("paging: total %d, %d rows, limit %d", page.Total, len(page.Users), page.Limit)
+	}
+	for _, field := range []string{"password", "totp", "recovery", "sso_subject", "ext-secret-subject"} {
+		if bytes.Contains(w.Body.Bytes(), []byte(field)) {
+			t.Errorf("user list carries %q: %s", field, w.Body.String())
+		}
+	}
+	w = do(t, srv, "GET", "/api/admin/users?offset=2&limit=500", admin)
+	_ = json.Unmarshal(w.Body.Bytes(), &page)
+	if len(page.Users) != 1 || page.Limit != 200 {
+		t.Fatalf("second page: %d rows, limit %d", len(page.Users), page.Limit)
 	}
 }

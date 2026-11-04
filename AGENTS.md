@@ -76,7 +76,7 @@ Default section order:
 6. Report any docs intentionally left unchanged and why
 
 ## User Preferences
-- Bootstrap passwords and passwords installed by `init-admin` must be replaced before privileged use. Operator resets atomically revoke sessions and MFA challenges. Untouched existing accounts are not retroactively flagged.
+- Bootstrap passwords and passwords installed by `init-admin` must be replaced before privileged use. Operator resets atomically revoke sessions. Untouched existing accounts are not retroactively flagged.
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
@@ -116,7 +116,7 @@ overlay merges with synthetic inputs and starts no containers.
 - [internal/config/AGENTS.md](internal/config/AGENTS.md): Configuration management and environment loader.
 - [internal/store/AGENTS.md](internal/store/AGENTS.md): Pluggable database abstraction layer (SQLite & PostgreSQL).
 - [internal/crypto/AGENTS.md](internal/crypto/AGENTS.md): Cryptographic primitives (AES-256-GCM, HMAC, SHA-256, randomness, PKCE).
-- [internal/auth/AGENTS.md](internal/auth/AGENTS.md): Authentication, MFA (TOTP), recovery codes, sessions, and CAPTCHA.
+- [internal/auth/AGENTS.md](internal/auth/AGENTS.md): Authentication, sessions, client addresses and CAPTCHA (MFA is KyIdentity's).
 - [internal/sso/AGENTS.md](internal/sso/AGENTS.md): Single Sign-On federation (KySignOn, OIDC, SAML 2.0).
 - [internal/scim/AGENTS.md](internal/scim/AGENTS.md): SCIM 2.0 user and group provisioning engine.
 - [internal/backup/AGENTS.md](internal/backup/AGENTS.md): Product-side adapters over `ky-primitives/recoveryclient`: payload collection, drill checks, settings and sealer glue.

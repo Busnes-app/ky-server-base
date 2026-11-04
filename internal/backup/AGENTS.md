@@ -20,9 +20,10 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   setting will not open.
 - `Collect` snapshots SQLite with the lib's `SQLiteSnapshot` (`VACUUM INTO`; the store runs in
   WAL mode, so a plain file read misses uncheckpointed commits) and returns
-  `ErrNoDatabaseSnapshot` for any other driver, so a capsule without a consistent database is
+  `ErrNoDatabaseSnapshot` for any other driver, and (`CheckDatabasePath`) for a SQLite DSN
+  other than `<DataDir>/ky_server.db`, the only path a capsule restores to, so a capsule without a consistent database is
   never sealed. It also carries the encryption key (`data/encryption.key`, required — restores
-  a database whose MFA secrets are gone otherwise) and the pinned recovery public key
+  a database whose sealed KyRecovery token is unreadable otherwise) and the pinned recovery public key
   (`data/recovery.pub`, only when paired).
 - `Checks(dir, opened)` reads the opened capsule's manifest, normalizes JSON lists and
   fails malformed or incomplete recipes. Required files include all capsule members and

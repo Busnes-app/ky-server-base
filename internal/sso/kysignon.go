@@ -76,7 +76,6 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.Timestamp == 0 || time.Since(time.Unix(payload.Timestamp, 0)).Abs() > 5*time.Minute {
 		return errors.New("webhook timestamp is missing or expired")
 	}
-
 	switch payload.Event {
 	case "user.created", "user.updated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
@@ -94,19 +93,14 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 		}
 
 		if existing != nil {
-			privilegesChanged := existing.Role != role || existing.Status != status
+			prevRole, prevStatus := existing.Role, existing.Status
 			existing.Username = payload.Username
 			existing.Email = payload.Email
 			existing.DisplayName = payload.DisplayName
 			existing.Role = role
 			existing.Status = status
-			if err := k.store.Users().UpdateUserProfile(ctx, existing); err != nil {
-				return err
-			}
-			if privilegesChanged {
-				return k.store.Sessions().DeleteUserSessions(ctx, existing.ID)
-			}
-			return nil
+			// A role or status change revokes the user's sessions in the same transaction.
+			return k.store.Users().UpdateUserProfile(ctx, existing, prevRole, prevStatus)
 		}
 
 		newUser := &store.User{
@@ -129,10 +123,13 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 		if err != nil {
 			return err
 		}
+		prevStatus := existing.Status
 		existing.Status = "inactive"
-		if err := k.store.Users().UpdateUserProfile(ctx, existing); err != nil {
+		if err := k.store.Users().UpdateUserProfile(ctx, existing, existing.Role, prevStatus); err != nil {
 			return err
 		}
+		// Sessions go even when the row was already inactive: a retry after a failed
+		// revocation must still end them.
 		return k.store.Sessions().DeleteUserSessions(ctx, existing.ID)
 
 	case "user.deleted":

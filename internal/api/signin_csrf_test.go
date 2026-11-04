@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-// Sign-in has no CSRF token, so a cross-site form (text/plain JSON) could log the victim into
-// an attacker's account. The browser's Sec-Fetch-Site label refuses it; API clients send none.
+// Sign-in has no CSRF token, so a cross-site or sibling-subdomain form (text/plain JSON) could
+// log the victim into an attacker's account. The browser's Sec-Fetch-Site label refuses it;
+// API clients send none.
 func TestCrossSiteSignInIsRefused(t *testing.T) {
 	srv, _, _ := setupTestServer(t)
-	for _, path := range []string{"/api/auth/login", "/api/auth/mfa/totp", "/api/auth/mfa/recovery-code"} {
-		for site, want := range map[string]bool{"cross-site": true, "same-origin": false, "": false} {
+	for _, path := range []string{"/api/auth/login"} {
+		for site, want := range map[string]bool{"cross-site": true, "same-site": true, "same-origin": false, "": false} {
 			req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"username":"x","password":"y"}`))
 			req.Header.Set("Content-Type", "text/plain")
 			if site != "" {

@@ -10,6 +10,8 @@ var (
 	ErrNotFound       = errors.New("record not found")
 	ErrAlreadyExists  = errors.New("record already exists")
 	ErrSessionExpired = errors.New("session expired")
+	// ErrConflict means the record changed since it was read; re-read and retry.
+	ErrConflict = errors.New("record changed concurrently")
 	// ErrSSOSessionEnded means the identity provider already ended the login being signed in.
 	ErrSSOSessionEnded = errors.New("SSO session already ended")
 )
@@ -35,18 +37,22 @@ type UserStore interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserBySSO(ctx context.Context, provider, subject string) (*User, error)
 	UpdateUser(ctx context.Context, u *User) error
-	// UpdateUserProfile writes only username, email, display name, role, status and SSO
-	// identity, so a directory sync working from a stale read cannot undo a concurrent
-	// password reset, MFA change or recovery-code spend.
-	UpdateUserProfile(ctx context.Context, u *User) error
+	// UpdateUserProfile writes only username, email, display name, role and status, so a
+	// directory sync working from a stale read cannot undo a concurrent password reset or SSO
+	// link. It applies only while role and status are still prevRole and prevStatus
+	// (the values the caller read), returning ErrConflict otherwise, so a stale read cannot put
+	// back a privilege a concurrent write revoked. When it changes either, it deletes the
+	// user's sessions in the same transaction.
+	UpdateUserProfile(ctx context.Context, u *User, prevRole, prevStatus string) error
+	// LinkSSOIdentity moves an account from fromProvider to toProvider, keeping its subject;
+	// ErrConflict when the account is no longer on fromProvider.
+	LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
-	UpdateRecoveryCodes(ctx context.Context, userID, oldHashes, newHashes string) error
-	// SpendTOTPCounter records counter as used. It returns ErrAlreadyExists when counter is
-	// not greater than the stored one, which is how a replayed code inside the skew window fails.
-	SpendTOTPCounter(ctx context.Context, userID string, counter int64) error
 	DeleteUser(ctx context.Context, id string) error
 	ListUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
+	// ListSCIMUsers is ListUsers restricted to accounts SCIM created (SCIMManaged).
+	ListSCIMUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
 	CountUsers(ctx context.Context) (int, error)
 }
 
@@ -62,8 +68,6 @@ type SessionStore interface {
 	// EndSSOSession ends every session of an SSO login and fences its sid until fenceUntil.
 	EndSSOSession(ctx context.Context, sid string, fenceUntil time.Time) error
 	CleanExpiredSessions(ctx context.Context) error
-	CreateMFAChallenge(ctx context.Context, challenge *MFAChallenge, expectedPasswordHash string) error
-	ConsumeMFAChallenge(ctx context.Context, tokenHash string) (userID, passwordHash string, err error)
 }
 
 // GroupStore defines repository operations for SCIM and RBAC groups.

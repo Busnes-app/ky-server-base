@@ -22,10 +22,10 @@ authority. The directory-sync webhook uses a signature instead of a login sessio
 
 For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 `ky_session` cookie requires `X-CSRF-Token` to equal the `ky_csrf` cookie. This also
-applies when an Authorization header is present alongside the cookie. Login, MFA
-verification and the signed directory-sync webhook are exempt. A bearer-only client
+applies when an Authorization header is present alongside the cookie. Login and the
+signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
-Login and MFA verification instead refuse an unsafe request carrying
+Login instead refuses an unsafe request carrying
 `Sec-Fetch-Site: cross-site` with 403 `{"error":"Cross-site sign-in refused"}`;
 clients that send no such header are unaffected.
 
@@ -57,37 +57,44 @@ Sources: [auth handlers](../internal/api/auth_handlers.go),
 | Method and path | Input and authority | Successful output |
 |---|---|---|
 | GET `/api/auth/pow-challenge` | Anonymous; no body | 200 challenge object described below |
-| POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies, or an MFA transaction |
-| POST `/api/auth/mfa/totp` | Anonymous JSON: `mfa_token`, `code` | 200 authenticated user and session/CSRF cookies |
-| POST `/api/auth/mfa/recovery-code` | Anonymous JSON: `mfa_token`, `code` | 200 authenticated user and session/CSRF cookies |
+| POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies |
 | GET `/api/auth/me` | Optional session; no body | 200 `{"authenticated":false}` or `{"authenticated":true,"user":User}` |
 | POST `/api/auth/change-password` | Restricted local session; JSON: `current_password`, `new_password`; cookie CSRF applies | 200 `{"password_changed":true,"login_required":true}`; all sessions revoked |
 | POST `/api/auth/logout` | Optional session; no body; cookie CSRF applies | 200 `{"logged_out":true}`; current session revoked and cookies expired |
 
-An ordinary completed login returns `{"authenticated":true,"user":User}`. `User`
+A completed login returns `{"authenticated":true,"user":User}`. `User`
 contains `id`, `username`, `email`, `display_name`, `role`, `status`, `sso_provider`,
-`totp_enabled`, `must_change_password`, `created_at` and `updated_at`; `sso_subject`,
+`must_change_password`, `created_at` and `updated_at`; `sso_subject`,
 `push_device_id` and `last_login_at` appear when set. User timestamps are RFC 3339
 strings. Roles used by the scaffold are `admin`, `user` and `manager`; only `admin`
-authorizes administrator routes. Password hashes, TOTP secrets/counters and recovery
-code hashes are never included.
+authorizes administrator routes. Password hashes are never included. Usernames are
+unique regardless of letter case: creating or renaming to a case variant of another
+account's name is refused (SCIM 409 `uniqueness`, KyIdentity sign-in 409). An
+installation that already holds such duplicates keeps them, logs each clash at
+startup and builds the case-insensitive unique index once they are resolved.
 
-With TOTP enabled, password login instead returns
-`{"mfa_required":true,"mfa_token":"…","methods":["totp","recovery_code"]}`.
-The transaction lasts five minutes and is consumed by the verification attempt,
-including a wrong code: start a fresh password login to retry. TOTP counters and
-recovery codes are single-use. Login allows 20 attempts per IP per minute; the two
-MFA routes share 20 attempts per IP per minute and five per account per five minutes.
-Invalid credentials/transactions/codes return 401; inactive or ineligible accounts
-and failed CAPTCHA return 403.
+There is no local multi-factor sign-in: MFA is a KyIdentity (SSO) feature, so require it
+there and sign in through KyIdentity. The former `/api/auth/mfa/totp` and
+`/api/auth/mfa/recovery-code` routes and the `totp_enabled` user field are gone. The
+`users.totp_secret_enc`, `totp_enabled`, `totp_last_counter` and `recovery_codes_hash`
+columns and the `mfa_challenges` table are kept with their data but no longer read or
+written; an account that had local TOTP signs in with its password alone.
+
+Login allows 20 attempts per client per minute, and 10 failed attempts per account per
+client per 15 minutes; an IPv6 client counts as its /64. An exhausted account window
+answers the same 401 as a wrong password without checking the password, and only for
+that client, so nobody elsewhere can lock an account out. Unknown names cost the same
+password hashing as known ones. Invalid credentials and inactive or disabled accounts
+both return 401 `{"error":"Invalid credentials"}`; a failed or reused CAPTCHA returns 403.
 
 The PoW challenge has `algorithm:"SHA-256"`, `salt`, `challenge`, `maxnumber`,
 `expires_at` (Unix seconds) and `signature`. Find an integer `number` from 1 through
 `maxnumber` whose lowercase hex SHA-256 of UTF-8 `salt + decimal(number)` equals
 `challenge`. Add `number` to the unchanged challenge object, encode that JSON in
 standard Base64 (padding optional), and submit it as `captcha_token`. The signed
-challenge expires after five minutes. Login verifies it when the configured provider
-is `pow`; no Turnstile/Friendly server-side verification is wired here.
+challenge expires after five minutes and each solved challenge is accepted once: a
+second login with the same token returns 403. Login verifies it when the configured
+provider is `pow`; no Turnstile/Friendly server-side verification is wired here.
 
 Password replacement is specifically for a local account flagged
 `must_change_password`, not a general password-edit endpoint. Otherwise it returns
@@ -104,6 +111,7 @@ Source: [settings handlers](../internal/api/settings_handlers.go).
 |---|---|---|
 | GET `/api/settings` | Optional session; no body | 200 tiered settings object |
 | POST `/api/settings/theme` | Administrator; JSON `{"theme":"name"}`; cookie CSRF applies | 200 `{"theme":"name"}` |
+| GET `/api/admin/users` | Administrator; query `offset` (default 0), `limit` (default 50, at most 200), optional `search` (substring of username, display name or email) | 200 `{users, total, offset, limit}`, newest first |
 
 Public settings are `app_name`, `app_url`, `theme` (stored value or `patina`),
 `captcha_provider` and `sso_enabled`. An unrestricted session additionally receives
@@ -112,6 +120,11 @@ stored settings; it can contain sensitive configuration. All keys beginning with
 `kyrecovery_token` are removed, including sealed/legacy token forms. Invalid theme
 JSON or an empty name is 400; the handler stores a nonempty name without validating
 it against the frontend theme list.
+
+`/api/admin/users` is read-only and lists every account (local, KyIdentity and SCIM).
+Each entry has `id`, `username`, `display_name`, `email`, `role`, `status`,
+`sso_provider`, `scim_managed`, `created_at` and, when set, `last_login_at`; no
+credential, MFA state or SSO subject. The Directory & SCIM screen uses it.
 
 ## Federation and directory synchronization
 
@@ -127,9 +140,13 @@ Sources: [SSO handlers](../internal/api/sso_handlers.go),
 | GET `/saml/metadata` | Anonymous; no body | 200 XML service-provider metadata |
 
 The callback verifies provider tokens, PKCE and nonce. Invalid state/nonce is 400;
-failed exchange is 401; an unprovisioned account is 403 when automatic provisioning
-is off. Automatic provisioning creates role `user`; sign-in does not itself grant
-administration. The scaffold constructs generic OIDC and SAML helpers, but registers
+failed exchange is 401. A subject with no KyIdentity account adopts the SCIM account
+whose `externalId` equals the subject: that row becomes a KyIdentity row (so
+back-channel logout reaches it) and stays SCIM-managed, audited as
+`sso.scim_account_linked`. Otherwise an unprovisioned account is 403 when automatic
+provisioning is off, and a username that another account already holds (in any letter
+case) is 409 naming it. A disabled account is 403. Automatic provisioning creates role
+`user`; sign-in does not itself grant administration. The scaffold constructs generic OIDC and SAML helpers, but registers
 no generic OIDC login/callback or SAML assertion-consumer handler. In particular,
 the `/saml/acs` URL named in the metadata is not an implemented login route here.
 
@@ -146,18 +163,18 @@ sessions are dated by their ID token's `iat`, not by when the callback finished.
 replay is harmless and acknowledged; an unknown subject is acknowledged. The route is
 anonymous by design: the signature is its authority, and no session cookie means no
 CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
-client's back-channel logout URI in KyIdentity. A device paired from an SSO session
-inherits that login's `sid` and credential time, so either kind of logout ends it,
-and a pairing still pending when its login ends returns no `session_token`.
+client's back-channel logout URI in KyIdentity.
 
 The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
 under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,
 `id` (provider subject), `username`, `email`, `display_name`, `role`, `status` and
 `timestamp` (Unix seconds within five minutes in either direction). Supported
 events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
-Create/update defaults an empty role to `user` and status to `active`; privilege or
-status changes revoke sessions. Deactivation sets `inactive` and revokes sessions;
-deletion removes the matching provider user. Unknown events currently return
+Events are not ordered per subject: a signed event replayed or delivered late inside
+the five-minute window is applied and can undo a newer change. Create/update defaults an empty role to `user` and status to
+`active`; privilege or status changes revoke sessions in the same transaction.
+Deactivation sets `inactive` and revokes sessions; deletion removes the matching
+provider user. Unknown events currently return
 `synced:true` without changing a user. An unconfigured HMAC secret, invalid signature,
 bad timestamp or processing error returns 401; an unreadable body returns 400.
 
@@ -171,6 +188,13 @@ including discovery, requires `Authorization: Bearer <KY_SCIM_TOKEN>` and SCIM
 must be enabled. Use `application/scim+json` for request/response bodies. Do not send
 browser session cookies; otherwise the shared CSRF rule also applies to writes.
 
+SCIM sees only the accounts it created (`scim_managed`, kept when a KyIdentity sign-in
+adopts one). Local and other SSO accounts, the bootstrap admin included, are absent
+from lists and filters, 404 by id, and 400 `invalidValue` as group members. SCIM may
+not grant the `admin` role (400 `invalidValue`) unless `KY_SCIM_ALLOW_ADMIN=true`;
+an account that is already an admin can still be updated, deactivated or demoted. A
+`userName` that another account holds in any letter case is 409 `uniqueness`.
+
 | Method and path | Input | Output |
 |---|---|---|
 | GET `/scim/v2/ServiceProviderConfig` | None | 200 capabilities and bearer authentication scheme |
@@ -180,14 +204,14 @@ browser session cookies; otherwise the shared CSRF rule also applies to writes.
 | GET `/scim/v2/ResourceTypes/{id}` | `User` or `Group` | 200 resource-type description |
 | GET `/scim/v2/Users` | `startIndex`, `count`, optional `filter` | 200 user ListResponse |
 | POST `/scim/v2/Users` | Core User resource | 201 created User resource |
-| POST `/scim/v2/Users/.search` | RFC 7644 SearchRequest | 200 user ListResponse; see filter limitation below |
+| POST `/scim/v2/Users/.search` | RFC 7644 SearchRequest | 501; search is not implemented, use GET with `filter` |
 | GET `/scim/v2/Users/{id}` | User ID | 200 User resource |
 | PUT `/scim/v2/Users/{id}` | Replacement User resource | 200 User resource |
 | PATCH `/scim/v2/Users/{id}` | RFC 7644 PatchOp | 200 User resource |
 | DELETE `/scim/v2/Users/{id}` | User ID | 204, no body |
-| GET `/scim/v2/Groups` | `startIndex`, `count` | 200 group ListResponse |
+| GET `/scim/v2/Groups` | `startIndex`, `count`, optional `filter` | 200 group ListResponse |
 | POST `/scim/v2/Groups` | Core Group resource | 201 created Group resource |
-| POST `/scim/v2/Groups/.search` | RFC 7644 SearchRequest | 200 group ListResponse; filtering is not applied by this adapter |
+| POST `/scim/v2/Groups/.search` | RFC 7644 SearchRequest | 501; search is not implemented, use GET with `filter` |
 | GET `/scim/v2/Groups/{id}` | Group ID | 200 Group resource |
 | PUT `/scim/v2/Groups/{id}` | Replacement Group resource | 200 Group resource |
 | PATCH `/scim/v2/Groups/{id}` | RFC 7644 PatchOp; see limitations below | 200 Group resource |
@@ -209,14 +233,25 @@ Adapter limits matter when configuring a provisioning connector:
   exactly, case-insensitively. A blank value or any other filter returns 400
   `invalidFilter`; an `emails` or `displayName` value whose substring matches more
   than 1000 accounts returns 400 `tooMany`.
-  User search currently reads this filter from the URL query, not the SearchRequest
-  body's filter. Group filtering is not applied.
+- Group list filtering accepts exactly one `displayName eq "x"` (exact,
+  case-insensitive) or `externalId eq "x"` (exact, case-sensitive) comparison. Any
+  other filter returns 400 `invalidFilter`; an `externalId` filter over more than
+  1000 groups returns 400 `tooMany`.
 - User PATCH supports add/replace of active, displayName, userName, emails and
-  roles; remove operations are ignored. Group PATCH only applies explicit paths
-  into displayName/members; complex member filters and complete RFC patch semantics
-  are not implemented by the persistence adapter. Prefer PUT when replacing a group.
-  An unknown member id on create, replace or PATCH is 400 `invalidValue` and leaves
-  the group unchanged.
+  roles. Filtered paths such as `emails[type eq "work"].value` or
+  `roles[primary eq "True"].value` take one `eq` selector and apply when it matches
+  the single stored value (the email is emitted as type `work`, primary; the role as
+  primary). A replace whose emails/roles selector matches nothing is 400 `noTarget`;
+  a filtered add creates a missing email. Remove clears `emails`, resets `roles` to
+  `user` and sets `displayName` back to `userName`. Paths into attributes not stored
+  here (`name.*`, `phoneNumbers`, `addresses`, email/role `type`/`primary`/`display`)
+  are ignored with 200.
+- Group PATCH applies each op by type to displayName, externalId and members:
+  add merges members, remove drops the listed members (or `members[value eq "id"]`,
+  or all members when `members` has no value), replace sets them. A member
+  sub-attribute path (`members.display`, `members[value eq "id"].display`) or any
+  other member filter is 400 `invalidPath`. An unknown member id on create, replace
+  or PATCH is 400 `invalidValue`. Either error leaves the group unchanged.
 - Cross-resource root list/search has no configured root-query handler; `/scim/v2/Me`
   is 501. Bulk is not enabled. Discover capabilities before using optional operations.
 
@@ -272,12 +307,13 @@ recorded backup. These shared formats are supplied by the pinned ky-primitives m
 Status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
 `allow_private_recovery`, `database_driver` and `members` (payload names).
 Conditional fields are `recovery_url`, `recovery_key_id`, `threshold`, `total_shares`,
-`recovery_key_error`, `last_deposit` (receipt), `local_dir`, `local_keep`,
+`recovery_key_error`, `database_path_error` (the SQLite database is not `<KY_DATA_DIR>/ky_server.db`, so nothing is sealed), `last_deposit` (receipt), `local_dir`, `local_keep`,
 `local_copies:[{name,size_bytes,created_at}]`, `local_error`, `interval_sec`,
 `min_interval_sec` and `next_run_at`. The recovery bearer token is never returned.
 
-Capsule creation currently requires SQLite. No consistent PostgreSQL snapshot is
-implemented. Export/deposit return 412 for missing prerequisites (key, destination,
+Capsule creation currently requires SQLite at `<KY_DATA_DIR>/ky_server.db`, the only
+path a capsule restores; a `KY_DB_DSN` pointing elsewhere refuses to seal (412, failed
+drill). No consistent PostgreSQL snapshot is implemented. Export/deposit return 412 for missing prerequisites (key, destination,
 database snapshot, or disallowed private destination as applicable); a PostgreSQL
 drill returns 200 with `passed:false`. A changed pin or concurrent deposit is 409;
 capsule size-cap failure is 413; remote deposit refusal is 502, which may still
@@ -297,16 +333,15 @@ normally go to stderr. Setup/operational failures return a nonzero exit status.
 |---|---|---|
 | No subcommand | Load environment, open store, bootstrap if empty, serve HTTP and run configured backup schedule | Startup/operation logs; listener defaults to `:8080` |
 | `version` | No inputs or data-directory access | Version text on stdout; use the source commit/image digest for exact build identity |
-| `init-admin -username NAME -password VALUE` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions/challenges/pairings, require password replacement | Confirmation on stderr |
-| `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results |
+| `init-admin -username NAME -password VALUE [-promote]` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions, require password replacement. An existing non-local account is refused; an existing local account that is not an active administrator is refused unless `-promote` is given (exit 1 either way) | Confirmation, and the previous role and status of an existing account, on stderr |
+| `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
 | `export-capsule [-out PATH]` | Require suite pin; seal payload to custodian public key; default output `<capsule-id>.kycap` | File plus capsule/key/size confirmation on stderr |
 | `deposit` | Seal once and deliver to configured destinations | Audit record; remote success logs capsule/time/digest on stderr; failures on stderr; no JSON stdout contract |
 | `restore -capsule PATH -to DIRECTORY [-service NAME]` | Read custodian shares from stdin, one `ky2-…` line each; target must be empty; expected service defaults to `KY_APP_NAME`, then `Busnes.app` | Authenticated manifest/restore result on stdout; optional terminal prompt on stderr |
 
 `init-admin` currently takes its password in argv, so it can be visible in process
-listings or shell history. Custodian shares are accepted only on stdin. A completed
-`backup-drill` can exit zero with a FAILED summary; inspect the summary rather than
-using exit zero as proof of recovery. Unknown subcommands currently fall through to
+listings or shell history. Custodian shares are accepted only on stdin. `backup-drill`
+exits 1 when the drill FAILED, so cron and monitoring see a failed recovery check. Unknown subcommands currently fall through to
 starting the server; there is no top-level help command. Flag-bearing subcommands
 support `-h`/`-help` without operating on data.
 
@@ -327,13 +362,13 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_ENV` | `development` | `production` requires a session secret and defaults to Secure cookies |
 | `KY_DB_DRIVER` | `sqlite` | SQLite or `postgres` (`postgresql` alias); other drivers are not implemented |
 | `KY_DATA_DIR` | `./data` | Local database/key directory |
-| `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly |
+| `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly. A SQLite DSN other than `<KY_DATA_DIR>/ky_server.db` disables backups |
 | `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections |
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
 | `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
-| `KY_COOKIE_SECURE` | true only in production | Secure flag and HSTS response header |
-| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain |
+| `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header |
+| `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
 | `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
@@ -345,9 +380,10 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_SAML_ENTITY_ID`, `KY_SAML_METADATA_URL` | Empty | SAML helper configuration; only local metadata output is wired |
 | `KY_SCIM_ENABLED` | `true` | Enable authenticated provisioning |
 | `KY_SCIM_TOKEN` | Fresh random 24-byte hex on each load | Provisioning bearer credential; set explicitly for a stable integration |
+| `KY_SCIM_ALLOW_ADMIN` | `false` | Let SCIM grant the `admin` role |
 | `KY_CAPTCHA_PROVIDER` | `pow` | Login PoW check; `none` disables it; other provider verification is not wired |
 | `KY_CAPTCHA_SITE_KEY`, `KY_CAPTCHA_SECRET_KEY` | Empty | Reserved provider configuration; not used by the current PoW verifier |
-| `KY_CAPTCHA_POW_DIFFICULTY` | `4` | Maximum puzzle candidate number; nonpositive values fall back to 20000 |
+| `KY_CAPTCHA_POW_DIFFICULTY` | `500000` | Maximum puzzle candidate number; nonpositive values fall back to the default. The default solves in about one second (median) in a desktop browser |
 | `KY_BACKUP_DIR` | Empty | Optional local sealed-capsule destination |
 | `KY_BACKUP_KEEP` | `7` | Local retention count; must be at least one |
 | `KY_BACKUP_DEPOSIT_INTERVAL` | `24h` | Go duration; zero disables; minimum nonzero `15m`; malformed/negative values fail startup |
