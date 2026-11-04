@@ -44,8 +44,7 @@ These are human summaries, not a raw version-control log.
   a group onto a taken name is 409 `uniqueness` instead of 500.
 - Sign-in: a browser `Origin` that is neither the server's host nor `KY_APP_URL` is
   refused like a cross-site request, closing login CSRF over plain HTTP where browsers
-  send no `Sec-Fetch-Site`. When too many password hashes are already running, a
-  sign-in no longer counts as a failed attempt, so load cannot lock accounts. After a sign-in the web app checks that the browser kept the
+  send no `Sec-Fetch-Site`. After a sign-in the web app checks that the browser kept the
   session, and says to open the https address when a Secure cookie was dropped on a
   plain-HTTP page.
 - Backups refuse a database snapshot too large for a capsule (413) before reading it

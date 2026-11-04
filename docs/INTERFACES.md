@@ -87,8 +87,6 @@ answers the same 401 as a wrong password without checking the password, and only
 that client, so nobody elsewhere can lock an account out. Unknown names cost the same
 password hashing as known ones. Invalid credentials and inactive or disabled accounts
 both return 401 `{"error":"Invalid credentials"}`; a failed or reused CAPTCHA returns 403.
-When too many password hashes are already running, login still answers that 401 but
-spends no attempt of the account window.
 
 The PoW challenge has `algorithm:"SHA-256"`, `salt`, `challenge`, `maxnumber`,
 `expires_at` (Unix seconds) and `signature`. Find an integer `number` from 1 through
