@@ -5,9 +5,11 @@ import { secureFetch } from '../api';
 interface ChangePasswordProps {
   onComplete: () => void;
   onLogout: () => void;
+  /** Set when the user chose to change a password that is not flagged for replacement. */
+  onCancel?: () => void;
 }
 
-export function ChangePassword({ onComplete, onLogout }: ChangePasswordProps) {
+export function ChangePassword({ onComplete, onLogout, onCancel }: ChangePasswordProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -41,9 +43,9 @@ export function ChangePassword({ onComplete, onLogout }: ChangePasswordProps) {
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
       <form onSubmit={submit} className="panel" style={{ width: '100%', maxWidth: 440 }}>
         <h1>Change your password</h1>
-        <p>Replace your temporary password before continuing. Use at least 12 characters. You will sign in again afterward.</p>
+        <p>{onCancel ? 'Use at least 12 characters.' : 'Replace your temporary password before continuing. Use at least 12 characters.'} You will sign in again afterward, and every other session is signed out.</p>
         <label htmlFor="current-password">Current password</label>
-        <input id="current-password" type="password" autoComplete="current-password" required maxLength={1024}
+        <input id="current-password" type="password" autoComplete="current-password" required
           value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
         <label htmlFor="new-password">New password</label>
         <input id="new-password" type="password" autoComplete="new-password" required minLength={12} maxLength={1024}
@@ -54,7 +56,9 @@ export function ChangePassword({ onComplete, onLogout }: ChangePasswordProps) {
         {error && <p role="alert">{error}</p>}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 16 }}>
           <button type="submit" disabled={busy}>{busy ? 'Changing password…' : 'Change password'}</button>
-          <button type="button" className="btn-secondary" disabled={busy} onClick={onLogout}>Sign out</button>
+          {onCancel
+            ? <button type="button" className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+            : <button type="button" className="btn-secondary" disabled={busy} onClick={onLogout}>Sign out</button>}
         </div>
       </form>
     </main>

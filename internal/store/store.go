@@ -45,8 +45,12 @@ type UserStore interface {
 	// user's sessions in the same transaction.
 	UpdateUserProfile(ctx context.Context, u *User, prevRole, prevStatus string) error
 	// LinkSSOIdentity moves an account from fromProvider to toProvider, keeping its subject;
-	// ErrConflict when the account is no longer on fromProvider.
-	LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error
+	// ErrConflict when the account is no longer on fromProvider or no longer has subject.
+	LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error
+	// UpdateSCIMProfile is UpdateUserProfile that also compares the subject read
+	// (prevSubject, ErrConflict otherwise) and, while the account is still "scim", writes
+	// u.SSOSubject (the SCIM externalId) in the same statement.
+	UpdateSCIMProfile(ctx context.Context, u *User, prevRole, prevStatus, prevSubject string) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
 	DeleteUser(ctx context.Context, id string) error
@@ -54,6 +58,11 @@ type UserStore interface {
 	// ListSCIMUsers is ListUsers restricted to accounts SCIM created (SCIMManaged).
 	ListSCIMUsers(ctx context.Context, offset, limit int, search string) ([]*User, int, error)
 	CountUsers(ctx context.Context) (int, error)
+	// LastDirectoryEvent is the newest directory-webhook timestamp recorded for the subject,
+	// 0 if none.
+	LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error)
+	// RecordDirectoryEvent records ts as applied for the subject; it never moves back.
+	RecordDirectoryEvent(ctx context.Context, provider, subject string, ts int64) error
 }
 
 // SessionStore defines repository operations for active login sessions.

@@ -28,3 +28,27 @@ func TestCrossSiteSignInIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Over plain HTTP (a LAN address) browsers send no Sec-Fetch-Site, but a cross-origin form
+// POST still carries Origin: a foreign one is refused, the server's own host is not.
+func TestForeignOriginSignInIsRefusedWithoutFetchMetadata(t *testing.T) {
+	srv, _, _ := setupTestServer(t)
+	for origin, want := range map[string]bool{
+		"http://evil.example":      true,
+		"null":                     true,
+		"http://192.168.1.20:8080": false, // the host the request was sent to
+		"":                         false, // an API client
+	} {
+		req := httptest.NewRequest(http.MethodPost, "http://192.168.1.20:8080/api/auth/login", bytes.NewBufferString(`{"username":"x","password":"y"}`))
+		req.Header.Set("Content-Type", "text/plain")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		refused := w.Code == http.StatusForbidden && bytes.Contains(w.Body.Bytes(), []byte("Cross-site sign-in refused"))
+		if refused != want {
+			t.Errorf("Origin %q: %d %s", origin, w.Code, w.Body.String())
+		}
+	}
+}

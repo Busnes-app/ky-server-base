@@ -25,9 +25,10 @@ For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 applies when an Authorization header is present alongside the cookie. Login and the
 signed directory-sync webhook are exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
-Login instead refuses an unsafe request carrying
-`Sec-Fetch-Site: cross-site` with 403 `{"error":"Cross-site sign-in refused"}`;
-clients that send no such header are unaffected.
+Login instead refuses an unsafe request carrying `Sec-Fetch-Site: cross-site` or
+`same-site`, or an `Origin` that is neither the request's host nor `KY_APP_URL`
+(browsers omit Fetch Metadata over plain HTTP), with 403
+`{"error":"Cross-site sign-in refused"}`; clients that send neither header are unaffected.
 
 CORS permits credentials only for the exact configured application origin. An
 OPTIONS request returns 200, or 403 plain text for a different nonempty origin.
@@ -59,7 +60,7 @@ Sources: [auth handlers](../internal/api/auth_handlers.go),
 | GET `/api/auth/pow-challenge` | Anonymous; no body | 200 challenge object described below |
 | POST `/api/auth/login` | Anonymous JSON: `username`, `password`, optional `captcha_token` | 200 authenticated user and session/CSRF cookies |
 | GET `/api/auth/me` | Optional session; no body | 200 `{"authenticated":false}` or `{"authenticated":true,"user":User}` |
-| POST `/api/auth/change-password` | Restricted local session; JSON: `current_password`, `new_password`; cookie CSRF applies | 200 `{"password_changed":true,"login_required":true}`; all sessions revoked |
+| POST `/api/auth/change-password` | Any local-account session (also a restricted one); JSON: `current_password`, `new_password`; cookie CSRF applies; 409 for a federated account | 200 `{"password_changed":true,"login_required":true}`; replacement flag cleared; all sessions revoked |
 | POST `/api/auth/logout` | Optional session; no body; cookie CSRF applies | 200 `{"logged_out":true}`; current session revoked and cookies expired |
 
 A completed login returns `{"authenticated":true,"user":User}`. `User`
@@ -96,9 +97,10 @@ challenge expires after five minutes and each solved challenge is accepted once:
 second login with the same token returns 403. Login verifies it when the configured
 provider is `pow`; no Turnstile/Friendly server-side verification is wired here.
 
-Password replacement is specifically for a local account flagged
-`must_change_password`, not a general password-edit endpoint. Otherwise it returns
-409. Both passwords are limited to 1024 bytes; the new value must differ and pass
+Any local account can change its own password, whether or not it is flagged
+`must_change_password` (a flagged account must do so first); a federated account
+gets 409. The new password is limited to 1024 bytes (the current one is checked at any
+length, since `init-admin` sets no cap); the new value must differ and pass
 the current policy (at least 12 bytes after trimming surrounding whitespace).
 The current password must verify. Limits are ten attempts per IP and five per
 account per minute. Success requires signing in again with the replacement.
@@ -170,8 +172,14 @@ under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `ev
 `id` (provider subject), `username`, `email`, `display_name`, `role`, `status` and
 `timestamp` (Unix seconds within five minutes in either direction). Supported
 events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
-Events are not ordered per subject: a signed event replayed or delivered late inside
-the five-minute window is applied and can undo a newer change. Create/update defaults an empty role to `user` and status to
+Events are ordered per subject: one whose `timestamp` is older than the newest event
+already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
+event cannot undo a newer change; an equal timestamp is applied. A failed event (non-200)
+still counts, so the sender must retry it: the retry has the same `timestamp` and is
+applied, while older events for that `id` are dropped meanwhile. An event without `id` returns 401.
+A create/update for a subject with no KyIdentity account first adopts the
+SCIM-provisioned account whose `externalId` is that subject, as sign-in does, instead
+of creating a second account. Create/update defaults an empty role to `user` and status to
 `active`; privilege or status changes revoke sessions in the same transaction.
 Deactivation sets `inactive` and revokes sessions; deletion removes the matching
 provider user. Unknown events currently return
@@ -221,10 +229,16 @@ List responses have `schemas`, `totalResults`, `startIndex`, `itemsPerPage` and
 `Resources`; pagination is one-based and capped at 200 results per page. User
 attributes persisted here are `userName`, `displayName`, `emails[].value`,
 `roles[].value`, `active` and `externalId`; the first supplied email/role value is
-used. Missing role on create defaults to `user`. User resources return those
+used. A missing role on create, and an empty `roles` value sent in PUT or a roles
+replace, mean `user`, so emptying the roles takes the role away; a PUT that omits
+`roles` keeps the stored role. `externalId` (the KyIdentity subject adoption matches)
+can be set or corrected by PUT or PATCH until a KyIdentity sign-in adopts the account;
+after that the account keeps the subject it signs in with. A PUT without `externalId`
+keeps the stored one. User resources return those
 attributes, `id` and metadata, not passwords. `active:false` maps to local `inactive`.
 Changing role/status invalidates sessions. Group resources persist `displayName`,
 `externalId` and `members:[{"value":"user-id"}]`, with `id` and metadata on output.
+Renaming a group onto a taken `displayName` is 409 `uniqueness`.
 
 Adapter limits matter when configuring a provisioning connector:
 
@@ -357,7 +371,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 |---|---|---|
 | `KY_HOST` | `0.0.0.0` | HTTP listener address; use network/proxy controls in production |
 | `KY_PORT` / `PORT` | `8080` | Integer listener port; KY_PORT wins |
-| `KY_APP_URL` | `http://localhost:<port>` | External application origin, redirects and SCIM base URL |
+| `KY_APP_URL` | `http://localhost:<port>` | External application origin, redirects and SCIM base URL. Set it to the public URL: behind a proxy that rewrites `Host`, a browser sign-in whose `Origin` matches neither is refused as cross-site |
 | `KY_APP_NAME` | `Busnes.app` | Application and capsule service identity; preserve it for restore |
 | `KY_ENV` | `development` | `production` requires a session secret and defaults to Secure cookies |
 | `KY_DB_DRIVER` | `sqlite` | SQLite or `postgres` (`postgresql` alias); other drivers are not implemented |
@@ -369,7 +383,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
 | `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header |
 | `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
-| `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup |
+| `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup. Set it behind a reverse proxy, or every client counts as the proxy for sign-in limits; startup logs a warning when `KY_APP_URL` is https and this is empty |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
 | `KY_KYSIGNON_CLIENT_ID` | Empty | Registered KySignOn client ID |

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/backup"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -171,5 +172,14 @@ func TestCollectRefusesADatabaseOutsideTheDataDir(t *testing.T) {
 	_, err := backup.Collect(context.Background(), cfg, "1.0.0")
 	if !errors.Is(err, backup.ErrNoDatabaseSnapshot) || !strings.Contains(err.Error(), "app.db") {
 		t.Fatalf("custom DSN sealed or unclear error: %v", err)
+	}
+}
+
+// A snapshot too big for a capsule is refused as too large before it is read into memory.
+func TestCollectRefusesASnapshotTooLargeForACapsule(t *testing.T) {
+	cfg, _ := payloadConfig(t)
+	defer backup.SetMaxSnapshotBytes(1024)()
+	if _, err := backup.Collect(context.Background(), cfg, "1.0.0"); !errors.Is(err, capsule.ErrCapsuleTooLarge) {
+		t.Fatalf("got %v, want ErrCapsuleTooLarge", err)
 	}
 }

@@ -45,3 +45,29 @@ it('routes a restricted signed-in user to replacement instead of the dashboard',
   expect(screen.queryByText('Directory & SCIM')).toBeNull();
   expect(screen.queryByText('Overview')).toBeNull();
 });
+
+it('lets a local user change their password from the header and cancel back', async () => {
+  const { App } = await import('../App');
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+    String(input) === '/api/auth/me'
+      ? { authenticated: true, user: { username: 'ann', role: 'user', sso_provider: 'local' } }
+      : { app_name: 'Test Server', theme: 'patina' },
+  ), { status: 200 })));
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Change password' }));
+  expect(await screen.findByRole('heading', { name: 'Change your password' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('heading', { name: 'Change your password' })).toBeNull();
+});
+
+it('offers no password change to a federated user', async () => {
+  const { App } = await import('../App');
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+    String(input) === '/api/auth/me'
+      ? { authenticated: true, user: { username: 'sso', role: 'user', sso_provider: 'kysignon' } }
+      : { app_name: 'Test Server', theme: 'patina' },
+  ), { status: 200 })));
+  render(<App />);
+  expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Change password' })).toBeNull();
+});

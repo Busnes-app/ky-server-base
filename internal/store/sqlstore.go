@@ -275,6 +275,16 @@ WHERE id = ?
 }
 
 func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole, prevStatus string) error {
+	return u.updateProfile(ctx, user, prevRole, prevStatus, nil)
+}
+
+func (u *userStore) UpdateSCIMProfile(ctx context.Context, user *User, prevRole, prevStatus, prevSubject string) error {
+	return u.updateProfile(ctx, user, prevRole, prevStatus, &prevSubject)
+}
+
+// updateProfile is UpdateUserProfile; with prevSubject it also compares the subject read and,
+// while the row is still "scim", writes user.SSOSubject, all in the one statement.
+func (u *userStore) updateProfile(ctx context.Context, user *User, prevRole, prevStatus string, prevSubject *string) error {
 	user.UpdatedAt = time.Now().UTC()
 	tx, err := u.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -284,12 +294,16 @@ func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole,
 	if err := u.checkUsernameFree(ctx, tx, user.Username, user.ID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, u.store.rebind(`
-UPDATE users SET
-    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
-WHERE id = ? AND role = ? AND status = ?
-`), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.UpdatedAt, user.ID, prevRole, prevStatus)
+	q := `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
+WHERE id = ? AND role = ? AND status = ?`
+	args := []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.ID, prevRole, prevStatus}
+	if prevSubject != nil {
+		q = `UPDATE users SET username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?,
+    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
+WHERE id = ? AND role = ? AND status = ? AND sso_subject = ?`
+		args = []any{user.Username, user.Email, user.DisplayName, user.Role, user.Status, user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus, *prevSubject}
+	}
+	res, err := tx.ExecContext(ctx, u.store.rebind(q), args...)
 	if err != nil {
 		return uniqueErr(err)
 	}
@@ -311,8 +325,8 @@ WHERE id = ? AND role = ? AND status = ?
 	return tx.Commit()
 }
 
-func (u *userStore) LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error {
-	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, fromProvider)
+func (u *userStore) LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, subject, fromProvider)
 	if err != nil {
 		return err
 	}
@@ -386,6 +400,21 @@ func (u *userStore) listUsers(ctx context.Context, offset, limit int, search str
 	}
 
 	return users, total, rows.Err()
+}
+
+func (u *userStore) LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error) {
+	var ts int64
+	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT last_timestamp FROM sso_directory_events WHERE provider = ? AND subject = ?`), provider, subject).Scan(&ts)
+	if errorsIs(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return ts, err
+}
+
+func (u *userStore) RecordDirectoryEvent(ctx context.Context, provider, subject string, ts int64) error {
+	_, err := u.store.db.ExecContext(ctx, u.store.rebind(`INSERT INTO sso_directory_events (provider, subject, last_timestamp) VALUES (?, ?, ?)
+ON CONFLICT (provider, subject) DO UPDATE SET last_timestamp = excluded.last_timestamp WHERE sso_directory_events.last_timestamp < excluded.last_timestamp`), provider, subject, ts)
+	return err
 }
 
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {
@@ -481,7 +510,7 @@ ON CONFLICT (provider, subject) DO UPDATE SET cutoff = excluded.cutoff, expires_
 func (u *userStore) CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error {
 	return u.store.withPassword(ctx, userID, oldHash, func(tx *sql.Tx) error {
 		now := time.Now().UTC()
-		result, err := tx.ExecContext(ctx, u.store.rebind(`UPDATE users SET password_hash = ?, must_change_password = ?, updated_at = ? WHERE id = ? AND must_change_password = ? AND sso_provider = 'local'`), newHash, false, now, userID, true)
+		result, err := tx.ExecContext(ctx, u.store.rebind(`UPDATE users SET password_hash = ?, must_change_password = ?, updated_at = ? WHERE id = ? AND sso_provider = 'local'`), newHash, false, now, userID)
 		if err != nil {
 			return err
 		}
@@ -492,7 +521,7 @@ func (u *userStore) CompletePasswordChange(ctx context.Context, userID, oldHash,
 		if n != 1 {
 			return ErrNotFound
 		}
-		return u.revokePasswordGrants(ctx, tx, userID, "forced replacement; sessions revoked", ip, now)
+		return u.revokePasswordGrants(ctx, tx, userID, "password changed; sessions revoked", ip, now)
 	})
 }
 
@@ -661,7 +690,7 @@ func (g *groupStore) UpdateGroup(ctx context.Context, group *Group) error {
 	q := g.store.rebind("UPDATE groups SET display_name = ?, external_id = ?, updated_at = ? WHERE id = ?")
 	res, err := g.store.db.ExecContext(ctx, q, group.DisplayName, group.ExternalID, group.UpdatedAt, group.ID)
 	if err != nil {
-		return err
+		return uniqueErr(err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {

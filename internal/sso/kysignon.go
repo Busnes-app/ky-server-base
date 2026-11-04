@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -17,6 +18,9 @@ type KySignOnClient struct {
 	config config.SSOConfig
 	store  store.Store
 	flow   *oauthFlow
+	// order serializes directory events, so the per-subject order check and the change it
+	// guards cannot interleave. One server process per database is the supported deployment.
+	order sync.Mutex
 }
 
 func NewKySignOnClient(cfg config.SSOConfig, st store.Store) *KySignOnClient {
@@ -76,9 +80,65 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.Timestamp == 0 || time.Since(time.Unix(payload.Timestamp, 0)).Abs() > 5*time.Minute {
 		return errors.New("webhook timestamp is missing or expired")
 	}
+	if payload.ID == "" {
+		return errors.New("webhook event names no subject")
+	}
+	// Per-subject ordering: an event older than the newest one taken for this subject is a
+	// replay or arrived late, and applying it would undo a newer change. It is acknowledged
+	// and dropped. The order is recorded before the change, so no crash or failure between
+	// the two can let an older event through after a newer change committed; a failed event
+	// is retried by the sender with the same timestamp, which is applied again.
+	k.order.Lock()
+	defer k.order.Unlock()
+	users := k.store.Users()
+	last, err := users.LastDirectoryEvent(ctx, "kysignon", payload.ID)
+	if err != nil {
+		return err
+	}
+	if payload.Timestamp < last {
+		return nil
+	}
+	if err := users.RecordDirectoryEvent(ctx, "kysignon", payload.ID, payload.Timestamp); err != nil {
+		return err
+	}
+	return k.apply(ctx, payload)
+}
+
+// AdoptSCIMUser links a SCIM-provisioned account to KyIdentity: the row whose externalId is
+// this subject becomes a "kysignon" row and stays SCIM-managed, so back-channel logout and
+// directory events reach it and the IdP keeps managing it by id. Sign-in and directory events
+// both call it, so neither creates a second row for the same person. ErrNotFound when none;
+// adopted reports whether this call made the link.
+func AdoptSCIMUser(ctx context.Context, users store.UserStore, subject string) (user *store.User, adopted bool, err error) {
+	if subject == "" { // SCIM rows sent without an externalId carry an empty subject
+		return nil, false, store.ErrNotFound
+	}
+	user, err = users.GetUserBySSO(ctx, "scim", subject)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := users.LinkSSOIdentity(ctx, user.ID, subject, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
+		user, err = users.GetUserBySSO(ctx, "kysignon", subject) // a concurrent call linked it first
+		return user, false, err
+	} else if err != nil {
+		return nil, false, err
+	}
+	user.SSOProvider = "kysignon"
+	return user, true, nil
+}
+
+// apply makes the local account match one directory event.
+func (k *KySignOnClient) apply(ctx context.Context, payload KySignOnSyncPayload) error {
 	switch payload.Event {
 	case "user.created", "user.updated":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			var adopted bool
+			existing, adopted, err = AdoptSCIMUser(ctx, k.store.Users(), payload.ID)
+			if adopted {
+				_ = k.store.Audit().LogAudit(ctx, &store.AuditRecord{UserID: existing.ID, Action: "sso.scim_account_linked", Resource: existing.Username})
+			}
+		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
@@ -123,14 +183,14 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 		if err != nil {
 			return err
 		}
-		prevStatus := existing.Status
-		existing.Status = "inactive"
-		if err := k.store.Users().UpdateUserProfile(ctx, existing, existing.Role, prevStatus); err != nil {
+		// Sessions go even when the row is already inactive. They go first, so a failure
+		// leaves nothing committed; a session created meanwhile is revoked by the status change.
+		if err := k.store.Sessions().DeleteUserSessions(ctx, existing.ID); err != nil {
 			return err
 		}
-		// Sessions go even when the row was already inactive: a retry after a failed
-		// revocation must still end them.
-		return k.store.Sessions().DeleteUserSessions(ctx, existing.ID)
+		prevStatus := existing.Status
+		existing.Status = "inactive"
+		return k.store.Users().UpdateUserProfile(ctx, existing, existing.Role, prevStatus)
 
 	case "user.deleted":
 		existing, err := k.store.Users().GetUserBySSO(ctx, "kysignon", payload.ID)

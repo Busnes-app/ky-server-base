@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	protocol "github.com/elimity-com/scim"
 	protocolErrors "github.com/elimity-com/scim/errors"
@@ -217,10 +218,11 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Username, _ = attrs["userName"].(string)
 		user.Email = primaryValue(attrs["emails"])
 		user.DisplayName = stringValue(attrs, "displayName", user.Username)
-		if role := primaryValue(attrs["roles"]); role != "" {
-			user.Role = role
+		if roles, sent := attrs["roles"]; sent {
+			user.Role = roleValue(roles)
 		}
 		user.Status = statusFromActive(attrs)
+		user.SSOSubject = stringValue(attrs, "externalId", user.SSOSubject)
 		return nil
 	})
 }
@@ -335,14 +337,21 @@ func (h *userResourceHandler) update(r *http.Request, id string, change func(*st
 		if err != nil {
 			return protocol.Resource{}, err
 		}
-		oldRole, oldStatus := user.Role, user.Status
+		oldRole, oldStatus, oldSubject := user.Role, user.Status, user.SSOSubject
 		if err := change(user); err != nil {
 			return protocol.Resource{}, err
 		}
 		if err := h.checkRole(oldRole, user.Role); err != nil {
 			return protocol.Resource{}, err
 		}
-		err = h.store.Users().UpdateUserProfile(r.Context(), user, oldRole, oldStatus)
+		// externalId is the subject KyIdentity adoption matches. It is written with the profile,
+		// compared against the subject read, and only while the row is SCIM's own: a stale write
+		// never puts back an old value, a refused one changes nothing, and an adopted account
+		// keeps its sign-in subject.
+		if user.SSOProvider != "scim" {
+			user.SSOSubject = oldSubject
+		}
+		err = h.store.Users().UpdateSCIMProfile(r.Context(), user, oldRole, oldStatus, oldSubject)
 		if errors.Is(err, store.ErrConflict) && attempt < 3 {
 			continue
 		}
@@ -376,10 +385,12 @@ func applyUserValue(user *store.User, path string, value interface{}) {
 		if v, ok := value.(string); ok {
 			user.Username = v
 		}
-	case "roles", "role":
-		if v := primaryValue(value); v != "" {
-			user.Role = v
+	case "externalid": // stored only while the row is SCIM's own (update)
+		if v, ok := value.(string); ok {
+			user.SSOSubject = v
 		}
+	case "roles", "role":
+		user.Role = roleValue(value)
 	case "emails":
 		user.Email = primaryValue(value)
 	}
@@ -396,7 +407,13 @@ func userResource(user *store.User) protocol.Resource {
 	return protocol.Resource{ID: user.ID, ExternalID: optional.NewString(user.SSOSubject), Attributes: attrs, Meta: protocol.Meta{Created: &user.CreatedAt, LastModified: &user.UpdatedAt}}
 }
 
-type groupResourceHandler struct{ store store.Store }
+// groupResourceHandler serializes membership writes in this process (mu): PATCH computes the
+// new membership from a read, so two PATCHes interleaving would drop one's change. One server
+// process per database is the supported deployment.
+type groupResourceHandler struct {
+	store store.Store
+	mu    sync.Mutex
+}
 
 func (h *groupResourceHandler) Create(r *http.Request, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group := &store.Group{ID: "grp_" + crypto.RandomHex(12), DisplayName: stringValue(attrs, "displayName", ""), ExternalID: stringValue(attrs, "externalId", "")}
@@ -489,6 +506,12 @@ func (h *groupResourceHandler) filterGroups(r *http.Request, raw string) ([]*sto
 }
 
 func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.replace(r, id, attrs)
+}
+
+func (h *groupResourceHandler) replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -516,6 +539,8 @@ func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 // Replace (member check, difference-only writes). Member sub-attribute paths and any member
 // filter but `members[value eq "id"]` with remove are refused before anything is written.
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -578,7 +603,7 @@ func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []pr
 			apply(op.Op, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
 		}
 	}
-	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
+	return h.replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
 }
 
 // checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
@@ -640,6 +665,17 @@ func memberValues(value interface{}) []string {
 	}
 	return out
 }
+
+// roleValue is the role a sent roles value grants: an empty one means "user", so a PUT or
+// replace that empties the roles takes the role away instead of leaving it in place. A PUT
+// that omits roles altogether leaves the role alone (IdPs that do not map roles omit it).
+func roleValue(value interface{}) string {
+	if v := primaryValue(value); v != "" {
+		return v
+	}
+	return "user"
+}
+
 func primaryValue(value interface{}) string {
 	if m, ok := value.(map[string]interface{}); ok {
 		v, _ := m["value"].(string)

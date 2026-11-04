@@ -11,7 +11,8 @@ import (
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
-// handleChangePassword completes a mandatory local-password replacement. All sessions
+// handleChangePassword changes a local account's password, voluntary or a mandatory
+// replacement. All sessions
 // are revoked atomically with the password update; the user signs in again afterward.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -23,8 +24,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusUnauthorized, "Authentication required")
 		return
 	}
-	if !user.MustChangePassword || user.SSOProvider != "local" {
-		s.writeError(w, http.StatusConflict, "No local password replacement is required")
+	if user.SSOProvider != "local" {
+		s.writeError(w, http.StatusConflict, "This account signs in through its identity provider and has no local password")
 		return
 	}
 	if !s.allowAttempt("password-change:"+s.limiterIP(r), 10, time.Minute) || !s.allowAttempt("password-change-user:"+user.ID, 5, time.Minute) {
@@ -39,7 +40,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if len(req.CurrentPassword) > 1024 || len(req.NewPassword) > 1024 {
+	if len(req.NewPassword) > 1024 { // the current one is verified at any length: init-admin sets no cap
 		s.writeError(w, http.StatusBadRequest, "Password is too long")
 		return
 	}

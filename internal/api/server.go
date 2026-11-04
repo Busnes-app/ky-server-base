@@ -326,7 +326,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Sign-in carries no CSRF token, so a form on another site -- or on a sibling subdomain,
 	// which the browser labels same-site -- could log the victim into the attacker's account.
 	// Only the app's own pages are same-origin; API clients send no Sec-Fetch-Site.
-	if site := r.Header.Get("Sec-Fetch-Site"); isUnsafeMethod(r.Method) && isSignIn(r.URL.Path) && (site == "cross-site" || site == "same-site") {
+	// Browsers omit Sec-Fetch-Site for plain-HTTP origins (a LAN address), but still send
+	// Origin on a cross-origin POST, so a foreign Origin is refused too.
+	if site := r.Header.Get("Sec-Fetch-Site"); isUnsafeMethod(r.Method) && isSignIn(r.URL.Path) && (site == "cross-site" || site == "same-site" || foreignOrigin(r, origin, s.config.Server.AppURL)) {
 		s.writeError(w, http.StatusForbidden, "Cross-site sign-in refused")
 		return
 	}
@@ -358,6 +360,19 @@ func csrfExempt(path string) bool {
 
 func isSignIn(path string) bool {
 	return path == "/api/auth/login"
+}
+
+// foreignOrigin reports a present Origin that is neither the host the request was sent to nor
+// KY_APP_URL (a proxy may rewrite Host). API clients send no Origin.
+func foreignOrigin(r *http.Request, origin, appURL string) bool {
+	if origin == "" {
+		return false
+	}
+	o, err := url.Parse(origin)
+	if err == nil && o.Host != "" && strings.EqualFold(o.Host, r.Host) {
+		return false
+	}
+	return !sameOrigin(origin, appURL)
 }
 
 func sameOrigin(origin, appURL string) bool {

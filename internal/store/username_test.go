@@ -118,10 +118,10 @@ func TestProfileWritesLeaveTheSSOLinkAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale, _ := st.Users().GetUserByID(ctx, "u1")
-	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); err != nil {
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "f", "scim", "kysignon"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "f", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("second link: %v, want ErrConflict", err)
 	}
 	stale.DisplayName = "Frank"
@@ -161,5 +161,66 @@ func TestUpdateUserProfileIsACompareAndSwapOnPrivileges(t *testing.T) {
 	}
 	if u, _ := st.Users().GetUserByID(ctx, "u1"); u.Role != "user" {
 		t.Fatalf("stale write restored role %q", u.Role)
+	}
+}
+
+func TestRecordDirectoryEventNeverMovesBack(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	for _, tc := range []struct{ record, want int64 }{{100, 100}, {99, 100}, {101, 101}, {101, 101}} {
+		if err := st.Users().RecordDirectoryEvent(ctx, "kysignon", "sub-1", tc.record); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := st.Users().LastDirectoryEvent(ctx, "kysignon", "sub-1"); err != nil || got != tc.want {
+			t.Fatalf("after %d: got %d %v, want %d", tc.record, got, err, tc.want)
+		}
+	}
+	if got, _ := st.Users().LastDirectoryEvent(ctx, "kysignon", "sub-2"); got != 0 {
+		t.Fatalf("subjects are not independent: %d", got)
+	}
+}
+
+// Adoption and externalId corrections are compare-and-swaps on the subject read: a stale
+// adoption cannot link a row whose subject has since changed, a stale correction loses, and a
+// refused profile write changes no subject.
+func TestSubjectChangesAreCompareAndSwaps(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	for _, u := range []*store.User{
+		{ID: "u1", Username: "gina", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "a", SCIMManaged: true},
+		{ID: "u2", Username: "hal", Role: "user", Status: "active", SSOProvider: "local"},
+	} {
+		if err := st.Users().CreateUser(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := func(from, to, username string) error {
+		u, _ := st.Users().GetUserByID(ctx, "u1")
+		u.SSOSubject, u.Username = to, username
+		return st.Users().UpdateSCIMProfile(ctx, u, u.Role, u.Status, from)
+	}
+	if err := set("a", "b", "hal"); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("rename onto a taken name: %v", err)
+	}
+	if u, _ := st.Users().GetUserByID(ctx, "u1"); u.SSOSubject != "a" {
+		t.Fatalf("a refused write changed the subject to %q", u.SSOSubject)
+	}
+	if err := set("a", "b", "gina"); err != nil {
+		t.Fatal(err)
+	}
+	if err := set("a", "c", "gina"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale correction: %v, want ErrConflict", err)
+	}
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "a", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("adoption for a subject the row no longer holds: %v, want ErrConflict", err)
+	}
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "b", "scim", "kysignon"); err != nil {
+		t.Fatal(err)
+	}
+	if err := set("b", "d", "gina"); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := st.Users().GetUserBySSO(ctx, "kysignon", "b"); u == nil || u.ID != "u1" {
+		t.Fatalf("an adopted row's subject changed: %+v", u)
 	}
 }

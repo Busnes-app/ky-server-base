@@ -28,73 +28,44 @@ These are human summaries, not a raw version-control log.
 ## Current source
 ### Changes
 
-- Local multi-factor sign-in is removed: MFA is a KyIdentity feature. The
-  `/api/auth/mfa/totp` and `/api/auth/mfa/recovery-code` routes, the login page's
-  verification step and the `totp_enabled` user field are gone. Stored TOTP secrets,
-  recovery codes and MFA challenges stay in the database, unused.
-- Sign-in hardening: an IPv6 client is limited by its /64; ten failed passwords for
-  one account from one client close that pair's window for 15 minutes, checked before
-  any hashing and answered with the same 401 as a wrong password, so nobody elsewhere
-  can lock the account out. Unknown names cost the same hashing as known ones,
-  disabled accounts answer 401 (was 403), and a solved CAPTCHA buys one attempt.
-  `KY_CAPTCHA_POW_DIFFICULTY` defaults to 500000 (was 4): a median solve of about one
-  second, measured in Chromium. Login from a sibling subdomain (`Sec-Fetch-Site:
-  same-site`) is refused like cross-site.
-- The login CAPTCHA no longer needs WebCrypto, so signing in over plain HTTP on a LAN
-  address (the default compose install) works; before, it failed with 403 every time.
-  Sign In waits until the check is solved, and a failed check offers Try again.
-- KyIdentity sign-in adopts the SCIM-provisioned account whose `externalId` is the
-  KyIdentity subject instead of failing with a 500; a username collision is 409 and a
-  disabled account 403.
-- SCIM sees and changes only the accounts it created: local accounts, the bootstrap
-  admin included, are 404 to it. SCIM may not grant `admin` unless the new
-  `KY_SCIM_ALLOW_ADMIN=true`.
-- SCIM group PATCH applies add/remove/replace to the current members (an incremental
-  "Add" no longer replaces the whole group, and "Remove" with a value list no longer
-  leaves only that user); member sub-attribute paths are refused before any write.
-  `GET /Groups?filter=` filters by `displayName`/`externalId` instead of returning every
-  group. Filtered user PATCH paths such as `emails[type eq "work"].value` and removes
-  now apply; unstored attributes are ignored.
-- SCIM and KyIdentity directory writes are a compare-and-swap on role and status and
-  revoke sessions in the same transaction, so a concurrent stale write cannot put
-  back an admin role or active status.
-- Usernames are unique regardless of letter case for new and renamed accounts.
-- The Directory & SCIM page lists every account, with its source, through the new
-  admin-only `GET /api/admin/users`.
-- `backup-drill` exits 1 when the drill fails. Backups refuse to seal a SQLite database
-  that is not `<KY_DATA_DIR>/ky_server.db`, the only path a capsule restores, and the
-  Backup page says why.
-- `init-admin` refuses to reset an existing account that is not an active local
-  administrator unless `-promote` is given, and prints its previous role and status.
-- `KY_COOKIE_SECURE` defaults to true when `KY_APP_URL` is https, and
-  `docker-compose.yml` now takes `KY_APP_URL` from `.env`.
-- `scripts/ky-init.sh` no longer copies `.env` into a new product and points its image
-  and repository coordinates at the new app.
+- KyIdentity directory webhooks are ordered per subject: an event older than the last
+  one applied for that `id` is acknowledged and dropped, so a replayed or late event
+  can no longer re-promote, reactivate or recreate an account. A webhook event without
+  `id` is refused (401). A `user.created`/`user.updated` event for a subject SCIM
+  already provisioned adopts that account, as sign-in does, instead of creating a
+  second one.
+- Any local account can change its own password from the key button in the header,
+  after confirming the current one; every session is signed out. Before, only an
+  account flagged for replacement could.
+- SCIM: a PUT with an empty `roles` value, or a roles replace with an empty value, sets
+  the role to `user` (an admin kept the role and its sessions before). `externalId` sent after
+  creation is stored until a KyIdentity sign-in adopts the account (it was dropped
+  with 200). Concurrent group PATCHes no longer drop each other's members, and renaming
+  a group onto a taken name is 409 `uniqueness` instead of 500.
+- Sign-in: a browser `Origin` that is neither the server's host nor `KY_APP_URL` is
+  refused like a cross-site request, closing login CSRF over plain HTTP where browsers
+  send no `Sec-Fetch-Site`. After a sign-in the web app checks that the browser kept the
+  session, and says to open the https address when a Secure cookie was dropped on a
+  plain-HTTP page.
+- Backups refuse a database snapshot too large for a capsule (413) before reading it
+  into memory.
+- Startup warns when `KY_APP_URL` is https and `KY_TRUSTED_PROXIES` is empty.
+- CI: the `reuse` licensing check now gates image publication.
 
 ### Upgrade impact
 
-- Migration 9 runs on start: it adds `users.scim_managed` (set for existing SCIM
-  accounts). On every start the server builds a
-  case-insensitive unique index on usernames; if accounts already differ only by
-  letter case it skips the index, logs each clash and keeps running. Rename or remove
-  all but one of each pair to get the index.
-- Accounts that had local TOTP now sign in with their password alone. Require MFA in
-  KyIdentity and have users sign in through it. Nothing is deleted.
-- A disabled account's login now answers 401 instead of 403, and repeated wrong
-  passwords for one account from one client now answer 401 for 15 minutes.
-- The login CAPTCHA takes about a second to solve at the new default; set
-  `KY_CAPTCHA_POW_DIFFICULTY` to override. Automated clients that reused one solved
-  token now need a fresh one per login.
-- SCIM: an IdP can no longer see or change local accounts, nor make anyone an admin,
-  unless `KY_SCIM_ALLOW_ADMIN=true`. Group PATCH and filtered user PATCH now do what
-  the request says; an unsupported member path is 400 `invalidPath`.
-- Behind an https `KY_APP_URL`, the session cookie is now `Secure` and HSTS is sent;
-  set `KY_COOKIE_SECURE=false` explicitly to keep the old behaviour. Compose users who
-  set `KY_APP_URL` in `.env` now get it in the container.
-- A SQLite `KY_DB_DSN` outside `<KY_DATA_DIR>/ky_server.db` disables backups (412 and a
-  failed drill) until the database is moved there.
-- Scripts that ran `backup-drill` and ignored its output now see exit status 1 on a
-  failed drill. `init-admin` on an existing non-admin account needs `-promote`.
+- Migration 10 runs on start and adds the `sso_directory_events` table. No data
+  changes.
+- KyIdentity: a directory event carrying an older `timestamp` than one already taken
+  for the same subject is now ignored (still 200). A failed event must be retried by
+  the sender; older events for that subject are ignored until it is. Events without `id` get 401.
+- SCIM: an IdP that sends an empty `roles` value now demotes the user to `user`; a PUT
+  that omits `roles` keeps the role as before. `externalId` updates now take effect on accounts that
+  have not signed in through KyIdentity yet.
+- Login: requests from a browser page on another origin get 403; API clients that send
+  no `Origin` are unaffected.
+- `POST /api/auth/change-password` now works for every local account (it answered 409
+  unless the account was flagged); federated accounts still get 409.
 
 ## Maintaining notes
 
@@ -117,6 +88,13 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### 2026-11-04 — da9f246
+
+Source: [da9f2469a2f7001b26af4827775eebb511e285ba](https://github.com/Busnes-app/ky-server-base/commit/da9f2469a2f7001b26af4827775eebb511e285ba) · [Published image CI](https://github.com/Busnes-app/ky-server-base/actions/runs/41767990120)
+
+- **Changes:** Local multi-factor sign-in is removed: MFA is a KyIdentity feature. The `/api/auth/mfa/totp` and `/api/auth/mfa/recovery-code` routes, the login page's verification step and the `totp_enabled` user field are gone. Stored TOTP secrets, recovery codes and MFA challenges stay in the database, unused. Sign-in hardening: an IPv6 client is limited by its /64; ten failed passwords for one account from one client close that pair's window for 15 minutes, checked before any hashing and answered with the same 401 as a wrong password, so nobody elsewhere can lock the account out. Unknown names cost the same hashing as known ones, disabled accounts answer 401 (was 403), and a solved CAPTCHA buys one attempt. `KY_CAPTCHA_POW_DIFFICULTY` defaults to 500000 (was 4): a median solve of about one second, measured in Chromium. Login from a sibling subdomain (`Sec-Fetch-Site: same-site`) is refused like cross-site. The login CAPTCHA no longer needs WebCrypto, so signing in over plain HTTP on a LAN address (the default compose install) works; before, it failed with 403 every time. Sign In waits until the check is solved, and a failed check offers Try again. KyIdentity sign-in adopts the SCIM-provisioned account whose `externalId` is the KyIdentity subject instead of failing with a 500; a username collision is 409 and a disabled account 403. SCIM sees and changes only the accounts it created: local accounts, the bootstrap admin included, are 404 to it. SCIM may not grant `admin` unless the new `KY_SCIM_ALLOW_ADMIN=true`. SCIM group PATCH applies add/remove/replace to the current members (an incremental "Add" no longer replaces the whole group, and "Remove" with a value list no longer leaves only that user); member sub-attribute paths are refused before any write. `GET /Groups?filter=` filters by `displayName`/`externalId` instead of returning every group. Filtered user PATCH paths such as `emails[type eq "work"].value` and removes now apply; unstored attributes are ignored. SCIM and KyIdentity directory writes are a compare-and-swap on role and status and revoke sessions in the same transaction, so a concurrent stale write cannot put back an admin role or active status. Usernames are unique regardless of letter case for new and renamed accounts. The Directory & SCIM page lists every account, with its source, through the new admin-only `GET /api/admin/users`. `backup-drill` exits 1 when the drill fails. Backups refuse to seal a SQLite database that is not `<KY_DATA_DIR>/ky_server.db`, the only path a capsule restores, and the Backup page says why. `init-admin` refuses to reset an existing account that is not an active local administrator unless `-promote` is given, and prints its previous role and status. `KY_COOKIE_SECURE` defaults to true when `KY_APP_URL` is https, and `docker-compose.yml` now takes `KY_APP_URL` from `.env`. `scripts/ky-init.sh` no longer copies `.env` into a new product and points its image and repository coordinates at the new app.
+- **Upgrade impact:** Migration 9 runs on start: it adds `users.scim_managed` (set for existing SCIM accounts). On every start the server builds a case-insensitive unique index on usernames; if accounts already differ only by letter case it skips the index, logs each clash and keeps running. Rename or remove all but one of each pair to get the index. Accounts that had local TOTP now sign in with their password alone. Require MFA in KyIdentity and have users sign in through it. Nothing is deleted. A disabled account's login now answers 401 instead of 403, and repeated wrong passwords for one account from one client now answer 401 for 15 minutes. The login CAPTCHA takes about a second to solve at the new default; set `KY_CAPTCHA_POW_DIFFICULTY` to override. Automated clients that reused one solved token now need a fresh one per login. SCIM: an IdP can no longer see or change local accounts, nor make anyone an admin, unless `KY_SCIM_ALLOW_ADMIN=true`. Group PATCH and filtered user PATCH now do what the request says; an unsupported member path is 400 `invalidPath`. Behind an https `KY_APP_URL`, the session cookie is now `Secure` and HSTS is sent; set `KY_COOKIE_SECURE=false` explicitly to keep the old behaviour. Compose users who set `KY_APP_URL` in `.env` now get it in the container. A SQLite `KY_DB_DSN` outside `<KY_DATA_DIR>/ky_server.db` disables backups (412 and a failed drill) until the database is moved there. Scripts that ran `backup-drill` and ignored its output now see exit status 1 on a failed drill. `init-admin` on an existing non-admin account needs `-promote`.
 
 ### 2026-11-03 — 413232c
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
+import { KeyRound, LogOut, Users, Settings as SettingsIcon, LayoutDashboard, Archive, Palette } from 'lucide-react';
 
 interface AppHeaderProps {
   appName: string;
@@ -7,9 +7,10 @@ interface AppHeaderProps {
   onTabChange: (tab: string) => void;
   user: any;
   onLogout: () => void;
+  onChangePassword?: () => void;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabChange, user, onLogout }) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabChange, user, onLogout, onChangePassword }) => {
   const navRef = useRef<HTMLElement>(null);
   // Phones scroll the navigation sideways: keep the current page's row in view, also after Overview actions.
   useEffect(() => {
@@ -56,6 +57,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ appName, activeTab, onTabC
                 <div style={{ fontWeight: 600, color: 'var(--ink-strong)' }}>{user.display_name || user.username}</div>
                 <div style={{ fontSize: '11px', color: 'var(--ink)' }}>{user.role}</div>
               </div>
+              {onChangePassword && (
+                <button
+                  className="btn-secondary app-logout"
+                  onClick={onChangePassword}
+                  title="Change password"
+                  aria-label="Change password"
+                >
+                  <KeyRound size={16} />
+                </button>
+              )}
               <button
                 className="btn-secondary app-logout"
                 onClick={onLogout}

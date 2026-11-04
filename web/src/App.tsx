@@ -20,6 +20,9 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [settings, setSettings] = useState<any>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  // Remounting Login solves a fresh CAPTCHA: the last token was spent on the sign-in.
+  const [loginKey, setLoginKey] = useState(0);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -77,8 +80,19 @@ export const App: React.FC = () => {
       <>
       {notice && <p role="status" style={{ padding: 16 }}>{notice}</p>}
       <Login
+        key={loginKey}
         appName={settings?.app_name || 'Busnes.app'}
-        onSuccess={(u) => {
+        onSuccess={async (u) => {
+          // A Secure session cookie is dropped on a plain-HTTP page, so a 200 from login does
+          // not mean the browser is signed in: ask the server before showing the app.
+          const me = await fetch('/api/auth/me').then((r) => r.json()).catch(() => null);
+          if (me && me.authenticated === false) { // only a definite answer; a failed check proceeds
+            setNotice(window.location.protocol === 'http:'
+              ? 'Signed in, but this browser did not keep the session: the server only sends its cookie over HTTPS. Open this server at its https:// address (KY_APP_URL).'
+              : 'Signed in, but this browser did not keep the session cookie. Check that cookies are allowed for this site.');
+            setLoginKey((k) => k + 1);
+            return;
+          }
           setNotice('');
           setUser(u);
           void loadSettings();
@@ -88,11 +102,14 @@ export const App: React.FC = () => {
     );
   }
 
-  if (user.must_change_password) {
-    return <ChangePassword onLogout={handleLogout} onComplete={() => {
-      setUser(null);
-      setNotice('Password changed. Sign in with your new password.');
-    }} />;
+  if (user.must_change_password || changingPassword) {
+    return <ChangePassword onLogout={handleLogout}
+      onCancel={user.must_change_password ? undefined : () => setChangingPassword(false)}
+      onComplete={() => {
+        setChangingPassword(false);
+        setUser(null);
+        setNotice('Password changed. Sign in with your new password.');
+      }} />;
   }
 
   return (
@@ -103,6 +120,7 @@ export const App: React.FC = () => {
         onTabChange={(tab) => setActiveTab(tab)}
         user={user}
         onLogout={handleLogout}
+        onChangePassword={user.sso_provider === 'local' ? () => setChangingPassword(true) : undefined}
       />
 
       <main className="app-main">
