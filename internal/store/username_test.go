@@ -133,23 +133,6 @@ func TestProfileWritesLeaveTheSSOLinkAlone(t *testing.T) {
 	}
 }
 
-func TestAdvanceDirectoryEventDropsOlderEvents(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	for _, tc := range []struct {
-		ts   int64
-		want bool
-	}{{100, true}, {100, true}, {99, false}, {101, true}, {100, false}} {
-		got, err := st.Users().AdvanceDirectoryEvent(ctx, "kysignon", "sub-1", tc.ts)
-		if err != nil || got != tc.want {
-			t.Fatalf("ts %d: got %v %v, want %v", tc.ts, got, err, tc.want)
-		}
-	}
-	if ok, _ := st.Users().AdvanceDirectoryEvent(ctx, "kysignon", "sub-2", 1); !ok {
-		t.Fatal("subjects are not independent")
-	}
-}
-
 // A profile write from a stale read cannot restore a role or status changed since that read,
 // and a role or status change takes the user's sessions with it in the same transaction.
 func TestUpdateUserProfileIsACompareAndSwapOnPrivileges(t *testing.T) {

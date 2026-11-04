@@ -57,8 +57,7 @@ These are human summaries, not a raw version-control log.
   now apply; unstored attributes are ignored.
 - SCIM and KyIdentity directory writes are a compare-and-swap on role and status and
   revoke sessions in the same transaction, so a concurrent stale write cannot put
-  back an admin role or active status. KyIdentity webhooks are ordered per subject: an
-  event older than the last applied one is dropped.
+  back an admin role or active status.
 - Usernames are unique regardless of letter case for new and renamed accounts.
 - The Directory & SCIM page lists every account, with its source, through the new
   admin-only `GET /api/admin/users`.
@@ -75,7 +74,7 @@ These are human summaries, not a raw version-control log.
 ### Upgrade impact
 
 - Migration 9 runs on start: it adds `users.scim_managed` (set for existing SCIM
-  accounts) and the `sso_directory_events` table. On every start the server builds a
+  accounts). On every start the server builds a
   case-insensitive unique index on usernames; if accounts already differ only by
   letter case it skips the index, logs each clash and keeps running. Rename or remove
   all but one of each pair to get the index.

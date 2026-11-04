@@ -304,26 +304,13 @@ ALTER TABLE device_pairings ADD COLUMN IF NOT EXISTS sso_sid TEXT NOT NULL DEFAU
 	},
 	{
 		// scim_managed scopes SCIM to the accounts it created, and stays set when a KyIdentity
-		// sign-in adopts one. sso_directory_events holds the newest directory-sync timestamp
-		// applied per subject, so a replayed or late webhook cannot undo a newer change.
+		// sign-in adopts one.
 		Version: 9,
-		Name:    "scim_scope_and_directory_order",
+		Name:    "scim_scope",
 		SQLite: `ALTER TABLE users ADD COLUMN scim_managed INTEGER NOT NULL DEFAULT 0;
-UPDATE users SET scim_managed = 1 WHERE sso_provider = 'scim';
-CREATE TABLE sso_directory_events (
-    provider TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    last_timestamp INTEGER NOT NULL,
-    PRIMARY KEY (provider, subject)
-);`,
+UPDATE users SET scim_managed = 1 WHERE sso_provider = 'scim';`,
 		Postgres: `ALTER TABLE users ADD COLUMN IF NOT EXISTS scim_managed BOOLEAN NOT NULL DEFAULT FALSE;
-UPDATE users SET scim_managed = TRUE WHERE sso_provider = 'scim';
-CREATE TABLE IF NOT EXISTS sso_directory_events (
-    provider TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    last_timestamp BIGINT NOT NULL,
-    PRIMARY KEY (provider, subject)
-);`,
+UPDATE users SET scim_managed = TRUE WHERE sso_provider = 'scim';`,
 	},
 }
 

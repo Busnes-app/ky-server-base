@@ -7,7 +7,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Busnes-app/ky_server_base/internal/store/migrations"
@@ -22,8 +21,6 @@ type SQLStore struct {
 	groups   *groupStore
 	audit    *auditStore
 	settings *settingsStore
-	// dirMu serializes directory-sync events (WithDirectoryLock).
-	dirMu sync.Mutex
 }
 
 // newSQLStore creates and initializes a SQLStore, running migrations automatically.
@@ -389,48 +386,6 @@ func (u *userStore) listUsers(ctx context.Context, offset, limit int, search str
 	}
 
 	return users, total, rows.Err()
-}
-
-// AdvanceDirectoryEvent records ts as the newest directory event applied for the subject and
-// reports false, recording nothing, when a newer one was already applied. An equal timestamp
-// is accepted: a redelivery of the last event changes nothing.
-func (u *userStore) AdvanceDirectoryEvent(ctx context.Context, provider, subject string, ts int64) (bool, error) {
-	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`INSERT INTO sso_directory_events (provider, subject, last_timestamp) VALUES (?, ?, ?)
-ON CONFLICT (provider, subject) DO UPDATE SET last_timestamp = excluded.last_timestamp WHERE sso_directory_events.last_timestamp <= excluded.last_timestamp`), provider, subject, ts)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n == 1, err
-}
-
-func (u *userStore) LastDirectoryEvent(ctx context.Context, provider, subject string) (int64, error) {
-	var ts int64
-	err := u.store.db.QueryRowContext(ctx, u.store.rebind(`SELECT last_timestamp FROM sso_directory_events WHERE provider = ? AND subject = ?`), provider, subject).Scan(&ts)
-	if errorsIs(err, sql.ErrNoRows) {
-		return 0, nil
-	}
-	return ts, err
-}
-
-// WithDirectoryLock serializes directory events in this process. It holds no database
-// connection, so it cannot starve the pool. One server process per database is the supported
-// deployment (the backup scheduler assumes it too).
-func (u *userStore) WithDirectoryLock(ctx context.Context, provider, subject string, fn func() error) error {
-	u.store.dirMu.Lock()
-	defer u.store.dirMu.Unlock()
-	return fn()
-}
-
-// SetDirectoryEvent puts the recorded timestamp back to ts, but only while it is still
-// current: it undoes an AdvanceDirectoryEvent whose event then failed to apply.
-func (u *userStore) SetDirectoryEvent(ctx context.Context, provider, subject string, current, ts int64) error {
-	if ts == 0 {
-		_, err := u.store.db.ExecContext(ctx, u.store.rebind(`DELETE FROM sso_directory_events WHERE provider = ? AND subject = ? AND last_timestamp = ?`), provider, subject, current)
-		return err
-	}
-	_, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE sso_directory_events SET last_timestamp = ? WHERE provider = ? AND subject = ? AND last_timestamp = ?`), ts, provider, subject, current)
-	return err
 }
 
 func (u *userStore) CountUsers(ctx context.Context) (int, error) {

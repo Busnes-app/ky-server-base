@@ -112,35 +112,3 @@ func TestSAMLServiceProvider(t *testing.T) {
 	}
 
 }
-
-// A replayed or late webhook must not undo a newer change for the same subject: a promotion
-// signed before a demotion is dropped once the demotion has been applied.
-func TestKySignOnWebhookDropsOlderEventsPerSubject(t *testing.T) {
-	ctx := context.Background()
-	st, err := store.Open(ctx, testdb.Config(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	secret := "webhook-secret-that-is-long-enough-123"
-	client := sso.NewKySignOnClient(config.SSOConfig{KySignOnHMACSecret: secret}, st)
-	send := func(role string, ts int64) {
-		t.Helper()
-		body, _ := json.Marshal(sso.KySignOnSyncPayload{Event: "user.updated", ID: "ext-9", Username: "erin", Role: role, Timestamp: ts})
-		if err := client.HandleSyncWebhook(ctx, body, crypto.ComputeHMACSHA256(body, secret)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	now := time.Now().Unix()
-	send("user", now-60)  // created
-	send("admin", now-30) // promoted
-	send("user", now-10)  // demoted
-	send("admin", now-30) // the promotion replayed
-	u, err := st.Users().GetUserBySSO(ctx, "kysignon", "ext-9")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.Role != "user" {
-		t.Fatalf("a replayed older event re-promoted the user: role %q", u.Role)
-	}
-}
