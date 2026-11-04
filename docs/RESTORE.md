@@ -204,11 +204,13 @@ ls -A data | wc -l
 With `0` confirmed, copy the restored files in. Before the server starts, delete the
 restored sessions: they are database rows, so every session cookie minted before the capsule,
 including one revoked or stolen since, would sign in again the moment the server listens.
-Everyone signs in again. Then start; the chain stops before the start if any step fails
-(install the `sqlite3` CLI first if the host lacks it):
+Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
+runs as root and refuses an `encryption.key` it does not own, so hand them to root (or to the
+UID of a `user:` override, if you run one). Then start; the chain stops before the start if
+any step fails (install the `sqlite3` CLI first if the host lacks it):
 
 ```bash
-sudo cp -a restored/data/. data/ && sudo chmod 600 data/* \
+sudo cp -a restored/data/. data/ && sudo chown -R 0:0 data && sudo chmod 600 data/* \
   && sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;' \
   && docker compose up -d
 ```
