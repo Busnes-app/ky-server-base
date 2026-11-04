@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	protocol "github.com/elimity-com/scim"
 	protocolErrors "github.com/elimity-com/scim/errors"
@@ -217,10 +218,9 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Username, _ = attrs["userName"].(string)
 		user.Email = primaryValue(attrs["emails"])
 		user.DisplayName = stringValue(attrs, "displayName", user.Username)
-		if role := primaryValue(attrs["roles"]); role != "" {
-			user.Role = role
-		}
+		user.Role = roleValue(attrs["roles"])
 		user.Status = statusFromActive(attrs)
+		user.SSOSubject = stringValue(attrs, "externalId", user.SSOSubject)
 		return nil
 	})
 }
@@ -376,10 +376,12 @@ func applyUserValue(user *store.User, path string, value interface{}) {
 		if v, ok := value.(string); ok {
 			user.Username = v
 		}
-	case "roles", "role":
-		if v := primaryValue(value); v != "" {
-			user.Role = v
+	case "externalid": // stored only while the row is SCIM's own (UpdateUserProfile)
+		if v, ok := value.(string); ok {
+			user.SSOSubject = v
 		}
+	case "roles", "role":
+		user.Role = roleValue(value)
 	case "emails":
 		user.Email = primaryValue(value)
 	}
@@ -396,7 +398,13 @@ func userResource(user *store.User) protocol.Resource {
 	return protocol.Resource{ID: user.ID, ExternalID: optional.NewString(user.SSOSubject), Attributes: attrs, Meta: protocol.Meta{Created: &user.CreatedAt, LastModified: &user.UpdatedAt}}
 }
 
-type groupResourceHandler struct{ store store.Store }
+// groupResourceHandler serializes membership writes in this process (mu): PATCH computes the
+// new membership from a read, so two PATCHes interleaving would drop one's change. One server
+// process per database is the supported deployment.
+type groupResourceHandler struct {
+	store store.Store
+	mu    sync.Mutex
+}
 
 func (h *groupResourceHandler) Create(r *http.Request, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group := &store.Group{ID: "grp_" + crypto.RandomHex(12), DisplayName: stringValue(attrs, "displayName", ""), ExternalID: stringValue(attrs, "externalId", "")}
@@ -489,6 +497,12 @@ func (h *groupResourceHandler) filterGroups(r *http.Request, raw string) ([]*sto
 }
 
 func (h *groupResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.replace(r, id, attrs)
+}
+
+func (h *groupResourceHandler) replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -516,6 +530,8 @@ func (h *groupResourceHandler) Delete(r *http.Request, id string) error {
 // Replace (member check, difference-only writes). Member sub-attribute paths and any member
 // filter but `members[value eq "id"]` with remove are refused before anything is written.
 func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	group, err := h.store.Groups().GetGroupByID(r.Context(), id)
 	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, id)
@@ -578,7 +594,7 @@ func (h *groupResourceHandler) Patch(r *http.Request, id string, operations []pr
 			apply(op.Op, strings.ToLower(op.Path.AttributePath.AttributeName), op.Value)
 		}
 	}
-	return h.Replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
+	return h.replace(r, id, protocol.ResourceAttributes{"displayName": displayName, "externalId": externalID, "members": memberMaps(members)})
 }
 
 // checkMembers refuses unknown users before anything is written, so a bad id cannot leave a
@@ -640,6 +656,16 @@ func memberValues(value interface{}) []string {
 	}
 	return out
 }
+
+// roleValue is the role a full or replaced roles value grants: none means "user", so a PUT
+// or replace that drops a role takes it away instead of leaving it in place.
+func roleValue(value interface{}) string {
+	if v := primaryValue(value); v != "" {
+		return v
+	}
+	return "user"
+}
+
 func primaryValue(value interface{}) string {
 	if m, ok := value.(map[string]interface{}); ok {
 		v, _ := m["value"].(string)

@@ -224,10 +224,15 @@ List responses have `schemas`, `totalResults`, `startIndex`, `itemsPerPage` and
 `Resources`; pagination is one-based and capped at 200 results per page. User
 attributes persisted here are `userName`, `displayName`, `emails[].value`,
 `roles[].value`, `active` and `externalId`; the first supplied email/role value is
-used. Missing role on create defaults to `user`. User resources return those
+used. A missing or empty role on create, PUT or a roles replace means `user`, so
+dropping a role takes it away. `externalId` (the KyIdentity subject adoption matches)
+can be set or corrected by PUT or PATCH until a KyIdentity sign-in adopts the account;
+after that the account keeps the subject it signs in with. A PUT without `externalId`
+keeps the stored one. User resources return those
 attributes, `id` and metadata, not passwords. `active:false` maps to local `inactive`.
 Changing role/status invalidates sessions. Group resources persist `displayName`,
 `externalId` and `members:[{"value":"user-id"}]`, with `id` and metadata on output.
+Renaming a group onto a taken `displayName` is 409 `uniqueness`.
 
 Adapter limits matter when configuring a provisioning connector:
 

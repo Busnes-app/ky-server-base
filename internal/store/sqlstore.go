@@ -286,10 +286,11 @@ func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole,
 	}
 	res, err := tx.ExecContext(ctx, u.store.rebind(`
 UPDATE users SET
-    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
+    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?,
+    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
 WHERE id = ? AND role = ? AND status = ?
 `), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.UpdatedAt, user.ID, prevRole, prevStatus)
+		user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus)
 	if err != nil {
 		return uniqueErr(err)
 	}
@@ -676,7 +677,7 @@ func (g *groupStore) UpdateGroup(ctx context.Context, group *Group) error {
 	q := g.store.rebind("UPDATE groups SET display_name = ?, external_id = ?, updated_at = ? WHERE id = ?")
 	res, err := g.store.db.ExecContext(ctx, q, group.DisplayName, group.ExternalID, group.UpdatedAt, group.ID)
 	if err != nil {
-		return err
+		return uniqueErr(err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
