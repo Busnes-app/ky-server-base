@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -13,8 +14,8 @@ import (
 
 var patchSchema = []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}
 
-// An IdP that empties a user's roles takes the role away: PUT without roles and a replace
-// with an empty value both leave "user", and the admin's sessions go with the role.
+// An IdP that empties a user's roles takes the role away: a PUT with empty roles and a
+// replace with an empty value both leave "user"; a PUT that omits roles leaves it alone.
 func TestSCIMEmptyRoleReplacementDemotes(t *testing.T) {
 	st, do := scopedSCIM(t, true)
 	ctx := context.Background()
@@ -39,8 +40,14 @@ func TestSCIMEmptyRoleReplacementDemotes(t *testing.T) {
 	if w := do("PUT", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": []string{scim.SchemaUser}, "userName": "ada", "active": true}); w.Code != http.StatusOK {
 		t.Fatal(w.Code, w.Body)
 	}
+	if u, _ := st.Users().GetUserByID(ctx, u.ID); u.Role != "admin" {
+		t.Fatalf("a PUT that omits roles changed the role to %q", u.Role)
+	}
+	if w := do("PUT", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": []string{scim.SchemaUser}, "userName": "ada", "active": true, "roles": []any{}}); w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body)
+	}
 	if u, _ := st.Users().GetUserByID(ctx, u.ID); u.Role != "user" {
-		t.Fatalf("a PUT without roles kept role %q", u.Role)
+		t.Fatalf("a PUT with empty roles kept role %q", u.Role)
 	}
 }
 
@@ -65,10 +72,10 @@ func TestSCIMExternalIDCanBeCorrectedBeforeAdoption(t *testing.T) {
 	if got, err := st.Users().GetUserBySSO(ctx, "scim", "sub-alice-2"); err != nil || got.ID != u.ID {
 		t.Fatalf("externalId PUT not stored: %v %v", got, err)
 	}
-	if err := st.Users().LinkSSOIdentity(ctx, u.ID, "scim", "kysignon"); err != nil {
+	if err := st.Users().LinkSSOIdentity(ctx, u.ID, "sub-alice-2", "scim", "kysignon"); err != nil {
 		t.Fatal(err)
 	}
-	if w := do("PATCH", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": patchSchema, "Operations": []any{map[string]any{"op": "replace", "path": "externalId", "value": "someone-else"}}}); w.Code != http.StatusOK {
+	if w := do("PATCH", "/scim/v2/Users/"+u.ID, map[string]any{"schemas": patchSchema, "Operations": []any{map[string]any{"op": "replace", "path": "externalId", "value": "someone-else"}}}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"externalId":"sub-alice-2"`) {
 		t.Fatal(w.Code, w.Body)
 	}
 	if got, err := st.Users().GetUserBySSO(ctx, "kysignon", "sub-alice-2"); err != nil || got.ID != u.ID {

@@ -118,10 +118,10 @@ func TestProfileWritesLeaveTheSSOLinkAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale, _ := st.Users().GetUserByID(ctx, "u1")
-	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); err != nil {
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "f", "scim", "kysignon"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Users().LinkSSOIdentity(ctx, "u1", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "f", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("second link: %v, want ErrConflict", err)
 	}
 	stale.DisplayName = "Frank"
@@ -177,5 +177,30 @@ func TestRecordDirectoryEventNeverMovesBack(t *testing.T) {
 	}
 	if got, _ := st.Users().LastDirectoryEvent(ctx, "kysignon", "sub-2"); got != 0 {
 		t.Fatalf("subjects are not independent: %d", got)
+	}
+}
+
+// Adoption and externalId corrections are compare-and-swaps on the subject read: a stale
+// adoption cannot link a row whose subject has since changed, and a stale correction loses.
+func TestSubjectChangesAreCompareAndSwaps(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	if err := st.Users().CreateUser(ctx, &store.User{ID: "u1", Username: "gina", Role: "user", Status: "active", SSOProvider: "scim", SSOSubject: "a", SCIMManaged: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().SetSCIMSubject(ctx, "u1", "a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().SetSCIMSubject(ctx, "u1", "a", "c"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale correction: %v, want ErrConflict", err)
+	}
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "a", "scim", "kysignon"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("adoption for a subject the row no longer holds: %v, want ErrConflict", err)
+	}
+	if err := st.Users().LinkSSOIdentity(ctx, "u1", "b", "scim", "kysignon"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Users().SetSCIMSubject(ctx, "u1", "b", "d"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("subject change on an adopted row: %v, want ErrConflict", err)
 	}
 }

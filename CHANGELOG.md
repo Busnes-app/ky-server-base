@@ -37,16 +37,15 @@ These are human summaries, not a raw version-control log.
 - Any local account can change its own password from the key button in the header,
   after confirming the current one; every session is signed out. Before, only an
   account flagged for replacement could.
-- SCIM: a PUT without roles, or a roles replace with an empty value, sets the role to
-  `user` (an admin kept the role and its sessions before). `externalId` sent after
+- SCIM: a PUT with an empty `roles` value, or a roles replace with an empty value, sets
+  the role to `user` (an admin kept the role and its sessions before). `externalId` sent after
   creation is stored until a KyIdentity sign-in adopts the account (it was dropped
   with 200). Concurrent group PATCHes no longer drop each other's members, and renaming
   a group onto a taken name is 409 `uniqueness` instead of 500.
 - Sign-in: a browser `Origin` that is neither the server's host nor `KY_APP_URL` is
   refused like a cross-site request, closing login CSRF over plain HTTP where browsers
-  send no `Sec-Fetch-Site`. When too many password hashes are already running, login
-  and password change answer 503 with `Retry-After` instead of "Invalid credentials",
-  and spend no attempt. After a sign-in the web app checks that the browser kept the
+  send no `Sec-Fetch-Site`. When too many password hashes are already running, a
+  sign-in no longer counts as a failed attempt, so load cannot lock accounts. After a sign-in the web app checks that the browser kept the
   session, and says to open the https address when a Secure cookie was dropped on a
   plain-HTTP page.
 - Backups refuse a database snapshot too large for a capsule (413) before reading it
@@ -58,13 +57,14 @@ These are human summaries, not a raw version-control log.
 
 - Migration 10 runs on start and adds the `sso_directory_events` table. No data
   changes.
-- KyIdentity: a directory event carrying an older `timestamp` than one already applied
-  for the same subject is now ignored (still 200). Events without `id` get 401.
-- SCIM: an IdP that sends PUT without `roles` now demotes the user to `user`; send the
-  role on every PUT to keep it. `externalId` updates now take effect on accounts that
+- KyIdentity: a directory event carrying an older `timestamp` than one already taken
+  for the same subject is now ignored (still 200). A failed event must be retried by
+  the sender; older events for that subject are ignored until it is. Events without `id` get 401.
+- SCIM: an IdP that sends an empty `roles` value now demotes the user to `user`; a PUT
+  that omits `roles` keeps the role as before. `externalId` updates now take effect on accounts that
   have not signed in through KyIdentity yet.
 - Login: requests from a browser page on another origin get 403; API clients that send
-  no `Origin` are unaffected. Overload is 503, not 401.
+  no `Origin` are unaffected.
 - `POST /api/auth/change-password` now works for every local account (it answered 409
   unless the account was flagged); federated accounts still get 409.
 

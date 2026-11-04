@@ -83,10 +83,11 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.ID == "" {
 		return errors.New("webhook event names no subject")
 	}
-	// Per-subject ordering: an event older than the newest one applied for this subject is a
+	// Per-subject ordering: an event older than the newest one taken for this subject is a
 	// replay or arrived late, and applying it would undo a newer change. It is acknowledged
-	// and dropped. The order is recorded only after the change commits, so a failed event is
-	// retried by the sender and never needs undoing.
+	// and dropped. The order is recorded before the change, so no crash or failure between
+	// the two can let an older event through after a newer change committed; a failed event
+	// is retried by the sender with the same timestamp, which is applied again.
 	k.order.Lock()
 	defer k.order.Unlock()
 	users := k.store.Users()
@@ -97,10 +98,10 @@ func (k *KySignOnClient) HandleSyncWebhook(ctx context.Context, body []byte, sig
 	if payload.Timestamp < last {
 		return nil
 	}
-	if err := k.apply(ctx, payload); err != nil {
+	if err := users.RecordDirectoryEvent(ctx, "kysignon", payload.ID, payload.Timestamp); err != nil {
 		return err
 	}
-	return users.RecordDirectoryEvent(context.WithoutCancel(ctx), "kysignon", payload.ID, payload.Timestamp)
+	return k.apply(ctx, payload)
 }
 
 // AdoptSCIMUser links a SCIM-provisioned account to KyIdentity: the row whose externalId is
@@ -116,7 +117,7 @@ func AdoptSCIMUser(ctx context.Context, users store.UserStore, subject string) (
 	if err != nil {
 		return nil, false, err
 	}
-	if err := users.LinkSSOIdentity(ctx, user.ID, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
+	if err := users.LinkSSOIdentity(ctx, user.ID, subject, "scim", "kysignon"); errors.Is(err, store.ErrConflict) {
 		user, err = users.GetUserBySSO(ctx, "kysignon", subject) // a concurrent call linked it first
 		return user, false, err
 	} else if err != nil {

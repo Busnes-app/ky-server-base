@@ -218,7 +218,9 @@ func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol
 		user.Username, _ = attrs["userName"].(string)
 		user.Email = primaryValue(attrs["emails"])
 		user.DisplayName = stringValue(attrs, "displayName", user.Username)
-		user.Role = roleValue(attrs["roles"])
+		if roles, sent := attrs["roles"]; sent {
+			user.Role = roleValue(roles)
+		}
 		user.Status = statusFromActive(attrs)
 		user.SSOSubject = stringValue(attrs, "externalId", user.SSOSubject)
 		return nil
@@ -335,12 +337,26 @@ func (h *userResourceHandler) update(r *http.Request, id string, change func(*st
 		if err != nil {
 			return protocol.Resource{}, err
 		}
-		oldRole, oldStatus := user.Role, user.Status
+		oldRole, oldStatus, oldSubject := user.Role, user.Status, user.SSOSubject
 		if err := change(user); err != nil {
 			return protocol.Resource{}, err
 		}
 		if err := h.checkRole(oldRole, user.Role); err != nil {
 			return protocol.Resource{}, err
+		}
+		// externalId is the subject KyIdentity adoption matches. It changes only on a row that
+		// is still SCIM's own, by its own compare-and-swap, so a write that did not ask for a
+		// change never puts back a stale value; an adopted account keeps its sign-in subject.
+		if user.SSOProvider != "scim" {
+			user.SSOSubject = oldSubject
+		} else if user.SSOSubject != oldSubject {
+			err = h.store.Users().SetSCIMSubject(r.Context(), id, oldSubject, user.SSOSubject)
+			if errors.Is(err, store.ErrConflict) && attempt < 3 {
+				continue
+			}
+			if err != nil {
+				return protocol.Resource{}, scimStoreError(err, id)
+			}
 		}
 		err = h.store.Users().UpdateUserProfile(r.Context(), user, oldRole, oldStatus)
 		if errors.Is(err, store.ErrConflict) && attempt < 3 {
@@ -376,7 +392,7 @@ func applyUserValue(user *store.User, path string, value interface{}) {
 		if v, ok := value.(string); ok {
 			user.Username = v
 		}
-	case "externalid": // stored only while the row is SCIM's own (UpdateUserProfile)
+	case "externalid": // stored only while the row is SCIM's own (update)
 		if v, ok := value.(string); ok {
 			user.SSOSubject = v
 		}
@@ -657,8 +673,9 @@ func memberValues(value interface{}) []string {
 	return out
 }
 
-// roleValue is the role a full or replaced roles value grants: none means "user", so a PUT
-// or replace that drops a role takes it away instead of leaving it in place.
+// roleValue is the role a sent roles value grants: an empty one means "user", so a PUT or
+// replace that empties the roles takes the role away instead of leaving it in place. A PUT
+// that omits roles altogether leaves the role alone (IdPs that do not map roles omit it).
 func roleValue(value interface{}) string {
 	if v := primaryValue(value); v != "" {
 		return v

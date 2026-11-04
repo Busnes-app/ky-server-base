@@ -96,9 +96,9 @@ type failingUsers struct {
 
 func (s failingUsers) Users() store.UserStore { return s.users }
 
-// Only an applied event moves the order: after the newest event fails, an older one is still
-// applied, and the failed one applies when the sender retries it.
-func TestFailedWebhookDoesNotMoveTheOrder(t *testing.T) {
+// A failed event still moves the order, so nothing older can slip in before the sender
+// retries it; the retry carries the same timestamp and is applied.
+func TestFailedWebhookIsAppliedOnRetry(t *testing.T) {
 	st := openOrderStore(t)
 	users := &failingProfileWrites{UserStore: st.Users()}
 	c := sso.NewKySignOnClient(config.SSOConfig{KySignOnHMACSecret: orderSecret}, failingUsers{st, users})
@@ -110,20 +110,20 @@ func TestFailedWebhookDoesNotMoveTheOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	users.fail = true
-	if err := send("admin", now-10); err == nil {
+	if err := send("user", now-10); err == nil { // a demotion that failed to apply
 		t.Fatal("a failed update was acknowledged")
 	}
 	users.fail = false
-	if err := send("manager", now-30); err != nil {
+	if err := send("admin", now-30); err != nil { // an older promotion arriving late
+		t.Fatal(err)
+	}
+	if u, _ := st.Users().GetUserBySSO(context.Background(), "kysignon", "ext-7"); u.Role != "user" {
+		t.Fatalf("an event older than a failed newer one was applied: role %q", u.Role)
+	}
+	if err := send("manager", now-10); err != nil { // the sender's retry of the newer event
 		t.Fatal(err)
 	}
 	if u, _ := st.Users().GetUserBySSO(context.Background(), "kysignon", "ext-7"); u.Role != "manager" {
-		t.Fatalf("an older event after a failed newer one was dropped: role %q", u.Role)
-	}
-	if err := send("admin", now-10); err != nil {
-		t.Fatal(err)
-	}
-	if u, _ := st.Users().GetUserBySSO(context.Background(), "kysignon", "ext-7"); u.Role != "admin" {
 		t.Fatalf("the retried event was not applied: role %q", u.Role)
 	}
 }

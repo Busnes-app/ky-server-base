@@ -45,8 +45,11 @@ type UserStore interface {
 	// user's sessions in the same transaction.
 	UpdateUserProfile(ctx context.Context, u *User, prevRole, prevStatus string) error
 	// LinkSSOIdentity moves an account from fromProvider to toProvider, keeping its subject;
-	// ErrConflict when the account is no longer on fromProvider.
-	LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error
+	// ErrConflict when the account is no longer on fromProvider or no longer has subject.
+	LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error
+	// SetSCIMSubject changes a SCIM-provisioned account's subject (SCIM externalId) from
+	// from to to; ErrConflict when it is no longer "scim" or no longer holds from.
+	SetSCIMSubject(ctx context.Context, id, from, to string) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
 	DeleteUser(ctx context.Context, id string) error

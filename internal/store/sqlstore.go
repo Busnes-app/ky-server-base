@@ -286,11 +286,10 @@ func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole,
 	}
 	res, err := tx.ExecContext(ctx, u.store.rebind(`
 UPDATE users SET
-    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?,
-    sso_subject = CASE WHEN sso_provider = 'scim' THEN ? ELSE sso_subject END
+    username = ?, email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
 WHERE id = ? AND role = ? AND status = ?
 `), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.UpdatedAt, user.SSOSubject, user.ID, prevRole, prevStatus)
+		user.UpdatedAt, user.ID, prevRole, prevStatus)
 	if err != nil {
 		return uniqueErr(err)
 	}
@@ -312,8 +311,19 @@ WHERE id = ? AND role = ? AND status = ?
 	return tx.Commit()
 }
 
-func (u *userStore) LinkSSOIdentity(ctx context.Context, id, fromProvider, toProvider string) error {
-	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, fromProvider)
+func (u *userStore) LinkSSOIdentity(ctx context.Context, id, subject, fromProvider, toProvider string) error {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_provider = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = ?`), toProvider, time.Now().UTC(), id, subject, fromProvider)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (u *userStore) SetSCIMSubject(ctx context.Context, id, from, to string) error {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET sso_subject = ?, updated_at = ? WHERE id = ? AND sso_provider = 'scim' AND sso_subject = ?`), to, time.Now().UTC(), id, from)
 	if err != nil {
 		return err
 	}

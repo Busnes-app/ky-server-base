@@ -45,7 +45,7 @@ export function ChangePassword({ onComplete, onLogout, onCancel }: ChangePasswor
         <h1>Change your password</h1>
         <p>{onCancel ? 'Use at least 12 characters.' : 'Replace your temporary password before continuing. Use at least 12 characters.'} You will sign in again afterward, and every other session is signed out.</p>
         <label htmlFor="current-password">Current password</label>
-        <input id="current-password" type="password" autoComplete="current-password" required maxLength={1024}
+        <input id="current-password" type="password" autoComplete="current-password" required
           value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
         <label htmlFor="new-password">New password</label>
         <input id="new-password" type="password" autoComplete="new-password" required minLength={12} maxLength={1024}

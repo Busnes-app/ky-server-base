@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +139,9 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 	}
 	if info.Size() > maxSnapshotBytes {
 		return nil, fmt.Errorf("%w: the database snapshot is %d bytes, a capsule member may be %d", capsule.ErrCapsuleTooLarge, info.Size(), maxSnapshotBytes)
+	}
+	if info.Size() > maxSnapshotBytes/10*8 {
+		log.Printf("[BACKUP] the database snapshot is %d bytes, over 80%% of the %d-byte capsule limit; backups stop when it is reached", info.Size(), maxSnapshotBytes)
 	}
 	return os.ReadFile(path)
 }

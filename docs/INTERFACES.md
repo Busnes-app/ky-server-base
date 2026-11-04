@@ -87,8 +87,8 @@ answers the same 401 as a wrong password without checking the password, and only
 that client, so nobody elsewhere can lock an account out. Unknown names cost the same
 password hashing as known ones. Invalid credentials and inactive or disabled accounts
 both return 401 `{"error":"Invalid credentials"}`; a failed or reused CAPTCHA returns 403.
-When too many password hashes are already running, login and password change answer 503
-with `Retry-After: 5` and spend no attempt.
+When too many password hashes are already running, login still answers that 401 but
+spends no attempt of the account window.
 
 The PoW challenge has `algorithm:"SHA-256"`, `salt`, `challenge`, `maxnumber`,
 `expires_at` (Unix seconds) and `signature`. Find an integer `number` from 1 through
@@ -101,7 +101,8 @@ provider is `pow`; no Turnstile/Friendly server-side verification is wired here.
 
 Any local account can change its own password, whether or not it is flagged
 `must_change_password` (a flagged account must do so first); a federated account
-gets 409. Both passwords are limited to 1024 bytes; the new value must differ and pass
+gets 409. The new password is limited to 1024 bytes (the current one is checked at any
+length, since `init-admin` sets no cap); the new value must differ and pass
 the current policy (at least 12 bytes after trimming surrounding whitespace).
 The current password must verify. Limits are ten attempts per IP and five per
 account per minute. Success requires signing in again with the replacement.
@@ -175,8 +176,9 @@ under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `ev
 events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
 Events are ordered per subject: one whose `timestamp` is older than the newest event
 already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
-event cannot undo a newer change; an equal timestamp is applied. A failed event does not
-count as applied, so the sender's retry applies it. An event without `id` returns 401.
+event cannot undo a newer change; an equal timestamp is applied. A failed event (non-200)
+still counts, so the sender must retry it: the retry has the same `timestamp` and is
+applied, while older events for that `id` are dropped meanwhile. An event without `id` returns 401.
 A create/update for a subject with no KyIdentity account first adopts the
 SCIM-provisioned account whose `externalId` is that subject, as sign-in does, instead
 of creating a second account. Create/update defaults an empty role to `user` and status to
@@ -229,8 +231,9 @@ List responses have `schemas`, `totalResults`, `startIndex`, `itemsPerPage` and
 `Resources`; pagination is one-based and capped at 200 results per page. User
 attributes persisted here are `userName`, `displayName`, `emails[].value`,
 `roles[].value`, `active` and `externalId`; the first supplied email/role value is
-used. A missing or empty role on create, PUT or a roles replace means `user`, so
-dropping a role takes it away. `externalId` (the KyIdentity subject adoption matches)
+used. A missing role on create, and an empty `roles` value sent in PUT or a roles
+replace, mean `user`, so emptying the roles takes the role away; a PUT that omits
+`roles` keeps the stored role. `externalId` (the KyIdentity subject adoption matches)
 can be set or corrected by PUT or PATCH until a KyIdentity sign-in adopts the account;
 after that the account keeps the subject it signs in with. A PUT without `externalId`
 keeps the stored one. User resources return those
@@ -370,7 +373,7 @@ reader in the binary. Docker Compose can supply its `.env` substitutions separat
 |---|---|---|
 | `KY_HOST` | `0.0.0.0` | HTTP listener address; use network/proxy controls in production |
 | `KY_PORT` / `PORT` | `8080` | Integer listener port; KY_PORT wins |
-| `KY_APP_URL` | `http://localhost:<port>` | External application origin, redirects and SCIM base URL |
+| `KY_APP_URL` | `http://localhost:<port>` | External application origin, redirects and SCIM base URL. Set it to the public URL: behind a proxy that rewrites `Host`, a browser sign-in whose `Origin` matches neither is refused as cross-site |
 | `KY_APP_NAME` | `Busnes.app` | Application and capsule service identity; preserve it for restore |
 | `KY_ENV` | `development` | `production` requires a session secret and defaults to Secure cookies |
 | `KY_DB_DRIVER` | `sqlite` | SQLite or `postgres` (`postgresql` alias); other drivers are not implemented |

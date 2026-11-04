@@ -11,7 +11,8 @@ import (
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
-// handleChangePassword completes a mandatory local-password replacement. All sessions
+// handleChangePassword changes a local account's password, voluntary or a mandatory
+// replacement. All sessions
 // are revoked atomically with the password update; the user signs in again afterward.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -52,11 +53,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok, err := password.Verify(req.CurrentPassword, user.PasswordHash)
-	if errors.Is(err, password.ErrBusy) {
-		w.Header().Set("Retry-After", "5")
-		s.writeError(w, http.StatusServiceUnavailable, "The server is busy. Try again in a few seconds.")
-		return
-	}
 	if err != nil || !ok {
 		s.writeError(w, http.StatusUnauthorized, "Current password is incorrect")
 		return
