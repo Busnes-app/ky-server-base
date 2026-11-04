@@ -79,7 +79,16 @@ export const App: React.FC = () => {
       {notice && <p role="status" style={{ padding: 16 }}>{notice}</p>}
       <Login
         appName={settings?.app_name || 'Busnes.app'}
-        onSuccess={(u) => {
+        onSuccess={async (u) => {
+          // A Secure session cookie is dropped on a plain-HTTP page, so a 200 from login does
+          // not mean the browser is signed in: ask the server before showing the app.
+          const me = await fetch('/api/auth/me').then((r) => r.json()).catch(() => null);
+          if (!me?.authenticated) {
+            setNotice(window.location.protocol === 'http:'
+              ? 'Signed in, but this browser did not keep the session: the server only sends its cookie over HTTPS. Open this server at its https:// address (KY_APP_URL).'
+              : 'Signed in, but this browser did not keep the session cookie. Check that cookies are allowed for this site.');
+            return;
+          }
           setNotice('');
           setUser(u);
           void loadSettings();

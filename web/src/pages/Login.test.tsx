@@ -77,3 +77,22 @@ it('keeps Sign In disabled until the security check is solved', async () => {
   await screen.findByText('Security check verified.');
   expect(button.disabled).toBe(false);
 });
+
+// Over plain HTTP a Secure session cookie is dropped: a 200 from login must not show the app.
+it('explains a session the browser did not keep instead of showing a broken app', async () => {
+  const { App } = await import('../App');
+  let meCalls = 0;
+  await stubAuth({
+    '/api/settings': () => json({ app_name: 'Test' }),
+    '/api/auth/me': () => { meCalls++; return json({ authenticated: false }); },
+    '/api/auth/login': () => json({ authenticated: true, user: { username: 'admin', role: 'admin', sso_provider: 'local' } }),
+  });
+  const { container } = render(<App />);
+  await screen.findByText('Security check verified.');
+  fireEvent.change(container.querySelector('input[type="text"]')!, { target: { value: 'admin' } });
+  fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'right password!' } });
+  fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+  expect((await screen.findByRole('status')).textContent).toContain('did not keep the session');
+  expect(meCalls).toBe(2);
+  expect(screen.queryByText('Overview')).toBeNull();
+});
