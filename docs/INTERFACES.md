@@ -208,6 +208,13 @@ from lists and filters, 404 by id, and 400 `invalidValue` as group members. SCIM
 not grant the `admin` role (400 `invalidValue`) unless `KY_SCIM_ALLOW_ADMIN=true`;
 an account that is already an admin can still be updated, deactivated or demoted. A
 `userName` that another account holds in any letter case is 409 `uniqueness`.
+`POST /Users` for someone who already signed in through KyIdentity takes that account
+over instead: when `externalId` equals the subject of a KyIdentity account SCIM does not
+manage yet, or, with no `externalId` sent, when `userName` names one, the account becomes
+SCIM-managed and the create's attributes are applied as a PUT would (an omitted `roles`
+keeps the role); the answer is 201 with the existing `id`, audited as `scim.user.adopt`.
+The account keeps its KyIdentity subject and sign-in. Local accounts are never taken
+over, and a `userName` match whose `externalId` differs is still 409.
 
 | Method and path | Input | Output |
 |---|---|---|

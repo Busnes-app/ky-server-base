@@ -336,6 +336,17 @@ func (u *userStore) LinkSSOIdentity(ctx context.Context, id, subject, fromProvid
 	return nil
 }
 
+func (u *userStore) ClaimForSCIM(ctx context.Context, id, subject string) error {
+	res, err := u.store.db.ExecContext(ctx, u.store.rebind(`UPDATE users SET scim_managed = ?, updated_at = ? WHERE id = ? AND sso_subject = ? AND sso_provider = 'kysignon' AND scim_managed = ?`), true, time.Now().UTC(), id, subject, false)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
 func (u *userStore) DeleteUser(ctx context.Context, id string) error {
 	q := u.store.rebind("DELETE FROM users WHERE id = ?")
 	res, err := u.store.db.ExecContext(ctx, q, id)

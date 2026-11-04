@@ -125,11 +125,46 @@ func (h *userResourceHandler) Create(r *http.Request, attrs protocol.ResourceAtt
 	if err := h.checkRole("", user.Role); err != nil {
 		return protocol.Resource{}, err
 	}
-	if err := h.store.Users().CreateUser(r.Context(), user); err != nil {
+	if user.SSOSubject != "" {
+		existing, err := h.store.Users().GetUserBySSO(r.Context(), "kysignon", user.SSOSubject)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return protocol.Resource{}, err
+		}
+		if err == nil && !existing.SCIMManaged {
+			return h.takeOver(r, existing, attrs)
+		}
+	}
+	err := h.store.Users().CreateUser(r.Context(), user)
+	if errors.Is(err, store.ErrAlreadyExists) && user.SSOSubject == "" {
+		// Without an externalId, the account KyIdentity sign-in created under this name.
+		existing, lookupErr := h.store.Users().GetUserByUsername(r.Context(), username)
+		if lookupErr == nil && existing.SSOProvider == "kysignon" && !existing.SCIMManaged {
+			return h.takeOver(r, existing, attrs)
+		}
+	}
+	if err != nil {
 		return protocol.Resource{}, scimStoreError(err, user.ID)
 	}
 	_ = h.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "scim.user.create", Resource: user.Username})
 	return userResource(user), nil
+}
+
+// takeOver answers a create for a person who already signed in through KyIdentity: their
+// account becomes SCIM-managed (keeping its id and KyIdentity subject) and the create's
+// attributes are applied as a PUT would apply them. Local accounts never reach here.
+func (h *userResourceHandler) takeOver(r *http.Request, user *store.User, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
+	if roles, sent := attrs["roles"]; sent {
+		if err := h.checkRole(user.Role, roleValue(roles)); err != nil {
+			return protocol.Resource{}, err
+		}
+	}
+	if err := h.store.Users().ClaimForSCIM(r.Context(), user.ID, user.SSOSubject); errors.Is(err, store.ErrConflict) {
+		return protocol.Resource{}, protocolErrors.ScimErrorUniqueness
+	} else if err != nil {
+		return protocol.Resource{}, err
+	}
+	_ = h.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "scim.user.adopt", Resource: user.Username})
+	return h.Replace(r, user.ID, attrs)
 }
 
 func (h *userResourceHandler) Get(r *http.Request, id string) (protocol.Resource, error) {
