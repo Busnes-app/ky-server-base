@@ -211,26 +211,16 @@ func userPage(users []*store.User, total int) protocol.Page {
 }
 
 func (h *userResourceHandler) Replace(r *http.Request, id string, attrs protocol.ResourceAttributes) (protocol.Resource, error) {
-	user, err := h.managedUser(r, id)
-	if err != nil {
-		return protocol.Resource{}, err
-	}
-	oldRole, oldStatus := user.Role, user.Status
-	user.Username, _ = attrs["userName"].(string)
-	user.Email = primaryValue(attrs["emails"])
-	user.DisplayName = stringValue(attrs, "displayName", user.Username)
-	if role := primaryValue(attrs["roles"]); role != "" {
-		user.Role = role
-	}
-	user.Status = statusFromActive(attrs)
-	if err := h.checkRole(oldRole, user.Role); err != nil {
-		return protocol.Resource{}, err
-	}
-	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
-		return protocol.Resource{}, scimStoreError(err, id)
-	}
-	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
-	return userResource(user), nil
+	return h.update(r, id, func(user *store.User) error {
+		user.Username, _ = attrs["userName"].(string)
+		user.Email = primaryValue(attrs["emails"])
+		user.DisplayName = stringValue(attrs, "displayName", user.Username)
+		if role := primaryValue(attrs["roles"]); role != "" {
+			user.Role = role
+		}
+		user.Status = statusFromActive(attrs)
+		return nil
+	})
 }
 
 func (h *userResourceHandler) Delete(r *http.Request, id string) error {
@@ -241,11 +231,13 @@ func (h *userResourceHandler) Delete(r *http.Request, id string) error {
 }
 
 func (h *userResourceHandler) Patch(r *http.Request, id string, operations []protocol.PatchOperation) (protocol.Resource, error) {
-	user, err := h.managedUser(r, id)
-	if err != nil {
-		return protocol.Resource{}, err
-	}
-	oldRole, oldStatus := user.Role, user.Status
+	return h.update(r, id, func(user *store.User) error {
+		return applyUserPatch(user, operations)
+	})
+}
+
+// applyUserPatch applies PATCH operations to user in order.
+func applyUserPatch(user *store.User, operations []protocol.PatchOperation) error {
 	for _, op := range operations {
 		if op.Op == protocol.PatchOperationRemove {
 			continue
@@ -258,19 +250,34 @@ func (h *userResourceHandler) Patch(r *http.Request, id string, operations []pro
 		}
 		applyUserValue(user, strings.ToLower(op.Path.String()), op.Value)
 	}
-	if err := h.checkRole(oldRole, user.Role); err != nil {
-		return protocol.Resource{}, err
-	}
-	if err := h.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
-		return protocol.Resource{}, scimStoreError(err, id)
-	}
-	h.revokeIfPrivilegesChanged(r, user, oldRole, oldStatus)
-	return userResource(user), nil
+	return nil
 }
 
-func (h *userResourceHandler) revokeIfPrivilegesChanged(r *http.Request, user *store.User, oldRole, oldStatus string) {
-	if user.Role != oldRole || user.Status != oldStatus {
-		_ = h.store.Sessions().DeleteUserSessions(r.Context(), user.ID)
+// update reads a managed user, applies change and writes it back. The write is a
+// compare-and-swap on role and status, revoking sessions when either changes; when a
+// concurrent write got there first, it re-reads and re-applies, so a stale read can never put
+// back a role or status another request just took away.
+func (h *userResourceHandler) update(r *http.Request, id string, change func(*store.User) error) (protocol.Resource, error) {
+	for attempt := 0; ; attempt++ {
+		user, err := h.managedUser(r, id)
+		if err != nil {
+			return protocol.Resource{}, err
+		}
+		oldRole, oldStatus := user.Role, user.Status
+		if err := change(user); err != nil {
+			return protocol.Resource{}, err
+		}
+		if err := h.checkRole(oldRole, user.Role); err != nil {
+			return protocol.Resource{}, err
+		}
+		err = h.store.Users().UpdateUserProfile(r.Context(), user, oldRole, oldStatus)
+		if errors.Is(err, store.ErrConflict) && attempt < 3 {
+			continue
+		}
+		if err != nil {
+			return protocol.Resource{}, scimStoreError(err, id)
+		}
+		return userResource(user), nil
 	}
 }
 

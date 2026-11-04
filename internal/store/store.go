@@ -10,6 +10,8 @@ var (
 	ErrNotFound       = errors.New("record not found")
 	ErrAlreadyExists  = errors.New("record already exists")
 	ErrSessionExpired = errors.New("session expired")
+	// ErrConflict means the record changed since it was read; re-read and retry.
+	ErrConflict = errors.New("record changed concurrently")
 	// ErrSSOSessionEnded means the identity provider already ended the login being signed in.
 	ErrSSOSessionEnded = errors.New("SSO session already ended")
 )
@@ -37,8 +39,11 @@ type UserStore interface {
 	UpdateUser(ctx context.Context, u *User) error
 	// UpdateUserProfile writes only username, email, display name, role, status and SSO
 	// identity, so a directory sync working from a stale read cannot undo a concurrent
-	// password reset.
-	UpdateUserProfile(ctx context.Context, u *User) error
+	// password reset. It applies only while role and status are still prevRole and prevStatus
+	// (the values the caller read), returning ErrConflict otherwise, so a stale read cannot put
+	// back a privilege a concurrent write revoked. When it changes either, it deletes the
+	// user's sessions in the same transaction.
+	UpdateUserProfile(ctx context.Context, u *User, prevRole, prevStatus string) error
 	ResetAdminPassword(ctx context.Context, userID, newHash string) error
 	CompletePasswordChange(ctx context.Context, userID, oldHash, newHash, ip string) error
 	DeleteUser(ctx context.Context, id string) error

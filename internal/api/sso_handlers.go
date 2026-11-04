@@ -129,7 +129,7 @@ func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, er
 		return nil, err
 	}
 	user.SSOProvider = "kysignon"
-	if err := s.store.Users().UpdateUserProfile(r.Context(), user); err != nil {
+	if err := s.store.Users().UpdateUserProfile(r.Context(), user, user.Role, user.Status); err != nil {
 		return nil, err
 	}
 	_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})

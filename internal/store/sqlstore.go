@@ -247,28 +247,42 @@ WHERE id = ?
 	return nil
 }
 
-func (u *userStore) UpdateUserProfile(ctx context.Context, user *User) error {
+func (u *userStore) UpdateUserProfile(ctx context.Context, user *User, prevRole, prevStatus string) error {
 	user.UpdatedAt = time.Now().UTC()
 	if err := u.checkUsernameFree(ctx, user.Username, user.ID); err != nil {
 		return err
 	}
-	q := u.store.rebind(`
+	tx, err := u.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, u.store.rebind(`
 UPDATE users SET
     username = ?, email = ?, display_name = ?, role = ?, status = ?,
     sso_provider = ?, sso_subject = ?, updated_at = ?
-WHERE id = ?
-`)
-	res, err := u.store.db.ExecContext(ctx, q,
-		user.Username, user.Email, user.DisplayName, user.Role, user.Status,
-		user.SSOProvider, user.SSOSubject, user.UpdatedAt, user.ID,
-	)
+WHERE id = ? AND role = ? AND status = ?
+`), user.Username, user.Email, user.DisplayName, user.Role, user.Status,
+		user.SSOProvider, user.SSOSubject, user.UpdatedAt, user.ID, prevRole, prevStatus)
 	if err != nil {
 		return uniqueErr(err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		return ErrNotFound
+		var n int
+		if err := tx.QueryRowContext(ctx, u.store.rebind(`SELECT COUNT(1) FROM users WHERE id = ?`), user.ID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return ErrConflict
 	}
-	return nil
+	if user.Role != prevRole || user.Status != prevStatus {
+		if _, err := tx.ExecContext(ctx, u.store.rebind(`DELETE FROM sessions WHERE user_id = ?`), user.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (u *userStore) DeleteUser(ctx context.Context, id string) error {

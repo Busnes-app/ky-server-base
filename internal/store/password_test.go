@@ -109,7 +109,7 @@ func TestUpdateUserProfileLeavesCredentialsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale.DisplayName = "Synced Name"
-	if err := st.Users().UpdateUserProfile(ctx, stale); err != nil {
+	if err := st.Users().UpdateUserProfile(ctx, stale, stale.Role, stale.Status); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.Users().GetUserByID(ctx, u.ID)
@@ -122,7 +122,7 @@ func TestUpdateUserProfileLeavesCredentialsAlone(t *testing.T) {
 	if got.PasswordHash != "reset-hash" || !got.MustChangePassword {
 		t.Fatalf("stale profile write restored credentials: hash=%q must_change=%v", got.PasswordHash, got.MustChangePassword)
 	}
-	if err := st.Users().UpdateUserProfile(ctx, &store.User{ID: "missing"}); !errors.Is(err, store.ErrNotFound) {
+	if err := st.Users().UpdateUserProfile(ctx, &store.User{ID: "missing"}, "", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing user: %v", err)
 	}
 }
