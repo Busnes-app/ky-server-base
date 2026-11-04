@@ -164,22 +164,6 @@ func TestUpdateUserProfileIsACompareAndSwapOnPrivileges(t *testing.T) {
 	}
 }
 
-func TestRecordDirectoryEventNeverMovesBack(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(t)
-	for _, tc := range []struct{ record, want int64 }{{100, 100}, {99, 100}, {101, 101}, {101, 101}} {
-		if err := st.Users().RecordDirectoryEvent(ctx, "kysignon", "sub-1", tc.record); err != nil {
-			t.Fatal(err)
-		}
-		if got, err := st.Users().LastDirectoryEvent(ctx, "kysignon", "sub-1"); err != nil || got != tc.want {
-			t.Fatalf("after %d: got %d %v, want %d", tc.record, got, err, tc.want)
-		}
-	}
-	if got, _ := st.Users().LastDirectoryEvent(ctx, "kysignon", "sub-2"); got != 0 {
-		t.Fatalf("subjects are not independent: %d", got)
-	}
-}
-
 // Adoption and externalId corrections are compare-and-swaps on the subject read: a stale
 // adoption cannot link a row whose subject has since changed, a stale correction loses, and a
 // refused profile write changes no subject.

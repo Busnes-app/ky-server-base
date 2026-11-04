@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -69,7 +70,7 @@ type SSOConfig struct {
 	KySignOnIssuer      string `json:"kysignon_issuer"`
 	KySignOnClientID    string `json:"kysignon_client_id"`
 	KySignOnSecret      string `json:"kysignon_secret"`
-	KySignOnHMACSecret  string `json:"kysignon_hmac_secret"`
+	KySignOnHMACSecret  string `json:"kysignon_hmac_secret"` // Deprecated: accepted but ignored.
 	GenericOIDCIssuer   string `json:"generic_oidc_issuer"`
 	GenericOIDCClientID string `json:"generic_oidc_client_id"`
 	GenericOIDCSecret   string `json:"generic_oidc_secret"`
@@ -149,8 +150,8 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("KY_SESSION_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
 	}
 	kysignonHMAC := getEnv("KY_KYSIGNON_HMAC_SECRET", "")
-	if kysignonHMAC != "" && len(kysignonHMAC) < crypto.MinHMACKeyBytes {
-		return nil, fmt.Errorf("KY_KYSIGNON_HMAC_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
+	if kysignonHMAC != "" {
+		log.Print("WARNING: KY_KYSIGNON_HMAC_SECRET is deprecated and ignored; the KyIdentity directory webhook was removed. Configure the KyIdentity SCIM connector at /scim/v2 instead.")
 	}
 
 	encryptionKey, ok, err := keyfile.FromEnv("KY_ENCRYPTION_KEY", 32)

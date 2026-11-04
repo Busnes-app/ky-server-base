@@ -27,13 +27,12 @@ https changes which names are read, so a browser holding only the other names mu
 (sessions themselves are not revoked: returning to the earlier scheme within their lifetime
 reuses them); the upgrade that introduced the prefix signs every https browser out once. Sessions expire after seven days. SCIM uses a
 separate configured bearer token; it does not accept a login session as provisioning
-authority. The directory-sync webhook uses a signature instead of a login session.
+authority.
 
 For an unsafe method (anything except GET, HEAD or OPTIONS), sending a nonempty
 session cookie requires `X-CSRF-Token` to equal the CSRF cookie (`ky_csrf`, or
 `__Host-ky_csrf` with `__Host-` names). This also
-applies when an Authorization header is present alongside the cookie. Login and the
-signed directory-sync webhook are exempt. A bearer-only client
+applies when an Authorization header is present alongside the cookie. Login is exempt. A bearer-only client
 should omit session cookies. CSRF failure is 403 `{"error":"Invalid CSRF token"}`.
 Login instead refuses an unsafe request carrying `Sec-Fetch-Site: cross-site` or
 `same-site`, or an `Origin` that is neither the request's host nor `KY_APP_URL`
@@ -141,14 +140,13 @@ credential, MFA state or SSO subject. The Directory & SCIM screen uses it.
 ## Federation and directory synchronization
 
 Sources: [SSO handlers](../internal/api/sso_handlers.go),
-[KySignOn client and payload](../internal/sso/kysignon.go).
+[KyIdentity client](../internal/sso/kysignon.go).
 
 | Method and path | Input and authority | Successful output |
 |---|---|---|
 | GET `/api/sso/kysignon/login` | Browser; no body | 302 to provider authorization URL; five-minute HttpOnly PKCE/nonce cookies |
 | GET `/api/sso/kysignon/callback` | Provider query `code`, `state`; matching PKCE/nonce cookies | 302 to `/` and session/CSRF cookies |
 | POST `/api/sso/kysignon/backchannel-logout` | Provider server; form body `logout_token` (≤16 KiB) | 200, `Cache-Control: no-store`; 400 `{"error":"invalid_request"}` for any token that fails verification |
-| POST `/api/sso/kysignon/sync` | Signed raw JSON body and `X-KySignOn-Signature` (fallback `X-Signature-SHA256`) | 200 `{"synced":true}` |
 | GET `/saml/metadata` | Anonymous; no body | 200 XML service-provider metadata |
 
 The callback verifies provider tokens, PKCE and nonce. Invalid state/nonce is 400;
@@ -185,24 +183,22 @@ anonymous by design: the signature is its authority, and no session cookie means
 CSRF check applies. Register `<KY_APP_URL>/api/sso/kysignon/backchannel-logout` as the
 client's back-channel logout URI in KyIdentity.
 
-The sync signature is the lowercase hex HMAC-SHA256 of the exact request bytes
-under `KY_KYSIGNON_HMAC_SECRET`, without a `sha256=` prefix. JSON fields are `event`,
-`id` (provider subject), `username`, `email`, `display_name`, `role`, `status` and
-`timestamp` (Unix seconds within five minutes in either direction). Supported
-events are `user.created`, `user.updated`, `user.deactivated` and `user.deleted`.
-Events are ordered per subject: one whose `timestamp` is older than the newest event
-already applied for that `id` is acknowledged (200) and dropped, so a replayed or late
-event cannot undo a newer change; an equal timestamp is applied. A failed event (non-200)
-still counts, so the sender must retry it: the retry has the same `timestamp` and is
-applied, while older events for that `id` are dropped meanwhile. An event without `id` returns 401.
-A create/update for a subject with no KyIdentity account first adopts the
-SCIM-provisioned account whose `externalId` is that subject, as sign-in does, instead
-of creating a second account. Create/update defaults an empty role to `user` and status to
-`active`; privilege or status changes revoke sessions in the same transaction.
-Deactivation sets `inactive` and revokes sessions; deletion removes the matching
-provider user. Unknown events currently return
-`synced:true` without changing a user. An unconfigured HMAC secret, invalid signature,
-bad timestamp or processing error returns 401; an unreadable body returns 400.
+The incompatible KyIdentity directory webhook `/api/sso/kysignon/sync` is removed.
+For directory synchronization, enable `KY_SCIM_ENABLED=true`, set a strong
+`KY_SCIM_TOKEN`, and configure KyIdentity's existing **SCIM** connector (system type
+`scim`) with base URL `<KY_APP_URL>/scim/v2` and the same bearer token. Disable
+the old webhook connector in KyIdentity; it cannot synchronize this server.
+`KY_KYSIGNON_HMAC_SECRET` and its stored configuration field remain accepted but
+are ignored; a nonempty environment setting produces a startup migration warning
+without logging its value. Remove it after migrating. Existing stored webhook-ordering
+data is retained and unused. OIDC sign-in and back-channel logout are unchanged.
+
+**Before upgrading**, register this application in KyIdentity and assign its explicit
+per-app `admin` role to each application administrator. A present `roles: []` means
+ordinary user even alongside an IdP-wide `role: "admin"`; it never falls back to the
+global role. Only tokens with no `roles` claim retain the legacy mapping described
+above. Keep SCIM admin-role mappings specific to this app if
+`KY_SCIM_ALLOW_ADMIN=true`; directory provisioning is separate from the sign-in grant.
 
 ## SCIM 2.0
 
@@ -222,14 +218,16 @@ an account that is already an admin can still be updated, deactivated or demoted
 `userName` that another account holds in any letter case is 409 `uniqueness`.
 `POST /Users` for someone who already signed in through KyIdentity takes that account
 over instead: when `externalId` equals the subject of a KyIdentity account SCIM does not
-manage yet, or, when no KyIdentity account has that subject, when `userName` names one, the account
+manage yet, or, only when `externalId` is absent or empty, when `userName` names one, the account
 becomes SCIM-managed and the create's attributes are applied as a PUT would (an omitted
 `roles` keeps the role, and keeping an existing admin's role is no grant); the answer is
 201 with the existing `id`, audited as `scim.user.adopt`. The account keeps its KyIdentity
 subject and sign-in. Claim and attributes are written in one statement, so a take-over
 that is refused (a taken `userName`, or the account changed meanwhile: 409) changes
 nothing. An `externalId` whose KyIdentity account SCIM already manages is 409. Local
-accounts are never taken over.
+accounts are never taken over. A nonempty `externalId` that differs from the
+username-matched account's KyIdentity subject returns 409 `uniqueness` and changes
+nothing; the immutable identity wins over a reused username.
 
 | Method and path | Input | Output |
 |---|---|---|
@@ -421,7 +419,7 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
 | `KY_KYSIGNON_CLIENT_ID` | Empty | Registered KySignOn client ID |
 | `KY_KYSIGNON_SECRET` | Empty | Registered client secret |
-| `KY_KYSIGNON_HMAC_SECRET` | Empty | Directory-sync webhook HMAC secret; absent means sync refusal; nonempty values below 16 bytes fail startup and use |
+| `KY_KYSIGNON_HMAC_SECRET` | Empty | Deprecated, accepted and ignored; a nonempty value logs a startup warning to migrate KyIdentity to the SCIM connector |
 | `KY_SSO_AUTO_PROVISION` | `true` | Allow a validated KySignOn login to create a local user |
 | `KY_OIDC_ISSUER`, `KY_OIDC_CLIENT_ID`, `KY_OIDC_SECRET` | Empty | Generic OIDC helper configuration; no public login/callback routes are wired |
 | `KY_SAML_ENTITY_ID`, `KY_SAML_METADATA_URL` | Empty | SAML helper configuration; only local metadata output is wired |

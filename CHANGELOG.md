@@ -34,10 +34,16 @@ These are human summaries, not a raw version-control log.
   account out everywhere else and is audited as `sso.role_changed`. Before, sign-in never
   changed the role, so an admin demoted in KyIdentity stayed admin here unless the signed
   directory webhook was configured.
+- The incompatible KyIdentity directory webhook is removed. Directory synchronization
+  now uses the existing KyIdentity SCIM connector at `/scim/v2`; the old HMAC-secret
+  setting remains accepted and ignored with a startup migration warning.
 - SCIM `POST /Users` for someone who already signed in through KyIdentity takes that
   account over (201 with its existing id) instead of creating a second account (when
   `externalId` was the KyIdentity subject) or answering 409 forever (when only the
-  `userName` matched). Local accounts are never taken over.
+  `userName` matched without an externalId). A nonempty externalId that differs from
+  the username-matched account's KyIdentity subject now returns 409 without changing
+  that account, preventing adoption of another person after username reuse.
+  Local accounts are never taken over.
 - With an https `KY_APP_URL`, the session, CSRF and KyIdentity sign-in cookies are
   `__Host-` cookies (`__Host-ky_session`,
   `__Host-ky_csrf`), so a page on another host under the same domain can no longer plant
@@ -54,7 +60,13 @@ These are human summaries, not a raw version-control log.
 
 ### Upgrade impact
 
-- No migration. Restart onto the new image.
+- No database migration. Complete the KyIdentity connector and administrator setup
+  below before restarting onto the new image.
+- Replace any legacy KyIdentity directory webhook connector with system type `scim`,
+  base URL `<KY_APP_URL>/scim/v2`, and the bearer token configured by `KY_SCIM_TOKEN`;
+  enable `KY_SCIM_ENABLED=true` here. Disable the old connector. The removed
+  `/api/sso/kysignon/sync` endpoint cannot apply updates. Remove
+  `KY_KYSIGNON_HMAC_SECRET` after migration; leaving it set is accepted with a warning.
 - With an https `KY_APP_URL`, everyone is signed out once by the upgrade and signs in
   again. Scripts that read the `ky_session` or
   `ky_csrf` cookie by name on https must use the `__Host-` names.
@@ -63,13 +75,16 @@ These are human summaries, not a raw version-control log.
   it: `__Host-` cookies must be Secure and take no domain. Remove them from `.env` before
   upgrading an https install.
 - KyIdentity: on the next sign-in, accounts take the role KyIdentity sends for this app.
-  KyIdentity always sends this app's `roles`, so before upgrading make sure the app is
-  registered in KyIdentity with an `admin` role assigned to every admin who signs in
-  through it, or they become users here at their next sign-in. Local accounts (`init-admin`)
-  are unaffected and stay a way back in.
+  KyIdentity always sends this app's `roles`: before upgrading, register the app in
+  KyIdentity and assign its explicit per-app `admin` role to every administrator
+  who signs in through it, or they become users here at their next sign-in. Local accounts (`init-admin`)
+  are unaffected and stay a way back in. A present empty `roles: []` always means
+  ordinary user, even if a legacy global `role: "admin"` is also present.
 - SCIM: an IdP that creates a user who already signed in through KyIdentity now gets that
   account (201) and manages it from then on: matched by `externalId` = KyIdentity subject,
-  else by `userName`. An `externalId` already managed under another name is 409.
+  else by `userName` only without a nonempty `externalId`. An authoritative ID
+  mismatch now returns 409; resolve the identity conflict instead of adopting the row.
+  An `externalId` already managed under another name is 409.
 - A SQLite install whose `KY_DB_DSN` is a `scheme://` URL now refuses to start; it was
   never writing to the data volume. Before upgrading such an install, find its database
   (`docker compose exec app ls -R /app`: a directory named after the URL), then stop the

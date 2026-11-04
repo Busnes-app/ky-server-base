@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"bytes"
+	"log"
 	"os"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestConfigLoadDefaults(t *testing.T) {
 
 func TestConfigRefusesShortHMACSecrets(t *testing.T) {
 	t.Setenv("KY_DATA_DIR", t.TempDir())
-	for _, name := range []string{"KY_SESSION_SECRET", "KY_KYSIGNON_HMAC_SECRET"} {
+	for _, name := range []string{"KY_SESSION_SECRET"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, strings.Repeat("x", 15))
 			if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), name) {
@@ -212,5 +213,25 @@ func TestHostCookiesOnHTTPS(t *testing.T) {
 		if refused := err != nil && strings.Contains(err.Error(), "KY_COOKIE_DOMAIN"); refused != tc.refuse {
 			t.Errorf("KY_APP_URL=%s KY_COOKIE_SECURE=%q with KY_COOKIE_DOMAIN: err %v, want refused=%v", tc.url, tc.secure, err, tc.refuse)
 		}
+	}
+}
+
+func TestRetiredKyIdentityHMACSettingIsAcceptedWithWarning(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	for _, secret := range []string{"x", strings.Repeat("private-value", 4)} {
+		t.Run(secret[:1], func(t *testing.T) {
+			t.Setenv("KY_KYSIGNON_HMAC_SECRET", secret)
+			var logs bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(previous)
+			cfg, err := config.LoadFromEnv()
+			if err != nil || cfg.SSO.KySignOnHMACSecret != secret {
+				t.Fatalf("legacy setting rejected: %v", err)
+			}
+			if !strings.Contains(logs.String(), "deprecated and ignored") || !strings.Contains(logs.String(), "/scim/v2") || strings.Contains(logs.String(), secret) {
+				t.Fatalf("missing migration warning or leaked secret: %q", logs.String())
+			}
+		})
 	}
 }

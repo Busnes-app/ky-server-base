@@ -14,7 +14,7 @@ import (
 
 // SCIM creating someone who already signed in through KyIdentity takes that account over
 // (201 with its id) instead of a permanent 409: by externalId = KyIdentity subject first,
-// by userName when no account has that externalId. Local accounts still get 409, a refused
+// by userName only without externalId. Local accounts still get 409, a refused
 // take-over changes nothing, and the take-over cannot grant admin.
 func TestSCIMCreateTakesOverTheKyIdentityAccount(t *testing.T) {
 	st, do := scopedSCIM(t, false)
@@ -70,9 +70,16 @@ func TestSCIMCreateTakesOverTheKyIdentityAccount(t *testing.T) {
 	if u := managed("usr_bob"); !u.SCIMManaged || u.Role != "admin" {
 		t.Fatalf("userName take-over row: %+v", u)
 	}
-	// An unmatched externalId falls back to userName (owner decision Q13 B).
-	if code, id := create(map[string]any{"userName": "cat", "externalId": "sub-other"}); code != http.StatusCreated || id != "usr_cat" || managed("usr_cat").SSOSubject != "sub-cat" {
-		t.Fatalf("userName take-over with another externalId: %d %q", code, id)
+	// A reused username cannot join two different KyIdentity people (Q19 B).
+	if code, _ := create(map[string]any{"userName": "cat", "externalId": "sub-other", "displayName": "Wrong person", "active": false}); code != http.StatusConflict {
+		t.Fatalf("mismatched authoritative externalId: %d, want 409", code)
+	}
+	if u := managed("usr_cat"); u.SCIMManaged || u.SSOSubject != "sub-cat" || u.DisplayName != "" || u.Status != "active" || u.Role != "user" {
+		t.Fatalf("refused adoption changed the original account: %+v", u)
+	}
+	// An explicit matching ID and username still takes over the same row.
+	if code, id := create(map[string]any{"userName": "cat", "externalId": "sub-cat"}); code != http.StatusCreated || id != "usr_cat" {
+		t.Fatalf("matching authoritative externalId: %d %q", code, id)
 	}
 	// The externalId of an account SCIM already manages, under a new name: 409, no second account.
 	if code, _ := create(map[string]any{"userName": "ann.other", "externalId": "sub-ann"}); code != http.StatusConflict {
@@ -82,9 +89,11 @@ func TestSCIMCreateTakesOverTheKyIdentityAccount(t *testing.T) {
 	if code, _ := create(map[string]any{"userName": "dan", "externalId": "sub-eve"}); code != http.StatusConflict || managed("usr_eve").SCIMManaged || managed("usr_eve").Username != "eve" {
 		t.Fatalf("refused take-over: %d %+v", code, managed("usr_eve"))
 	}
-	// Local accounts are never taken over.
-	if code, _ := create(map[string]any{"userName": "dan"}); code != http.StatusConflict || managed("usr_dan").SCIMManaged {
-		t.Fatalf("local account: %d", code)
+	// Local accounts are never taken over, with or without an externalId.
+	for _, externalID := range []string{"", "sub-dan"} {
+		if code, _ := create(map[string]any{"userName": "dan", "externalId": externalID}); code != http.StatusConflict || managed("usr_dan").SCIMManaged || managed("usr_dan").SSOProvider != "local" {
+			t.Fatalf("local account: %d", code)
+		}
 	}
 	// The take-over cannot grant admin with KY_SCIM_ALLOW_ADMIN off, and changes nothing.
 	if code, _ := create(map[string]any{"userName": "eve", "externalId": "sub-eve", "roles": []any{map[string]any{"value": "admin"}}}); code != http.StatusBadRequest || managed("usr_eve").SCIMManaged {

@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -148,31 +147,6 @@ func (s *Server) adoptSCIMUser(r *http.Request, subject string) (*store.User, er
 		_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.scim_account_linked", Resource: user.Username, IPAddress: s.requestIP(r)})
 	}
 	return user, err
-}
-
-func (s *Server) handleKySignOnSyncWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	sig := r.Header.Get("X-KySignOn-Signature")
-	if sig == "" {
-		sig = r.Header.Get("X-Signature-SHA256")
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-
-	if err := s.kysignon.HandleSyncWebhook(r.Context(), body, sig); err != nil {
-		s.writeError(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]bool{"synced": true})
 }
 
 // ssoLogoutFence outlives the 5-minute login callback window, so a logout that lands

@@ -142,7 +142,7 @@ func (h *userResourceHandler) Create(r *http.Request, attrs protocol.ResourceAtt
 
 // kyIdentityAccount finds the account KyIdentity sign-in created for the person a create
 // names: by externalId = KyIdentity subject first, else by userName when that account is not
-// SCIM's yet. nil when there is none. An externalId whose account SCIM already manages is a
+// SCIM's yet and no externalId was supplied. nil when there is none. An externalId whose account SCIM already manages is a
 // uniqueness conflict, never a second account.
 func (h *userResourceHandler) kyIdentityAccount(r *http.Request, subject, username string) (*store.User, error) {
 	if subject != "" {
@@ -165,6 +165,9 @@ func (h *userResourceHandler) kyIdentityAccount(r *http.Request, subject, userna
 		return nil, err
 	}
 	if existing.SSOProvider == "kysignon" && !existing.SCIMManaged {
+		if subject != "" && subject != existing.SSOSubject {
+			return nil, protocolErrors.ScimErrorUniqueness
+		}
 		return existing, nil
 	}
 	return nil, nil
