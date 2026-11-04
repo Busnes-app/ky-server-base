@@ -147,8 +147,14 @@ whose `externalId` equals the subject: that row becomes a KyIdentity row (so
 back-channel logout reaches it) and stays SCIM-managed, audited as
 `sso.scim_account_linked`. Otherwise an unprovisioned account is 403 when automatic
 provisioning is off, and a username that another account already holds (in any letter
-case) is 409 naming it. A disabled account is 403. Automatic provisioning creates role
-`user`; sign-in does not itself grant administration. The scaffold constructs generic OIDC and SAML helpers, but registers
+case) is 409 naming it. A disabled account is 403. The role follows KyIdentity on every
+sign-in: `admin` in the ID token's per-app `roles` array means `admin`, any other `roles`
+value means `user`; a token without `roles` uses the legacy IdP-wide `role` (`admin` or
+`user`), and a token with neither leaves the stored role unchanged (automatic provisioning
+then creates `user`). A malformed `roles` claim fails the sign-in (401). A role change
+revokes the account's other sessions in the same transaction and is audited as
+`sso.role_changed`; a concurrent change to the account is 409 (sign in again). Only
+KyIdentity rows are reached, so local accounts never change. The scaffold constructs generic OIDC and SAML helpers, but registers
 no generic OIDC login/callback or SAML assertion-consumer handler. In particular,
 the `/saml/acs` URL named in the metadata is not an implemented login route here.
 

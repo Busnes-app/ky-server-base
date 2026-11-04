@@ -71,6 +71,7 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	mappedRole, roleSent := claims.LocalRole()
 	user, err := s.store.Users().GetUserBySSO(r.Context(), "kysignon", claims.Subject)
 	if errors.Is(err, store.ErrNotFound) {
 		user, err = s.adoptSCIMUser(r, claims.Subject)
@@ -80,12 +81,16 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 			s.writeError(w, http.StatusForbidden, "User account not provisioned")
 			return
 		}
+		role := "user"
+		if roleSent {
+			role = mappedRole
+		}
 		user = &store.User{
 			ID:          fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
 			Username:    claims.PreferredUsername,
 			Email:       claims.Email,
 			DisplayName: claims.Name,
-			Role:        "user",
+			Role:        role,
 			Status:      "active",
 			SSOProvider: "kysignon",
 			SSOSubject:  claims.Subject,
@@ -103,6 +108,20 @@ func (s *Server) handleKySignOnCallback(w http.ResponseWriter, r *http.Request) 
 	if user.Status != "active" {
 		s.writeError(w, http.StatusForbidden, "Account is disabled")
 		return
+	}
+	// The role follows KyIdentity on every sign-in; the change revokes the user's other
+	// sessions in the same transaction. A token without role claims leaves it alone.
+	if roleSent && user.Role != mappedRole {
+		prevRole := user.Role
+		user.Role = mappedRole
+		if err := s.store.Users().UpdateUserProfile(r.Context(), user, prevRole, user.Status); errors.Is(err, store.ErrConflict) {
+			s.writeError(w, http.StatusConflict, "Your account changed while you were signing in. Sign in again.")
+			return
+		} else if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "Failed to update the account role")
+			return
+		}
+		_ = s.store.Audit().LogAudit(r.Context(), &store.AuditRecord{UserID: user.ID, Action: "sso.role_changed", Resource: user.Username, Details: fmt.Sprintf("from=%s to=%s", prevRole, mappedRole), IPAddress: s.requestIP(r)})
 	}
 
 	_, _, err = s.sessions.IssueSSOSession(r.Context(), w, r, user, claims.SessionID, claims.IssuedAt)
