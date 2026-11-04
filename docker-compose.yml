@@ -58,7 +58,9 @@ services:
     # KY_SSO_AUTO_PROVISION, and KY_TRUSTED_PROXIES set to the reverse proxy container's own
     # address when one fronts this service, e.g. KY_TRUSTED_PROXIES=172.18.0.2/32 (never a
     # whole bridge range like 172.16.0.0/12, which trusts every other container; 0.0.0.0/0
-    # and ::/0 are refused). The entries above win over .env; an overlay's env_file wins over it.
+    # and ::/0 are refused). The entries above win over .env (KY_DB_DRIVER=sqlite included:
+    # PostgreSQL needs this file or an overlay changed, not just .env); an overlay's env_file
+    # wins over it.
     # The optional form needs Compose 2.24.0 or later.
     env_file:
       - path: .env
