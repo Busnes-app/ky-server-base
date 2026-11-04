@@ -177,8 +177,11 @@ restored one at first open, mixing two databases.
 
 ```bash
 docker compose down
-ls -A data | wc -l
+sudo ls -A data | wc -l
 ```
+
+(`data/` is root-owned, mode 0700 after an earlier restore, so list it as root: an unprivileged
+`ls` there prints `0` for a full directory.)
 
 That must print `0`. If it does not, the old directory still holds data, and you keep a copy
 of it before anything else: it holds every change made after the capsule was sealed, and it
@@ -197,8 +200,8 @@ old live directory in the clear, with the same key the capsule holds; it is remo
 Only with the copy confirmed, empty the directory. This is irreversible:
 
 ```bash
-sudo rm -rf data/* data/.[!.]*
-ls -A data | wc -l
+sudo sh -c 'rm -rf data/* data/.[!.]*'
+sudo ls -A data | wc -l
 ```
 
 With `0` confirmed, copy the restored files in. Before the server starts, delete the

@@ -188,7 +188,7 @@ func LoadFromEnv() (*Config, error) {
 	https := strings.HasPrefix(strings.ToLower(appURL), "https://")
 	// On https the cookies are __Host- cookies, which browsers accept only Secure.
 	if https && !cookieSecure {
-		return nil, errors.New("KY_COOKIE_SECURE=false: not allowed with an https KY_APP_URL, whose cookies are __Host- cookies and must be Secure; remove KY_COOKIE_SECURE")
+		return nil, errors.New("KY_COOKIE_SECURE is false or empty: not allowed with an https KY_APP_URL, whose cookies are __Host- cookies and must be Secure; remove KY_COOKIE_SECURE")
 	}
 	if https && cookieDomain != "" {
 		return nil, errors.New("KY_COOKIE_DOMAIN: not allowed with an https KY_APP_URL: there the cookies are __Host- cookies, which browsers refuse with a Domain, so that no other host under that domain can set them; leave KY_COOKIE_DOMAIN empty")

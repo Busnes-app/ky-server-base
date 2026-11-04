@@ -71,11 +71,12 @@ These are human summaries, not a raw version-control log.
   account (201) and manages it from then on: matched by `externalId` = KyIdentity subject,
   else by `userName`. An `externalId` already managed under another name is 409.
 - A SQLite install whose `KY_DB_DSN` is a `scheme://` URL now refuses to start; it was
-  never writing to the data volume. Before upgrading such an install, copy its database out
-  of the running container: it sits under a directory named after the URL in `/app`
-  (`docker compose exec app ls -R /app`), and `docker compose cp` copies it. To keep that
-  data, stop the server, put the file at `data/ky_server.db` (keep the old one aside) and
-  remove `KY_DB_DSN` from `.env`; there is no SQLite-to-PostgreSQL import. For PostgreSQL,
+  never writing to the data volume. Before upgrading such an install, find its database
+  (`docker compose exec app ls -R /app`: a directory named after the URL), then stop the
+  container without removing it (`docker compose stop app`; a clean close folds the
+  write-ahead log into the file) and copy the file out with `docker compose cp`. To keep
+  that data, put it at `data/ky_server.db` in an otherwise empty `data/` (keep the old
+  files aside) and remove `KY_DB_DSN` from `.env`; there is no SQLite-to-PostgreSQL import. For PostgreSQL,
   set `KY_DB_DRIVER=postgres` in the compose file or an overlay.
 
 ## Maintaining notes

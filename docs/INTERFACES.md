@@ -23,8 +23,9 @@ Secure) every cookie this server sets and reads carries the `__Host-` prefix
 `__Host-ky_pkce_<state>`/`__Host-ky_nonce_<state>`, all `Path=/` without `Domain`), so
 another host under the same domain cannot plant one; the bare names are ignored there.
 A plain-HTTP `KY_APP_URL` keeps the bare names. Changing `KY_APP_URL` between http and
-https changes the names, so browsers sign in again; the upgrade that introduced the prefix
-signs every https browser out once. Sessions expire after seven days. SCIM uses a
+https changes which names are read, so a browser holding only the other names must sign in
+(sessions themselves are not revoked: returning to the earlier scheme within their lifetime
+reuses them); the upgrade that introduced the prefix signs every https browser out once. Sessions expire after seven days. SCIM uses a
 separate configured bearer token; it does not accept a login session as provisioning
 authority. The directory-sync webhook uses a signature instead of a login session.
 
