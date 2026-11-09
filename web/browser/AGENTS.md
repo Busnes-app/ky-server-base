@@ -17,7 +17,7 @@ This directory owns test setup, disposable server launch and UI assertions. The 
 
 ## Work Guidance
 
-Prefer browser-native behavior and assertions over screenshot-only checks. A passing suite covers these workflows, not every page or a complete accessibility audit.
+Prefer browser-native behavior and assertions over screenshot-only checks. `ui.spec.mjs` covers current suite palettes and the product-owned legacy palette choices, including their native radio order and keyboard selection. A passing suite covers these workflows, not every page or a complete accessibility audit.
 
 ## Verification
 

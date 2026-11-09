@@ -12,6 +12,7 @@ import './ky-ui/tokens.css';
 import './ky-ui/navigation.css';
 import './ky-ui/appearance.css';
 import './ky-ui/appearance-themes.css';
+import './styles/legacy-themes.css';
 import { secureFetch } from './api';
 
 export const App: React.FC = () => {

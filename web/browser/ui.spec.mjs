@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { THEME_CATALOG } from '../src/ky-ui/themes.js';
+import { LEGACY_THEMES } from '../src/legacyThemes.ts';
 
 // Relative luminance of a computed colour: rgb() channels are 0-255, color(srgb …) 0-1.
 const luminance = color => {
@@ -49,7 +50,7 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   const theme = (p, id) => p.getByRole('group', { name: 'Theme' }).locator(`input[value="${id}"]`);
   await openAppearance(page);
   await theme(page, 'paper').check();
-  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 250, 252)');
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(236, 239, 244)');
   await theme(page, 'busnes-dark').check();
   await page.reload();
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(24, 35, 38)');
@@ -77,12 +78,12 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   // Appearance: native radio cards for every catalog theme, chosen by keyboard.
   await nav.getByRole('button', { name: 'Appearance' }).click();
   const picker = page.getByRole('group', { name: 'Theme' });
-  await expect(picker.getByRole('radio')).toHaveCount(THEME_CATALOG.length + 1);
+  await expect(picker.getByRole('radio')).toHaveCount(THEME_CATALOG.length + LEGACY_THEMES.length + 1);
   await expect(picker.getByRole('radio', { name: /Match system/ })).toBeChecked();
-  await picker.getByRole('radio', { name: /Coffee/ }).check();
+  await picker.getByRole('radio', { name: /Forest Light/ }).check();
   await page.keyboard.press('ArrowLeft');
-  await expect(picker.getByRole('radio', { name: /Ocean/ })).toBeChecked();
-  await expect(picker.getByRole('radio', { name: /Ocean/ })).toBeFocused();
+  await expect(picker.getByRole('radio', { name: /Ocean Dark/ })).toBeChecked();
+  await expect(picker.getByRole('radio', { name: /Ocean Dark/ })).toBeFocused();
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(15, 27, 36)');
   await fits(page);
   // A new light named theme has no product CSS block: hover, selection and focus must

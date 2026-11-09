@@ -1,0 +1,12 @@
+/* Preview values for the product-owned legacy palettes in legacyThemes.ts. */
+[data-ky-preview="tropics"] { --ky-preview-bg: #f4f1eb; --ky-preview-sidebar: #ece5d8; --ky-preview-ink: #241a14; --ky-preview-accent: #9bc400; }
+[data-ky-preview="tropic-night"] { --ky-preview-bg: #15131a; --ky-preview-sidebar: #1d1a24; --ky-preview-ink: #e8ddf5; --ky-preview-accent: #9bc400; }
+[data-ky-preview="coffee"] { --ky-preview-bg: #1d1714; --ky-preview-sidebar: #231a16; --ky-preview-ink: #f0ded2; --ky-preview-accent: #b47f5c; }
+[data-ky-preview="cyber-punk"] { --ky-preview-bg: #120918; --ky-preview-sidebar: #1b0d24; --ky-preview-ink: #ffe9ff; --ky-preview-accent: #00f5d4; }
+[data-ky-preview="neon-purple"] { --ky-preview-bg: #130b1d; --ky-preview-sidebar: #1b1029; --ky-preview-ink: #f2e6ff; --ky-preview-accent: #c86cff; }
+[data-ky-preview="space"] { --ky-preview-bg: #0b0f1a; --ky-preview-sidebar: #0f1625; --ky-preview-ink: #e7efff; --ky-preview-accent: #86a8ff; }
+[data-ky-preview="sky"] { --ky-preview-bg: #dff1ff; --ky-preview-sidebar: #d3ecfa; --ky-preview-ink: #183142; --ky-preview-accent: #6db3d6; }
+[data-ky-preview="sun"] { --ky-preview-bg: #fff3dc; --ky-preview-sidebar: #f8e7c5; --ky-preview-ink: #392611; --ky-preview-accent: #e0ab4f; }
+[data-ky-preview="patina"] { --ky-preview-bg: #0d0f14; --ky-preview-sidebar: #161a22; --ky-preview-ink: #f1f5f9; --ky-preview-accent: #4deeea; }
+[data-ky-preview="cyber"] { --ky-preview-bg: #05070a; --ky-preview-sidebar: #0d121d; --ky-preview-ink: #eef6f5; --ky-preview-accent: #00d9bd; }
+[data-ky-preview="oled"] { --ky-preview-bg: #000000; --ky-preview-sidebar: #111111; --ky-preview-ink: #fafafa; --ky-preview-accent: #4deeea; }
