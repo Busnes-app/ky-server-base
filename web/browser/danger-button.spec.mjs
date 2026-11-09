@@ -5,8 +5,8 @@ import { THEME_CATALOG } from '../src/ky-ui/themes.js';
 // diagnostic adds one labelled button to the real signed-in page, under the real CSS and CSP, and
 // measures its rendered label on its fill (screenshot pixels: hover opacity and focus included)
 // for every suite palette.
-const LEGACY = ['patina', 'cyber', 'nord', 'paper', 'oled'];
-const SUITE = THEME_CATALOG.filter(t => !t.id.startsWith('busnes-') && !LEGACY.includes(t.id)).map(t => t.id);
+const BASE_THEMES = ['nord', 'paper'];
+const SUITE = THEME_CATALOG.filter(t => !t.id.startsWith('busnes-') && !BASE_THEMES.includes(t.id)).map(t => t.id);
 
 // Fill = the most common pixel; label = the pixel that contrasts most with it. The clip stays
 // inside the rounded corners, so the page behind the button is never sampled.
@@ -73,9 +73,9 @@ test('diagnostic: a filled danger button label reads on its fill in every suite 
     }
     console.log(testInfo.project.name, JSON.stringify(results));
     expect(results.filter(r => Math.min(r.rest, r.hover, r.focus) < 4.5)).toEqual([]);
-    // Busnes and the five original base palettes keep their own label colour (polled: the
+    // Busnes and the Nord pair keep their own label colour (polled: the
     // button's colour transition settles after the switch).
-    for (const id of ['busnes-light', 'busnes-dark', ...LEGACY]) {
+    for (const id of ['busnes-light', 'busnes-dark', ...BASE_THEMES]) {
       await choose(id);
       await expect.poll(() => button.evaluate(el => {
         const probe = document.body.appendChild(document.createElement('i'));

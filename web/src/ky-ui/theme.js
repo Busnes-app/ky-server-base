@@ -9,11 +9,12 @@ export function readChoice(key) {
 export function saveChoice(key, value) {
   try { globalThis.localStorage.setItem(key, value); } catch { /* Choice still applies in memory. */ }
 }
-export function watchChoice(key, apply, hasChoice) {
+// Every OS scheme change re-applies, since a saved pair follows the OS; apply must be idempotent.
+export function watchChoice(key, apply) {
   const target = globalThis.window ?? globalThis;
   const storage = event => { if (event.key === key || event.key === null) apply(); };
   const media = target.matchMedia?.('(prefers-color-scheme: dark)');
-  const change = () => { if (!hasChoice()) apply(); };
+  const change = () => apply();
   target.addEventListener?.('storage', storage);
   media?.addEventListener('change', change);
   return () => {
@@ -51,7 +52,8 @@ export function readStoredTheme(storage) {
   return normalizeTheme(value);
 }
 
-export function applyTheme(choice = readStoredTheme(), options = {}) {
+export function applyTheme(choice, options = {}) {
+  if (choice === undefined) choice = readStoredTheme(options.storage);
   const document = options.document ?? globalThis.document;
   if (!document?.documentElement) return "system";
 
@@ -62,7 +64,8 @@ export function applyTheme(choice = readStoredTheme(), options = {}) {
 
   if (normalized === "system") delete document.documentElement.dataset.kyTheme;
   else document.documentElement.dataset.kyTheme = resolved;
-  document.documentElement.style.colorScheme = resolved === "busnes-dark" ? "dark" : "light";
+  // System leaves color-scheme to tokens.css, which follows later OS changes too.
+  document.documentElement.style.colorScheme = normalized === "system" ? "" : resolved === "busnes-dark" ? "dark" : "light";
   if (options.persist !== false && typeof storage?.setItem === "function") {
     try {
       storage.setItem(THEME_STORAGE_KEY, normalized);

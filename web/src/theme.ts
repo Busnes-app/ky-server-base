@@ -31,4 +31,4 @@ export function applyTheme(theme: string, persist = false) {
   listeners.forEach(listener => listener());
 }
 applyTheme(current);
-watchChoice('ky_theme', () => applyTheme(storedTheme()), () => current !== 'system');
+watchChoice('ky_theme', () => applyTheme(storedTheme()));

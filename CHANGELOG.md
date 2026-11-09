@@ -26,7 +26,54 @@ development before the first image is summarized with that initial distribution.
 These are human summaries, not a raw version-control log.
 
 ## Current source
+
 ### Changes
+
+- Refresh the complete ky-ui source copy and manifest from 0.4.3 to 0.11.0 at
+  `801879cda3117ae84442043c6b02b3aeb5202d0f`, restoring the suite's exact-byte
+  freshness check. Shared fixes include navigation focus/scrolling, readable muted
+  text and theme storage handling. Rebuild the committed browser bundle.
+- Adopt the current shared theme catalog. Retired choices fall back to Busnes
+  following the operating system; aliases retained upstream resolve normally.
+  Appearance lists only current catalog entries and Match system.
+
+### Upgrade impact
+
+- Rebuild and restart the server to serve the new embedded assets. No database or
+  configuration migration is added by this change. Supported saved choices and
+  aliases follow the upstream catalog. Removed palette IDs now use Busnes following
+  the OS; choose another current theme in Appearance if desired.
+- Authentication, directory, cookie and database upgrade requirements from the
+  preceding source revision still apply; see the archived source summary below.
+  No new known vulnerability identifiers apply to this asset refresh.
+
+## Maintaining notes
+
+Before merging a change to `master`, replace Current source with its major changes
+and upgrade impact. Include restart/rebuild requirements, schema/configuration or
+format migrations, deprecated behavior and any known vulnerability/advisory IDs.
+Say explicitly when no migration is needed. Archive the previous Current source
+summary under its known full commit after it has shipped; keep existing history.
+For an upgrade across several revisions, read each intervening summary.
+
+`make notes-check` runs three standard-library tests and compares the current
+summary with `HEAD^`. CI fetches two commits: on a pull request the first parent
+of the tested merge is the target branch; on a master push it is the preceding
+commit. For local review against the target, also run
+`python3 scripts/check-release-notes.py --base origin/master` (fetch it first).
+An invalid/missing base fails; a base without this file permits initial adoption.
+The gate requires nonempty change/upgrade bullets and rejects an unchanged
+Current source section even if the archive changes. It checks presence/freshness,
+**not factual accuracy or completeness**; reviewers still verify the prose against
+the actual change. The required Go job gates publish, and publish gates promotion.
+
+## Historical image publications
+
+### Source summary at 1d88179
+
+Source: [1d8817928307c7c476db7608b124c7be80e5721f](https://github.com/Busnes-app/ky-server-base/commit/1d8817928307c7c476db7608b124c7be80e5721f).
+
+#### Changes
 
 - KyIdentity sign-in applies the role KyIdentity sends, every time: `admin` in the ID
   token's per-app `roles` makes the account an admin here, any other `roles` makes it a
@@ -58,7 +105,7 @@ These are human summaries, not a raw version-control log.
 - SCIM: a PATCH that removes `externalId` now unlinks it (it answered 200 and kept it),
   and concurrent PATCHes of different attributes of one user no longer undo each other.
 
-### Upgrade impact
+#### Upgrade impact
 
 - No database migration. Complete the KyIdentity connector and administrator setup
   below before restarting onto the new image.
@@ -94,27 +141,6 @@ These are human summaries, not a raw version-control log.
   files aside) and remove `KY_DB_DSN` from `.env`; there is no SQLite-to-PostgreSQL import. For PostgreSQL,
   set `KY_DB_DRIVER=postgres` in the compose file or an overlay.
 
-## Maintaining notes
-
-Before merging a change to `master`, replace Current source with its major changes
-and upgrade impact. Include restart/rebuild requirements, schema/configuration or
-format migrations, deprecated behavior and any known vulnerability/advisory IDs.
-Say explicitly when no migration is needed. Archive the previous Current source
-summary under its known full commit after it has shipped; keep existing history.
-For an upgrade across several revisions, read each intervening summary.
-
-`make notes-check` runs three standard-library tests and compares the current
-summary with `HEAD^`. CI fetches two commits: on a pull request the first parent
-of the tested merge is the target branch; on a master push it is the preceding
-commit. For local review against the target, also run
-`python3 scripts/check-release-notes.py --base origin/master` (fetch it first).
-An invalid/missing base fails; a base without this file permits initial adoption.
-The gate requires nonempty change/upgrade bullets and rejects an unchanged
-Current source section even if the archive changes. It checks presence/freshness,
-**not factual accuracy or completeness**; reviewers still verify the prose against
-the actual change. The required Go job gates publish, and publish gates promotion.
-
-## Historical image publications
 
 ### 2026-11-04 — ab2c472
 
