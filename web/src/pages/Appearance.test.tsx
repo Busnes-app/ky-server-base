@@ -2,54 +2,47 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Appearance } from './Appearance';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
-import { THEME_OPTIONS } from '../theme';
-import { LEGACY_THEMES } from '../legacyThemes';
+import { THEME_CATALOG } from '../ky-ui/themes';
 
 const root = document.documentElement;
+const retired = ['tropics', 'tropic-night', 'coffee', 'cyber-punk', 'neon-purple', 'space', 'sky', 'sun', 'cyber', 'oled'];
 
 describe('Appearance', () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
-    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
+    fireEvent(window, new StorageEvent('storage', { key: 'ky_theme' }));
   });
 
-  it('lists every suite theme as a native radio card, keeping a saved legacy choice', () => {
+  it('lists the current suite catalog and keeps a saved current choice', () => {
     localStorage.setItem('ky_theme', 'paper');
-    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
+    fireEvent(window, new StorageEvent('storage', { key: 'ky_theme' }));
     render(<Appearance />);
-    const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(THEME_OPTIONS.length);
+    expect(screen.getAllByRole('radio')).toHaveLength(THEME_CATALOG.length + 1);
     expect(screen.getByRole('group', { name: 'Theme' })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Nord Light/ })).toHaveProperty('checked', true);
     expect(screen.getByRole('radio', { name: /Match system/ })).toHaveProperty('checked', false);
     expect(document.querySelector('[data-ky-preview="ocean"]')).not.toBeNull();
   });
 
-  it.each(LEGACY_THEMES)('keeps the retired $id palette and its saved aliases', theme => {
-    for (const choice of [theme.id, theme.name, ...theme.aliases]) {
-      localStorage.setItem('ky_theme', choice);
-      window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
-      expect(root.dataset.theme).toBe(theme.id);
-      expect(root.style.getPropertyValue('--bg')).toBe(theme.palette.bg);
-      expect(root.style.getPropertyValue('--ink-strong')).toBe(theme.palette.inkStrong);
-      expect(root.style.colorScheme).toBe(theme.scheme);
-    }
-    localStorage.setItem('ky_theme', 'busnes-light');
-    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
+  it.each(retired)('falls back to system Busnes for the retired %s choice', id => {
+    render(<Appearance />);
+    fireEvent.click(screen.getByRole('radio', { name: /Ocean Dark/ }));
+    localStorage.setItem('ky_theme', id);
+    fireEvent(window, new StorageEvent('storage', { key: 'ky_theme' }));
+    expect(screen.getByRole('radio', { name: /Match system/ })).toHaveProperty('checked', true);
+    expect(root.dataset.theme).toBe('busnes-light');
     expect(root.style.getPropertyValue('--bg')).toBe('');
     expect(root.style.getPropertyValue('--ink-strong')).toBe('');
+    expect(document.querySelector(`input[value="${id}"]`)).toBeNull();
   });
 
-  it('keeps the base Patina palette for a saved patina choice, distinct from suite Patina Ky', () => {
+  it('uses aliases retained in the current catalog', () => {
     localStorage.setItem('ky_theme', 'patina');
-    window.dispatchEvent(new StorageEvent('storage', { key: 'ky_theme' }));
+    fireEvent(window, new StorageEvent('storage', { key: 'ky_theme' }));
     render(<Appearance />);
-    expect(screen.getByRole('radio', { name: /Patina Ky \(base\)/ })).toHaveProperty('checked', true);
-    expect(root.style.getPropertyValue('--ink-strong')).toBe('#f1f5f9');
-    expect(root.style.getPropertyValue('--panel-hover')).toBe('#1c222c');
-    fireEvent.click(document.querySelector('input[value="patina-ky"]')!);
-    expect(localStorage.getItem('ky_theme')).toBe('patina-ky');
+    expect(screen.getByRole('radio', { name: /Ky Dark/ })).toHaveProperty('checked', true);
+    expect(root.dataset.theme).toBe('patina-ky');
     expect(root.style.getPropertyValue('--ink-strong')).toBe('#e2e8f0');
   });
 

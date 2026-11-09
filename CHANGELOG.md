@@ -33,15 +33,16 @@ These are human summaries, not a raw version-control log.
   `801879cda3117ae84442043c6b02b3aeb5202d0f`, restoring the suite's exact-byte
   freshness check. Shared fixes include navigation focus/scrolling, readable muted
   text and theme storage handling. Rebuild the committed browser bundle.
-- Keep all eleven palettes retired from the shared catalog in the product's
-  `legacyThemes.ts` adapter, with their existing saved IDs, names, aliases and
-  preview colors. Current suite themes use the upstream names and palette values.
+- Adopt the current shared theme catalog. Retired choices fall back to Busnes
+  following the operating system; aliases retained upstream resolve normally.
+  Appearance lists only current catalog entries and Match system.
 
 ### Upgrade impact
 
 - Rebuild and restart the server to serve the new embedded assets. No database or
-  configuration migration is added by this change. Saved browser choices remain
-  available; current shared theme labels follow the upstream catalog.
+  configuration migration is added by this change. Supported saved choices and
+  aliases follow the upstream catalog. Removed palette IDs now use Busnes following
+  the OS; choose another current theme in Appearance if desired.
 - Authentication, directory, cookie and database upgrade requirements from the
   preceding source revision still apply; see the archived source summary below.
   No new known vulnerability identifiers apply to this asset refresh.

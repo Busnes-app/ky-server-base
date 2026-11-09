@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import { THEME_CATALOG } from '../src/ky-ui/themes.js';
-import { LEGACY_THEMES } from '../src/legacyThemes.ts';
 
 // Relative luminance of a computed colour: rgb() channels are 0-255, color(srgb …) 0-1.
 const luminance = color => {
@@ -78,7 +77,19 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   // Appearance: native radio cards for every catalog theme, chosen by keyboard.
   await nav.getByRole('button', { name: 'Appearance' }).click();
   const picker = page.getByRole('group', { name: 'Theme' });
-  await expect(picker.getByRole('radio')).toHaveCount(THEME_CATALOG.length + LEGACY_THEMES.length + 1);
+  await expect(picker.getByRole('radio')).toHaveCount(THEME_CATALOG.length + 1);
+  // An old stored palette falls back on storage events and after reload, under either OS scheme.
+  await theme(page, 'ocean').check();
+  const retiredChoice = await context.newPage();
+  await retiredChoice.goto('/app-icon.png');
+  await retiredChoice.evaluate(() => localStorage.setItem('ky_theme', 'cyber'));
+  await expect(page.locator('html')).toHaveAttribute('data-theme', testInfo.project.use.colorScheme === 'dark' ? 'busnes-dark' : 'busnes-light');
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--bg'))).toBe('');
+  await retiredChoice.close();
+  await page.reload();
+  await openAppearance(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', testInfo.project.use.colorScheme === 'dark' ? 'busnes-dark' : 'busnes-light');
+  await expect(theme(page, 'cyber')).toHaveCount(0);
   await expect(picker.getByRole('radio', { name: /Match system/ })).toBeChecked();
   await picker.getByRole('radio', { name: /Forest Light/ }).check();
   await page.keyboard.press('ArrowLeft');
@@ -88,7 +99,7 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   await fits(page);
   // A new light named theme has no product CSS block: hover, selection and focus must
   // come from its own palette, not the dark base :root values.
-  await picker.getByRole('radio', { name: /^Sky Light$/ }).check();
+  await picker.getByRole('radio', { name: /^Ocean Light Light$/ }).check();
   const idle = nav.getByRole('button').first();
   await idle.hover();
   const hovered = await idle.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color]);
@@ -96,12 +107,12 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   expect(luminance(hovered[1])).toBeLessThan(0.2);
   const current = nav.locator('[aria-current="page"]');
   expect(luminance(await current.evaluate(el => getComputedStyle(el).backgroundColor))).toBeGreaterThan(0.5);
-  // Keyboard round trip so the radio has :focus-visible, ending back on Sky.
-  await picker.getByRole('radio', { name: /^Sky Light$/ }).focus();
+  // Keyboard round trip so the radio has :focus-visible, ending back on Ocean Light.
+  await picker.getByRole('radio', { name: /^Ocean Light Light$/ }).focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowLeft');
-  await expect(picker.getByRole('radio', { name: /^Sky Light$/ })).toBeChecked();
-  await expect(picker.locator('label', { hasText: 'Sky' })).toHaveCSS('outline-style', 'solid');
+  await expect(picker.getByRole('radio', { name: /^Ocean Light Light$/ })).toBeChecked();
+  await expect(picker.locator('label', { hasText: 'Ocean Light' })).toHaveCSS('outline-style', 'solid');
   await picker.getByRole('radio', { name: /^Busnes Light Light$/ }).check();
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 246, 240)');
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--panel-hover'))).toBe('');
@@ -110,7 +121,7 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   // New suite palettes must keep status text readable against both app surfaces.
   await nav.getByRole('button', { name: 'Appearance' }).click();
   const statusContrast = [];
-  for (const id of ['light-matter', 'tropics', 'white-cliffs', 'sun', 'polished-ky', 'sky']) {
+  for (const id of THEME_CATALOG.filter(theme => theme.scheme === 'light' && !theme.id.startsWith('busnes-')).map(theme => theme.id)) {
     await page.locator(`.ky-appearance-radio[value="${id}"]`).check();
     statusContrast.push(...await page.evaluate((theme) => {
       const root = document.documentElement;
@@ -134,7 +145,7 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   }
   await page.mouse.move(0, 0);
   await testInfo.attach('status-contrast', { body: JSON.stringify(statusContrast, null, 2), contentType: 'application/json' });
-  await page.screenshot({ path: testInfo.outputPath('sky-status-contrast.png'), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('current-theme-status-contrast.png'), fullPage: true });
   for (const row of statusContrast) expect(row.ratio, JSON.stringify(row)).toBeGreaterThanOrEqual(4.5);
   await page.evaluate(() => fetch('/browser-regression-uncached'));
   const cachedDynamic = await page.evaluate(async () => {
