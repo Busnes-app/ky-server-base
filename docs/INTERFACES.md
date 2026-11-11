@@ -344,7 +344,9 @@ metadata. It does not expose the sealed member list. A receipt has `capsule_id`,
 against the bytes sent. Timestamps are RFC 3339. Save the receipt for restore
 freshness checks. `receipt_unrecorded:true` on a 200 means the remote capsule was
 accepted but its local receipt was not recorded; reconcile before claiming a fully
-recorded backup. These shared formats are supplied by the pinned ky-primitives module.
+recorded backup. A deposit in flight when the server is told to stop answers 503: the
+snapshot or upload is cancelled, the interruption is audited, and the scheduled backup
+runs again after the restart. These shared formats are supplied by the pinned ky-primitives module.
 
 Status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
 `allow_private_recovery`, `database_driver` and `members` (payload names).
@@ -438,7 +440,9 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 Loading configuration can create the encryption-key file. The fixed read/write
 timeouts are 15 seconds, session lifetime seven days and database connection lifetime
 15 minutes; these are not environment options. Backup deposit extends its response
-write deadline to 16 minutes. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
+write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
+at most 10 more for interrupted backup work to record its outcome, so a 30-second stop
+grace period is enough. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
 stored schedule precedence, container DNS overrides and backup retention. Compose's
 `KY_IMAGE`, `KY_CONTAINER_IP`, `KY_NETWORK_SUBNET` and `KY_DNS` are deployment inputs,
 not additional environment-loader options in the binary.
