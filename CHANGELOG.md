@@ -38,6 +38,8 @@ These are human summaries, not a raw version-control log.
   of one interval later. An interrupted `POST /api/backup/deposit` answers 503. A backup
   that fails for any other reason is still retried once per interval.
 - `docker-compose.yml` lowers `stop_grace_period` from 20m to 30s.
+- Built with Go 1.27.4, which fixes an HTTP/1 server crash from a `MaxBytesReader` header
+  race in `net/http` (GO-2026-6859). The API server reaches the affected code.
 
 ### Upgrade impact
 
@@ -50,7 +52,7 @@ These are human summaries, not a raw version-control log.
   new capsule and records its receipt. The local backup directory only ever holds whole
   capsules.
 - Requirements from the preceding source revisions still apply; see the archived
-  summaries below. No new known vulnerability identifiers apply to this change.
+  summaries below. GO-2026-6859 is fixed by the Go 1.27.4 toolchain; rebuild to pick it up.
 
 ## Maintaining notes
 
