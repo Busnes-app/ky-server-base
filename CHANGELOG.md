@@ -29,30 +29,17 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Stopping the server takes seconds, not up to 17 minutes. On SIGTERM a backup in flight
-  is interrupted: the database snapshot and the upload to KyRecovery are cancelled, the
-  interruption is written to the audit log, and the server exits within 15 seconds (5 s
-  HTTP drain, then at most 10 s for the backup to record its outcome). Before, shutdown
-  waited for the deposit to finish.
-- An interrupted scheduled backup runs again about a minute after the next start instead
-  of one interval later. An interrupted `POST /api/backup/deposit` answers 503. A backup
-  that fails for any other reason is still retried once per interval.
-- `docker-compose.yml` lowers `stop_grace_period` from 20m to 30s.
-- Built with Go 1.27.4, which fixes an HTTP/1 server crash from a `MaxBytesReader` header
-  race in `net/http` (GO-2026-6859). The API server reaches the affected code.
+- `golang.org/x/crypto` goes from v0.58.0 to v0.59.0, clearing the OSV report GO-2026-5932
+  (the unmaintained `golang.org/x/crypto/openpgp` package) against the module. This server
+  only uses `argon2` from that module and never imports `openpgp`, so the advisory was not
+  reachable. The update also raises `golang.org/x/sync` to v0.25.0 and `golang.org/x/text`
+  to v0.44.0, which the new `x/crypto` requires.
 
 ### Upgrade impact
 
-- Rebuild and restart. No database or configuration migration is added. A deployment
-  that copied the old 20-minute `stop_grace_period` or a Kubernetes
-  `terminationGracePeriodSeconds` of about 1,200 can lower it to 30 seconds; the old
-  values keep working.
-- An upload cut off after KyRecovery stored the capsule but before this server read the
-  receipt leaves a complete capsule there with no receipt here. The next run deposits a
-  new capsule and records its receipt. The local backup directory only ever holds whole
-  capsules.
+- Rebuild and restart. No database or configuration migration is needed.
 - Requirements from the preceding source revisions still apply; see the archived
-  summaries below. GO-2026-6859 is fixed by the Go 1.27.4 toolchain; rebuild to pick it up.
+  summaries below.
 
 ## Maintaining notes
 
@@ -75,6 +62,37 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### Source summary at f4bfdbf
+
+Source: [f4bfdbffd97b4dafe3a870c099394470234969be](https://github.com/Busnes-app/ky-server-base/commit/f4bfdbffd97b4dafe3a870c099394470234969be).
+
+#### Changes
+
+- Stopping the server takes seconds, not up to 17 minutes. On SIGTERM a backup in flight
+  is interrupted: the database snapshot and the upload to KyRecovery are cancelled, the
+  interruption is written to the audit log, and the server exits within 15 seconds (5 s
+  HTTP drain, then at most 10 s for the backup to record its outcome). Before, shutdown
+  waited for the deposit to finish.
+- An interrupted scheduled backup runs again about a minute after the next start instead
+  of one interval later. An interrupted `POST /api/backup/deposit` answers 503. A backup
+  that fails for any other reason is still retried once per interval.
+- `docker-compose.yml` lowers `stop_grace_period` from 20m to 30s.
+- Built with Go 1.27.4, which fixes an HTTP/1 server crash from a `MaxBytesReader` header
+  race in `net/http` (GO-2026-6859). The API server reaches the affected code.
+
+#### Upgrade impact
+
+- Rebuild and restart. No database or configuration migration is added. A deployment
+  that copied the old 20-minute `stop_grace_period` or a Kubernetes
+  `terminationGracePeriodSeconds` of about 1,200 can lower it to 30 seconds; the old
+  values keep working.
+- An upload cut off after KyRecovery stored the capsule but before this server read the
+  receipt leaves a complete capsule there with no receipt here. The next run deposits a
+  new capsule and records its receipt. The local backup directory only ever holds whole
+  capsules.
+- Requirements from the preceding source revisions still apply; see the archived
+  summaries below. GO-2026-6859 is fixed by the Go 1.27.4 toolchain; rebuild to pick it up.
 
 ### Source summary at 7c3a89b
 
