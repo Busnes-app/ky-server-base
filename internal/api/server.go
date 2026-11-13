@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/netallow"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -39,6 +42,8 @@ type Server struct {
 	attemptsMu sync.Mutex
 	attempts   map[string]attemptWindow
 	powSpent   *auth.PoWSpent
+	// exempt is the office-network allowlist: environment plus admin setting.
+	exempt atomic.Pointer[netallow.List]
 	// detached counts the requests running on a context deliberately separated from their
 	// connection. http.Server.Shutdown does not know about them, so runServer waits on this
 	// before the store closes.
@@ -163,6 +168,7 @@ func NewServer(cfg *config.Config, st store.Store) *Server {
 	}
 
 	s.stopping, s.stopDetached = context.WithCancel(context.Background())
+	s.loadExemptNetworks()
 	s.routes()
 	return s
 }
@@ -228,6 +234,15 @@ func (s *Server) limiterIP(r *http.Request) string {
 	return auth.RateLimitKey(s.requestIP(r))
 }
 
+// perIPExempt reports whether the request comes from an allowlisted office network and so
+// skips per-IP limits. Only those: per-account windows, the CAPTCHA and every check after
+// them still run. It matches the address requestIP resolved, so a forged X-Forwarded-For
+// from an untrusted peer cannot claim an allowlisted address.
+func (s *Server) perIPExempt(r *http.Request) bool {
+	addr, err := netip.ParseAddr(s.requestIP(r))
+	return err == nil && s.exempt.Load().Exempt(addr)
+}
+
 func (s *Server) routes() {
 	// Auth
 	s.mux.HandleFunc("/api/auth/pow-challenge", s.handlePoWChallenge)
@@ -257,6 +272,8 @@ func (s *Server) routes() {
 	// Settings & Theme. The read endpoint tiers its own payload by role.
 	s.mux.HandleFunc("/api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("/api/settings/theme", s.requireAdmin(s.handleSetTheme))
+	s.mux.HandleFunc("GET /api/settings/rate-limit-networks", s.requireAdmin(s.handleGetExemptNetworks))
+	s.mux.HandleFunc("PUT /api/settings/rate-limit-networks", s.requireAdmin(s.handleSetExemptNetworks))
 
 	// Directory: the account list behind the Directory & SCIM screen. Read-only.
 	s.mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleListUsers))

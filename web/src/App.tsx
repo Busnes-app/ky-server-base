@@ -127,7 +127,7 @@ export const App: React.FC = () => {
         {activeTab === 'dashboard' && <Dashboard settings={settings} user={user} onNavigate={(tab) => setActiveTab(tab)} />}
         {activeTab === 'scim' && <SCIMAdmin />}
         {activeTab === 'backup' && <Backup />}
-        {activeTab === 'settings' && <Settings settings={settings} />}
+        {activeTab === 'settings' && <Settings settings={settings} isAdmin={user.role === 'admin'} />}
         {activeTab === 'appearance' && <Appearance />}
       </main>
     </div>

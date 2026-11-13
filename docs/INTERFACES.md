@@ -122,6 +122,8 @@ Source: [settings handlers](../internal/api/settings_handlers.go).
 |---|---|---|
 | GET `/api/settings` | Optional session; no body | 200 tiered settings object |
 | POST `/api/settings/theme` | Administrator; JSON `{"theme":"name"}`; cookie CSRF applies | 200 `{"theme":"name"}` |
+| GET `/api/settings/rate-limit-networks` | Administrator; no body | 200 `{networks, environment, exempted}`: the stored list, the `KY_RATE_LIMIT_EXEMPT_NETWORKS` list (both comma-separated, canonical) and the requests that skipped a per-address limit since the list last changed or the server started |
+| PUT `/api/settings/rate-limit-networks` | Administrator; JSON `{"networks":"203.0.113.0/24,2001:db8:1::/48"}` (empty clears); cookie CSRF applies | 200 as GET, with the list as stored; 400 with the reason for an invalid entry, a range broader than /16 (IPv4) or /48 (IPv6), loopback or more than 256 networks. Takes effect at once; audited as `admin.rate_limit_networks` |
 | GET `/api/admin/users` | Administrator; query `offset` (default 0), `limit` (default 50, at most 200), optional `search` (substring of username, display name or email) | 200 `{users, total, offset, limit}`, newest first |
 
 Public settings are `app_name`, `app_url`, `theme` (stored value or `patina`),
@@ -417,6 +419,7 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header. `false` with an https `KY_APP_URL` stops startup: its cookies are `__Host-` cookies, which must be Secure |
 | `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain, plain HTTP only: set with an https `KY_APP_URL` it stops the server, and every command that loads the configuration, at startup, because the cookies there are `__Host-` cookies, which take no domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
 | `KY_TRUSTED_PROXIES` | Empty | Comma-separated proxy IPs/CIDRs allowed to supply client forwarding headers; invalid entries and `/0` fail startup. Set it behind a reverse proxy, or every client counts as the proxy for sign-in limits; startup logs a warning when `KY_APP_URL` is https and this is empty |
+| `KY_RATE_LIMIT_EXEMPT_NETWORKS` | Empty | Comma-separated office networks (CIDR or single address) whose requests skip the per-address sign-in and password-change limits; per-account limits and the CAPTCHA still apply. Combined with the list an administrator saves under Settings. Ranges broader than /16 (IPv4) or /48 (IPv6), loopback and invalid entries fail startup. List only networks you control, never the reverse proxy, guest Wi-Fi or a VPN exit |
 | `KY_SSO_ENABLED` | `true` | Advertised SSO setting; does not by itself configure an identity provider |
 | `KY_KYSIGNON_ISSUER` | Empty | KySignOn OIDC issuer |
 | `KY_KYSIGNON_CLIENT_ID` | Empty | Registered KySignOn client ID |
