@@ -204,15 +204,6 @@ func (s *Server) makeRoom(now time.Time) {
 	}
 }
 
-// attemptsExhausted reports whether key has already used limit attempts in its live window,
-// without counting this call as one.
-func (s *Server) attemptsExhausted(key string, limit int) bool {
-	s.attemptsMu.Lock()
-	defer s.attemptsMu.Unlock()
-	entry, ok := s.attempts[key]
-	return ok && time.Now().Before(entry.reset) && entry.count >= limit
-}
-
 func bumpWindow(entry attemptWindow, now time.Time, window time.Duration) attemptWindow {
 	if now.After(entry.reset) {
 		entry = attemptWindow{reset: now.Add(window)}
@@ -234,13 +225,35 @@ func (s *Server) limiterIP(r *http.Request) string {
 	return auth.RateLimitKey(s.requestIP(r))
 }
 
-// perIPExempt reports whether the request comes from an allowlisted office network and so
-// skips per-IP limits. Only those: per-account windows, the CAPTCHA and every check after
-// them still run. It matches the address requestIP resolved, so a forged X-Forwarded-For
-// from an untrusted peer cannot claim an allowlisted address.
-func (s *Server) perIPExempt(r *http.Request) bool {
-	addr, err := netip.ParseAddr(s.requestIP(r))
-	return err == nil && s.exempt.Load().Exempt(addr)
+// officeBudget is what all allowlisted office networks together may spend each minute on one
+// per-IP limit before their requests fall back to that limit. It keeps one host inside an
+// office from making unbounded attempts, which would also churn live windows out of attempts.
+const officeBudget = 300
+
+// allowPerIP is allowAttempt for a limit keyed only on the client address. A request from an
+// allowlisted office network draws on the shared office budget instead, and on the ordinary
+// per-IP window once that is spent. Only per-IP limits come here: per-account windows, the
+// CAPTCHA and every later check run regardless. It matches the address requestIP resolved, so
+// a forged X-Forwarded-For from an untrusted peer cannot claim an allowlisted address.
+func (s *Server) allowPerIP(r *http.Request, bucket string, limit int, window time.Duration) bool {
+	ip := s.requestIP(r)
+	if addr, err := netip.ParseAddr(ip); err == nil && s.exempt.Load().Contains(addr) &&
+		s.allowAttempt(bucket+":office", officeBudget, time.Minute) {
+		s.exempt.Load().Exempt(addr) // counted only when the per-IP window was skipped
+		return true
+	}
+	return s.allowAttempt(bucket+":"+auth.RateLimitKey(ip), limit, window)
+}
+
+// releaseAttempt hands back one attempt allowAttempt counted, for a reservation that turned
+// out not to be a failure.
+func (s *Server) releaseAttempt(key string) {
+	s.attemptsMu.Lock()
+	defer s.attemptsMu.Unlock()
+	if entry, ok := s.attempts[key]; ok && entry.count > 0 {
+		entry.count--
+		s.attempts[key] = entry
+	}
 }
 
 func (s *Server) routes() {

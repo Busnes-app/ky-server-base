@@ -35,6 +35,12 @@ These are human summaries, not a raw version-control log.
   **Settings & DB → Office networks**, or the operator sets `KY_RATE_LIMIT_EXEMPT_NETWORKS`;
   the two lists are combined. Requests from a listed network skip those two per-address
   windows only. The per-account windows, the CAPTCHA and every later check still apply.
+- All listed networks together share 300 sign-ins and 300 password changes a minute past
+  the per-address windows; beyond that their requests meet the ordinary per-address
+  window again, so one host inside an office cannot make unbounded attempts.
+- Sign-in now reserves its place in the per-account window (10 failures per account and
+  client per 15 minutes) before the password is checked, and hands it back on success.
+  Concurrent guesses at one account can no longer all be checked before any is counted.
 - The list is empty by default. Ranges broader than /16 (IPv4) or /48 (IPv6), loopback and
   invalid entries are refused, at startup for the variable and with 400 for the setting.
   The match uses the client address resolved through `KY_TRUSTED_PROXIES`, so a forged

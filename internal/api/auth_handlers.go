@@ -47,7 +47,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := s.limiterIP(r)
-	if !s.perIPExempt(r) && !s.allowAttempt("login:"+client, 20, time.Minute) {
+	if !s.allowPerIP(r, "login", 20, time.Minute) {
 		s.writeError(w, http.StatusTooManyRequests, "Too many login attempts")
 		return
 	}
@@ -72,16 +72,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Checked before any password hashing. An exhausted window answers exactly like a wrong
+	// Reserved before any password hashing, so concurrent guesses cannot all slip past a
+	// window none of them has filled yet. An exhausted window answers exactly like a wrong
 	// password, for known and unknown names alike. The name is hashed so a key stays small.
 	accountKey := "login-account:" + crypto.SHA256Hex([]byte(strings.ToLower(req.Username)))[:32] + "|" + client
-	if s.attemptsExhausted(accountKey, loginAccountLimit) {
+	if !s.allowAttempt(accountKey, loginAccountLimit, loginAccountWindow) {
 		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	user, err := s.store.Users().GetUserByUsername(r.Context(), req.Username)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.releaseAttempt(accountKey)
 		s.writeError(w, http.StatusInternalServerError, "Authentication error")
 		return
 	}
@@ -93,10 +95,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// A disabled account answers like a wrong password, so the status cannot enumerate it.
 	if !ok || user.Status != "active" {
-		s.allowAttempt(accountKey, loginAccountLimit, loginAccountWindow)
 		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
+	s.releaseAttempt(accountKey) // only failures stay counted
 
 	// Issue active session
 	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user)

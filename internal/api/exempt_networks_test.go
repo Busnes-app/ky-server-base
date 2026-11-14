@@ -1,11 +1,14 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Busnes-app/ky-primitives/password"
@@ -225,5 +228,84 @@ func TestExemptNetworksRefuseBroadOrInvalidRanges(t *testing.T) {
 	}
 	if code := loginStatus(t, srv, "10.9.9.9:41000", ""); code != http.StatusTooManyRequests {
 		t.Fatalf("an address in a refused range answered %d, want 429", code)
+	}
+}
+
+// Offices share one budget per limit. Past it their requests meet the ordinary per-IP window,
+// so one host inside an office cannot make unbounded attempts or churn the limiter's keys.
+func TestOfficeBudgetFallsBackToThePerIPLimit(t *testing.T) {
+	t.Setenv("KY_RATE_LIMIT_EXEMPT_NETWORKS", officeRange)
+	srv, _, _ := setupTestServer(t)
+
+	for i := 1; i <= 320; i++ {
+		if code := loginStatus(t, srv, officePeer, ""); code == http.StatusTooManyRequests {
+			t.Fatalf("office attempt %d throttled, want the budget of 300 and then a window of 20", i)
+		}
+	}
+	if code := loginStatus(t, srv, officePeer, ""); code != http.StatusTooManyRequests {
+		t.Fatalf("office attempt 321 answered %d, want 429", code)
+	}
+	// Another office address has its own per-IP window once the budget is spent.
+	if code := loginStatus(t, srv, "203.0.113.77:41000", ""); code == http.StatusTooManyRequests {
+		t.Fatal("a second office address was throttled by the first one's window")
+	}
+}
+
+// countingUsers counts the account lookups that precede every password verification.
+type countingUsers struct {
+	store.UserStore
+	lookups *atomic.Int64
+}
+
+func (c countingUsers) GetUserByUsername(ctx context.Context, name string) (*store.User, error) {
+	c.lookups.Add(1)
+	return c.UserStore.GetUserByUsername(ctx, name)
+}
+
+type countingStore struct {
+	store.Store
+	lookups *atomic.Int64
+}
+
+func (c countingStore) Users() store.UserStore { return countingUsers{c.Store.Users(), c.lookups} }
+
+// Concurrent guesses at one account from an office reserve their place in the account window
+// before any hashing: no more than ten reach password verification, however they interleave.
+func TestConcurrentOfficeGuessesCannotOutrunTheAccountWindow(t *testing.T) {
+	t.Setenv("KY_RATE_LIMIT_EXEMPT_NETWORKS", officeRange)
+	srv, st, _ := setupTestServer(t)
+	var lookups atomic.Int64
+	api.SetStoreForTest(srv, countingStore{st, &lookups})
+
+	body, _ := json.Marshal(map[string]string{"username": "carol", "password": "WrongPass123!"})
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader(body))
+			req.RemoteAddr = officePeer
+			srv.ServeHTTP(httptest.NewRecorder(), req)
+		}()
+	}
+	wg.Wait()
+	if got := lookups.Load(); got != 10 {
+		t.Fatalf("%d guesses reached password verification, want exactly 10", got)
+	}
+}
+
+// A successful sign-in hands its reservation back: only failures count against the account.
+func TestSuccessfulSignInsDoNotFillTheAccountWindow(t *testing.T) {
+	srv, st, _ := setupTestServer(t)
+	hash, _ := password.Hash("SuperSecretPass123!")
+	if err := st.Users().CreateUser(context.Background(), &store.User{
+		ID: "usr_erin", Username: "erin", PasswordHash: hash, Role: "user", Status: "active", SSOProvider: "local",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 15; i++ {
+		if w := loginStatusFor(t, srv, "erin", "SuperSecretPass123!", officePeer); w.Code != http.StatusOK {
+			t.Fatalf("sign-in %d: %d %s", i, w.Code, w.Body.String())
+		}
 	}
 }
