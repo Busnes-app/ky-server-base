@@ -257,6 +257,7 @@ jobs:
           cache: true
 
       - run: shellcheck scripts/*.sh
+      - run: scripts/check-no-binaries.sh
       - run: go build -o ky_server_base ./cmd/server
       - run: scripts/smoke-test.sh
 

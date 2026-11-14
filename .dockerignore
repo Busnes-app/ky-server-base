@@ -17,6 +17,7 @@
 **/coverage.out
 **/node_modules
 /ky_server_base
+/server
 .claude/
 .codex/
 .superpowers/
