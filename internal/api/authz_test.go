@@ -140,6 +140,8 @@ func TestPrivilegedEndpointsRequireAdmin(t *testing.T) {
 		{"PUT", "/api/backup/schedule"},
 		{"GET", "/api/backup/status"},
 		{"POST", "/api/settings/theme"},
+		{"GET", "/api/settings/rate-limit-networks"},
+		{"PUT", "/api/settings/rate-limit-networks"},
 		{"GET", "/api/admin/users"},
 	}
 

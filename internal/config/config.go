@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Busnes-app/ky-primitives/keyfile"
+	"github.com/Busnes-app/ky-primitives/netallow"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
 )
 
@@ -62,6 +63,9 @@ type SecurityConfig struct {
 	// TrustedProxies is the parsed KY_TRUSTED_PROXIES allowlist. Only a request whose peer
 	// address falls inside it may speak for a client other than itself.
 	TrustedProxies []netip.Prefix `json:"-"`
+	// RateLimitExemptNetworks is KY_RATE_LIMIT_EXEMPT_NETWORKS in netallow's canonical form:
+	// office networks whose requests skip per-IP limits. The admin setting adds to it.
+	RateLimitExemptNetworks string `json:"-"`
 }
 
 // SSOConfig holds identity provider and federation parameters.
@@ -182,6 +186,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("KY_TRUSTED_PROXIES: %w", err)
 	}
+	exemptNetworks, err := netallow.Parse(getEnv("KY_RATE_LIMIT_EXEMPT_NETWORKS", ""))
+	if err != nil {
+		return nil, fmt.Errorf("KY_RATE_LIMIT_EXEMPT_NETWORKS: %w", err)
+	}
 
 	// An https app URL means a TLS-terminating proxy is in front: never send the session cookie in clear.
 	cookieSecure := getEnvBool("KY_COOKIE_SECURE", env == "production" || strings.HasPrefix(strings.ToLower(appURL), "https://"))
@@ -214,13 +222,14 @@ func LoadFromEnv() (*Config, error) {
 			ConnMaxLifetime: 15 * time.Minute,
 		},
 		Security: SecurityConfig{
-			SessionSecret:  sessionSecret,
-			EncryptionKey:  encryptionKey,
-			CookieSecure:   cookieSecure,
-			CookieDomain:   cookieDomain,
-			HostCookies:    https,
-			SessionTTL:     7 * 24 * time.Hour,
-			TrustedProxies: trustedProxies,
+			SessionSecret:           sessionSecret,
+			EncryptionKey:           encryptionKey,
+			CookieSecure:            cookieSecure,
+			CookieDomain:            cookieDomain,
+			HostCookies:             https,
+			SessionTTL:              7 * 24 * time.Hour,
+			TrustedProxies:          trustedProxies,
+			RateLimitExemptNetworks: exemptNetworks.String(),
 		},
 		SSO: SSOConfig{
 			Enabled:             getEnvBool("KY_SSO_ENABLED", true),

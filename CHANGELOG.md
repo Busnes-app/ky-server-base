@@ -29,15 +29,32 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- `golang.org/x/crypto` goes from v0.58.0 to v0.59.0, clearing the OSV report GO-2026-5932
-  (the unmaintained `golang.org/x/crypto/openpgp` package) against the module. This server
-  only uses `argon2` from that module and never imports `openpgp`, so the advisory was not
-  reachable. The update also raises `golang.org/x/sync` to v0.25.0 and `golang.org/x/text`
-  to v0.44.0, which the new `x/crypto` requires.
+- Office networks can skip the per-address sign-in limit. Staff behind one NAT address
+  share the 20-a-minute sign-in window (and the 10-a-minute password-change window) and
+  can trip it together. An administrator lists the office's networks under
+  **Settings & DB → Office networks**, or the operator sets `KY_RATE_LIMIT_EXEMPT_NETWORKS`;
+  the two lists are combined. Requests from a listed network skip those two per-address
+  windows only. The per-account windows, the CAPTCHA and every later check still apply.
+- All listed networks together share 300 sign-ins and 300 password changes a minute past
+  the per-address windows; beyond that their requests meet the ordinary per-address
+  window again, so one host inside an office cannot make unbounded attempts.
+- Sign-in now reserves its place in the per-account window (10 failures per account and
+  client per 15 minutes) before the password is checked, and hands it back on success.
+  Concurrent guesses at one account can no longer all be checked before any is counted.
+- The list is empty by default. Ranges broader than /16 (IPv4) or /48 (IPv6), loopback and
+  invalid entries are refused, at startup for the variable and with 400 for the setting.
+  The match uses the client address resolved through `KY_TRUSTED_PROXIES`, so a forged
+  `X-Forwarded-For` cannot claim a listed network. Changes are audited as
+  `admin.rate_limit_networks`, and the screen counts the requests that skipped the limit.
+- New admin routes GET and PUT `/api/settings/rate-limit-networks`.
+- `ky-primitives` moves to the revision that adds its `netallow` package.
 
 ### Upgrade impact
 
-- Rebuild and restart. No database or configuration migration is needed.
+- Rebuild and restart. No database or configuration migration is needed; with no network
+  listed, every limit behaves as before.
+- List only networks you control. Never list guest Wi-Fi, a VPN provider's exit or the
+  reverse proxy's own address: everyone behind a listed address loses the per-address limit.
 - Requirements from the preceding source revisions still apply; see the archived
   summaries below.
 
@@ -62,6 +79,24 @@ Current source section even if the archive changes. It checks presence/freshness
 the actual change. The required Go job gates publish, and publish gates promotion.
 
 ## Historical image publications
+
+### Source summary at c94c07b
+
+Source: [c94c07b9a040967a27213e8a311394e6b830d062](https://github.com/Busnes-app/ky-server-base/commit/c94c07b9a040967a27213e8a311394e6b830d062).
+
+#### Changes
+
+- `golang.org/x/crypto` goes from v0.58.0 to v0.59.0, clearing the OSV report GO-2026-5932
+  (the unmaintained `golang.org/x/crypto/openpgp` package) against the module. This server
+  only uses `argon2` from that module and never imports `openpgp`, so the advisory was not
+  reachable. The update also raises `golang.org/x/sync` to v0.25.0 and `golang.org/x/text`
+  to v0.44.0, which the new `x/crypto` requires.
+
+#### Upgrade impact
+
+- Rebuild and restart. No database or configuration migration is needed.
+- Requirements from the preceding source revisions still apply; see the archived
+  summaries below.
 
 ### Source summary at f4bfdbf
 

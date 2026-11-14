@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/Busnes-app/ky-primitives/netallow"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -39,6 +42,8 @@ type Server struct {
 	attemptsMu sync.Mutex
 	attempts   map[string]attemptWindow
 	powSpent   *auth.PoWSpent
+	// exempt is the office-network allowlist: environment plus admin setting.
+	exempt atomic.Pointer[netallow.List]
 	// detached counts the requests running on a context deliberately separated from their
 	// connection. http.Server.Shutdown does not know about them, so runServer waits on this
 	// before the store closes.
@@ -163,6 +168,7 @@ func NewServer(cfg *config.Config, st store.Store) *Server {
 	}
 
 	s.stopping, s.stopDetached = context.WithCancel(context.Background())
+	s.loadExemptNetworks()
 	s.routes()
 	return s
 }
@@ -198,15 +204,6 @@ func (s *Server) makeRoom(now time.Time) {
 	}
 }
 
-// attemptsExhausted reports whether key has already used limit attempts in its live window,
-// without counting this call as one.
-func (s *Server) attemptsExhausted(key string, limit int) bool {
-	s.attemptsMu.Lock()
-	defer s.attemptsMu.Unlock()
-	entry, ok := s.attempts[key]
-	return ok && time.Now().Before(entry.reset) && entry.count >= limit
-}
-
 func bumpWindow(entry attemptWindow, now time.Time, window time.Duration) attemptWindow {
 	if now.After(entry.reset) {
 		entry = attemptWindow{reset: now.Add(window)}
@@ -226,6 +223,37 @@ func (s *Server) requestIP(r *http.Request) string {
 // subscriber holds, so rotating addresses inside it buys no fresh windows.
 func (s *Server) limiterIP(r *http.Request) string {
 	return auth.RateLimitKey(s.requestIP(r))
+}
+
+// officeBudget is what all allowlisted office networks together may spend each minute on one
+// per-IP limit before their requests fall back to that limit. It keeps one host inside an
+// office from making unbounded attempts, which would also churn live windows out of attempts.
+const officeBudget = 300
+
+// allowPerIP is allowAttempt for a limit keyed only on the client address. A request from an
+// allowlisted office network draws on the shared office budget instead, and on the ordinary
+// per-IP window once that is spent. Only per-IP limits come here: per-account windows, the
+// CAPTCHA and every later check run regardless. It matches the address requestIP resolved, so
+// a forged X-Forwarded-For from an untrusted peer cannot claim an allowlisted address.
+func (s *Server) allowPerIP(r *http.Request, bucket string, limit int, window time.Duration) bool {
+	ip := s.requestIP(r)
+	if addr, err := netip.ParseAddr(ip); err == nil && s.exempt.Load().Contains(addr) &&
+		s.allowAttempt(bucket+":office", officeBudget, time.Minute) {
+		s.exempt.Load().Exempt(addr) // counted only when the per-IP window was skipped
+		return true
+	}
+	return s.allowAttempt(bucket+":"+auth.RateLimitKey(ip), limit, window)
+}
+
+// releaseAttempt hands back one attempt allowAttempt counted, for a reservation that turned
+// out not to be a failure.
+func (s *Server) releaseAttempt(key string) {
+	s.attemptsMu.Lock()
+	defer s.attemptsMu.Unlock()
+	if entry, ok := s.attempts[key]; ok && entry.count > 0 {
+		entry.count--
+		s.attempts[key] = entry
+	}
 }
 
 func (s *Server) routes() {
@@ -257,6 +285,8 @@ func (s *Server) routes() {
 	// Settings & Theme. The read endpoint tiers its own payload by role.
 	s.mux.HandleFunc("/api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("/api/settings/theme", s.requireAdmin(s.handleSetTheme))
+	s.mux.HandleFunc("GET /api/settings/rate-limit-networks", s.requireAdmin(s.handleGetExemptNetworks))
+	s.mux.HandleFunc("PUT /api/settings/rate-limit-networks", s.requireAdmin(s.handleSetExemptNetworks))
 
 	// Directory: the account list behind the Directory & SCIM screen. Read-only.
 	s.mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleListUsers))

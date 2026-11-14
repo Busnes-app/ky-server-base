@@ -12,8 +12,12 @@ test('phone navigation reveals the current row after an Overview action', async 
   const nav = page.getByRole('navigation', { name: 'Primary' });
   await expect(page.getByRole('heading', { name: /Welcome/ })).toBeVisible();
   // Test-only height (CSSOM, allowed by the CSP), so the page cannot clamp its scroll:
-  // any movement would come from the page change.
-  await page.locator('main').evaluate(el => el.style.setProperty('min-height', '400vh'));
+  // any movement would come from the page change. Scroll anchoring is off for the same
+  // reason: the Settings cards reach under the viewport and the browser would nudge to one.
+  await page.locator('main').evaluate(el => {
+    el.style.setProperty('min-height', '400vh');
+    el.style.setProperty('overflow-anchor', 'none');
+  });
   const action = page.getByRole('button', { name: 'Database Config' });
   await action.scrollIntoViewIfNeeded();
   await page.evaluate(() => scrollBy(0, 200));

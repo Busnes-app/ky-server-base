@@ -73,6 +73,17 @@ test('production CSP, worker, themes, keyboard and responsive shell', async ({ p
   await nav.getByRole('button', { name: 'Settings & DB' }).click();
   await expect(nav.getByRole('button', { name: 'Settings & DB' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'System Settings & Architecture' })).toBeVisible();
+  // Office networks: a too-broad range is refused by the server, a real one is stored canonically.
+  const networks = page.getByLabel('Networks that skip the per-address limit, one per line');
+  await expect(networks).toBeEnabled();
+  await networks.fill('10.0.0.0/8');
+  await page.getByRole('button', { name: 'Save networks' }).click();
+  await expect(page.getByRole('alert')).toContainText('too broad');
+  await networks.fill('203.0.113.9/24');
+  await page.getByRole('button', { name: 'Save networks' }).click();
+  await expect(page.getByRole('status')).toContainText('Saved');
+  await expect(networks).toHaveValue('203.0.113.0/24');
+  await page.screenshot({ path: testInfo.outputPath('office-networks.png'), fullPage: true });
   await fits(page);
   // Appearance: native radio cards for every catalog theme, chosen by keyboard.
   await nav.getByRole('button', { name: 'Appearance' }).click();

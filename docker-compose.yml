@@ -61,6 +61,8 @@ services:
     # and ::/0 are refused). The entries above win over .env (KY_DB_DRIVER=sqlite included:
     # PostgreSQL needs this file or an overlay changed, not just .env); an overlay's env_file
     # wins over it.
+    # KY_RATE_LIMIT_EXEMPT_NETWORKS lists office networks (e.g. 203.0.113.0/24) that skip the
+    # per-address sign-in limit; never the proxy's address, which would exempt everyone.
     # The optional form needs Compose 2.24.0 or later.
     env_file:
       - path: .env
