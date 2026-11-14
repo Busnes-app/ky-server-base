@@ -48,6 +48,9 @@ These are human summaries, not a raw version-control log.
   `admin.rate_limit_networks`, and the screen counts the requests that skipped the limit.
 - New admin routes GET and PUT `/api/settings/rate-limit-networks`.
 - `ky-primitives` moves to the revision that adds its `netallow` package.
+- CI fails when a compiled executable is tracked in the repository
+  (`scripts/check-no-binaries.sh`), and `/server`, where a bare `go build ./cmd/server`
+  writes, is ignored by git and Docker. No binary was found.
 
 ### Upgrade impact
 
