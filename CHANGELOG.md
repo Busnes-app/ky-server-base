@@ -51,6 +51,8 @@ These are human summaries, not a raw version-control log.
 - CI fails when a compiled executable is tracked in the repository
   (`scripts/check-no-binaries.sh`), and `/server`, where a bare `go build ./cmd/server`
   writes, is ignored by git and Docker. No binary was found.
+- CI and CodeQL skip draft pull requests and run when one is marked ready for review,
+  and every CI job has a time limit sized from its recent run times.
 
 ### Upgrade impact
 
