@@ -210,7 +210,7 @@ jobs:
     # Chromium and its system libraries come baked into the image, avoiding a
     # slow apt mirror. The tag must match @playwright/test in web/package-lock.json.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       # The runner's uid, which owns the checkout; as root, git refuses it and
       # go build cannot stamp VCS info.
       options: --user 1001
