@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Busnes-app/ky-primitives/netallow"
+	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
@@ -51,9 +52,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// By prefix, not by literal: the lib owns the token's key name, and a future
-		// spelling must not leak by default.
+		// spelling must not leak by default. The replica fingerprint is never shown either.
 		for k := range settings {
-			if strings.HasPrefix(k, "kyrecovery_token") {
+			if strings.HasPrefix(k, "kyrecovery_token") || k == config.ReplicaConfigSetting {
 				delete(settings, k)
 			}
 		}

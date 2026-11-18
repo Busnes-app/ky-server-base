@@ -37,6 +37,9 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "accept-replica-config":
+			runAcceptReplicaConfig()
+			return
 		case "init-admin":
 			runInitAdmin(os.Args[2:])
 			return
@@ -61,14 +64,18 @@ func main() {
 	runServer()
 }
 
+// readinessDrainDelay is how long a stopping server keeps serving with /readyz at 503: five
+// one-second proxy probes. Part of the shutdown budget below.
+const readinessDrainDelay = 5 * time.Second
+
 // shutdownTimeout drains in-flight HTTP requests. Backup work is cancelled before the drain
 // starts, so an interrupted deposit request can still answer inside it.
 const shutdownTimeout = 5 * time.Second
 
 // backupWaitTimeout bounds the wait for cancelled backup work to unwind. The snapshot and the
 // upload stop at once; what may still be running is the sealing and local copy of one capsule
-// already collected, and the database writes that record the outcome. The two timeouts
-// together must stay inside Kubernetes' default 30s termination grace and docker-compose.yml's
+// already collected, and the database writes that record the outcome. With the drain delay the
+// three must stay inside Kubernetes' default 30s termination grace and docker-compose.yml's
 // stop_grace_period; TestShutdownBudgetFitsTheGracePeriods holds them in step.
 const backupWaitTimeout = 10 * time.Second
 
@@ -97,6 +104,60 @@ func runServer() {
 	runConfiguredServer(cfg)
 }
 
+// bootstrap runs once per start under the shared "bootstrap" lock: the first admin on an empty
+// database, then the replica configuration check on PostgreSQL.
+func bootstrap(ctx context.Context, cfg *config.Config, st store.Store) error {
+	for {
+		won, err := st.Coordination().WithLock(ctx, "bootstrap", func(ctx context.Context) error {
+			if err := ensureBootstrapAdmin(ctx, st); err != nil {
+				return err
+			}
+			if st.Driver() != "postgres" {
+				return nil
+			}
+			return checkReplicaConfig(ctx, cfg, st.Settings())
+		})
+		if err != nil || won {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// ensureBootstrapAdmin creates the default admin if the database has no users.
+func ensureBootstrapAdmin(ctx context.Context, st store.Store) error {
+	count, err := st.Users().CountUsers(ctx)
+	if err != nil || count != 0 {
+		return err
+	}
+	adminPass := os.Getenv("KY_ADMIN_PASSWORD")
+	if adminPass == "" {
+		adminPass = crypto.RandomHex(12)
+		log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
+	}
+	hash, err := password.Hash(adminPass)
+	if err != nil {
+		return fmt.Errorf("hash bootstrap password: %w", err)
+	}
+	if err := st.Users().CreateUser(ctx, &store.User{
+		ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+		Username:           "admin",
+		DisplayName:        "Administrator",
+		PasswordHash:       hash,
+		Role:               "admin",
+		Status:             "active",
+		SSOProvider:        "local",
+		MustChangePassword: true,
+	}); err != nil {
+		return fmt.Errorf("create bootstrap admin: %w", err)
+	}
+	return nil
+}
+
 func runConfiguredServer(cfg *config.Config) {
 	if cfg.Backup.AllowPrivateRecovery {
 		log.Printf("[BACKUP] KY_BACKUP_ALLOW_PRIVATE_RECOVERY is on: RFC1918 and CGNAT destinations admitted; loopback, link-local and other reserved addresses remain refused (HTTPS still required)")
@@ -116,45 +177,8 @@ func runConfiguredServer(cfg *config.Config) {
 	}
 	defer st.Close()
 
-	for {
-		won, err := st.Coordination().WithLock(ctx, "bootstrap", func(ctx context.Context) error {
-			// Ensure default admin user exists if database is empty
-			count, err := st.Users().CountUsers(ctx)
-			if err != nil {
-				return err
-			}
-			if count == 0 {
-				adminPass := os.Getenv("KY_ADMIN_PASSWORD")
-				if adminPass == "" {
-					adminPass = crypto.RandomHex(12)
-					log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
-				}
-				hash, err := password.Hash(adminPass)
-				if err != nil {
-					return fmt.Errorf("hash bootstrap password: %w", err)
-				}
-				if err := st.Users().CreateUser(ctx, &store.User{
-					ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-					Username:           "admin",
-					DisplayName:        "Administrator",
-					PasswordHash:       hash,
-					Role:               "admin",
-					Status:             "active",
-					SSOProvider:        "local",
-					MustChangePassword: true,
-				}); err != nil {
-					return fmt.Errorf("create bootstrap admin: %w", err)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			log.Fatalf("Bootstrap failed: %v", err)
-		}
-		if won {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	if err := bootstrap(ctx, cfg, st); err != nil {
+		log.Fatalf("Bootstrap failed: %v", err)
 	}
 
 	srv := api.NewServer(cfg, st)
@@ -183,16 +207,25 @@ func runConfiguredServer(cfg *config.Config) {
 	}()
 
 	<-stop
-	log.Println("[KY-BASE] Shutting down gracefully...")
+	gracefulStop(srv, httpServer, stopBackups, cancel, backupDone, readinessDrainDelay)
+}
+
+// gracefulStop is the SIGTERM order: /readyz turns 503, backup work is cancelled, the server
+// keeps serving for drain so a proxy probing every second takes this replica out of rotation,
+// then the listener drains in-flight requests and the cancelled backup work unwinds.
+func gracefulStop(srv *api.Server, httpServer *http.Server, stopBackups, cancel func(), backupDone <-chan struct{}, drain time.Duration) {
+	srv.StartDraining()
+	log.Printf("[KY-BASE] draining: /readyz answers 503; serving %s more before closing the listener", drain)
 
 	// Backups first: a snapshot or upload in flight is aborted now and runs again after the
 	// restart, so the waits below take seconds whatever the backup was doing.
 	stopBackups()
 	srv.StopDetached()
+	time.Sleep(drain)
+	log.Println("[KY-BASE] Shutting down gracefully...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
-
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
