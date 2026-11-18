@@ -4,9 +4,9 @@
 
 Commands and unlinked file paths below are relative to the repository root.
 
-[Replica topology and database migration](REPLICAS.md) describes worker ownership and the
-SQLite-to-PostgreSQL cutover. PostgreSQL deployments need independent protected database
-backups and the retained encryption/recovery key files before cutover.
+[Replica topology and database migration](REPLICAS.md) describes worker ownership, the
+replica deployment and the SQLite-to-PostgreSQL cutover. Capsules cover both drivers; they
+back up the database's contents and do not make PostgreSQL highly available.
 
 ## Disaster recovery
 
@@ -17,17 +17,18 @@ ceremony) can reconstruct. Nothing on this server, and nothing on KyRecovery, ca
 The mechanics are `github.com/Busnes-app/ky-primitives/recoveryclient`; this repository
 supplies what it seals and how it checks a drill.
 
-**Capsules are SQLite-only today.** The snapshot is `VACUUM INTO` against the local database
-file; on `KY_DB_DRIVER=postgres` there is no snapshot and every backup refuses with "no
-consistent database snapshot for this driver". SQLite must be at `<KY_DATA_DIR>/ky_server.db`,
-the one path a capsule restores to; a `KY_DB_DSN` naming any other file refuses to seal, and
-the Backup page and the drill say so. A Postgres deployment must back its database up
-itself, with `pg_dump` on its own schedule and its own retention, and must protect that dump:
-it is the plaintext of everything a capsule would have sealed. Nothing travels in a capsule
-there, because no capsule is made. The recovery key pin, the pairing and the schedule live in
-the database and so ride in the `pg_dump`; `data/encryption.key` and `data/recovery.pub` do
-not, and you must copy them separately. Without `encryption.key` the KyRecovery token in that
-dump cannot be decrypted.
+**Both drivers seal the same capsule.** On SQLite the snapshot is `VACUUM INTO` against the
+local database file, which must be at `<KY_DATA_DIR>/ky_server.db`, the one path a capsule
+restores to; a `KY_DB_DSN` naming any other file refuses to seal, and the Backup page and the
+drill say so. On PostgreSQL every scaffold table is read in one `REPEATABLE READ READ ONLY`
+transaction, one point in time, and written into a SQLite file in a private (0700) scratch
+directory under `KY_DATA_DIR`, verified per table (row count and row digest), by
+`PRAGMA integrity_check` and `foreign_key_check`, sealed as the same `data/ky_server.db`
+member, and removed. A schema with tables, columns or a migration history the scaffold does
+not know refuses with HTTP 412 naming the product adapter it needs; nothing partial is sealed.
+The scheduled run holds three PostgreSQL connections at once (worker, backup run, snapshot),
+so `KY_DB_MAX_OPEN_CONNS` must be at least 4 there. Restoring a PostgreSQL capsule goes
+through `migrate-postgres` into an empty database: [RESTORE.md](RESTORE.md#restoring-a-postgresql-deployment).
 
 The admin screen **Backup & recovery** shows four facts (recovery key, KyRecovery, local
 copies, schedule) and the actions: Back up now, Download capsule, Run restore drill, the

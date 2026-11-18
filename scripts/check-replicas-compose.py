@@ -60,3 +60,9 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     assert json.loads(result.stdout)["networks"]["database"].get("internal") is True
     assert app["healthcheck"]["test"][-1].endswith("/readyz")
     print("PASS replicas:", " + ".join(chain_files))
+
+edge = compose(files, base_env | required | {"KY_EDGE_TRUSTED_PROXIES": "172.31.250.1/32"})
+assert edge.returncode == 0, edge.stderr
+trusted = json.loads(edge.stdout)["services"]["app"]["environment"]["KY_TRUSTED_PROXIES"]
+assert trusted == required["KY_PROXY_IP"] + "/32,172.31.250.1/32", trusted
+print("PASS replicas: KY_EDGE_TRUSTED_PROXIES extends only the trusted list")

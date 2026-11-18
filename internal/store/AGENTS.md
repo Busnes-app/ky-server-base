@@ -13,7 +13,16 @@ Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `
   probe failures cancel work and the physical connection is discarded on exit. SQLite uses
   persistent OS file locks next to its database. Session pooling is required for PostgreSQL.
 - PostgreSQL schema migration and username-index creation run under one lock. Pools need
-  at least three connections for worker, job ownership and queries.
+  at least `config.MinPostgresOpenConns` (4): worker lock, backup-run lock, the snapshot
+  transaction and one for queries and readiness (`TestSnapshotLeavesAConnectionAtThePoolFloor`).
+- `Store.SnapshotToSQLite` (PostgreSQL only) reads every `migrationTables` table in one
+  `REPEATABLE READ READ ONLY` transaction on one pooled connection, writes a fresh SQLite file
+  opened with `Open` (current scaffold schema), verifies per-table counts and row digests
+  against that transaction, then integrity and foreign keys, and leaves one self-contained
+  file. An unknown table/column, a missing table or a non-current migration history is
+  `ErrSnapshotSchema`; nothing partial is produced. It shares `copyTable`/`tableDigest`/
+  `migrationValues` with `MigrateToPostgres`; `migrationTables` is the single ordered list for
+  both directions.
 - `MigrateToPostgres` validates original migration history before upgrading a private snapshot,
   preflights destination rows before any DDL, refuses unknown source/target schemas and
   populated targets, copies all scaffold tables in one transaction, verifies counts/content,

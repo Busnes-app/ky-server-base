@@ -120,8 +120,8 @@ The validated local-data configuration uses SQLite. PostgreSQL remains supported
 for a remote PostgreSQL server use verified TLS (`sslmode=verify-full` with the
 correct CA/hostname), strong certificates and the process profile. Backend race
 tests use a disposable local database; they do not certify a live PostgreSQL TLS
-deployment. PostgreSQL backups remain the operator's protected `pg_dump` workflow,
-as documented in the README, rather than sealed SQLite snapshots.
+deployment. PostgreSQL deployments seal the same capsules as SQLite
+([Disaster recovery](DISASTER-RECOVERY.md#disaster-recovery)).
 
 This scaffold has no SMTP client or inbound SAML assertion route. SAML metadata
 does not add an assertion verifier. Generic OIDC is a library helper; the exposed

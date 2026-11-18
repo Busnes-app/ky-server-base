@@ -40,6 +40,6 @@ func migratePostgres(ctx context.Context, args []string, out io.Writer) error {
 	if err := json.NewEncoder(out).Encode(report); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(out, "Verified. SQLite and configuration were not changed. Keep existing encryption.key, recovery.pub and secrets. Configure PostgreSQL backups before cutover; capsule snapshots currently support SQLite only.")
+	_, err = fmt.Fprintln(out, "Verified. SQLite and configuration were not changed. Keep existing encryption.key, recovery.pub and secrets. After cutover, prove a PostgreSQL capsule with Back up now and the restore drill.")
 	return err
 }

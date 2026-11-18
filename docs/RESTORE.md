@@ -37,13 +37,13 @@ Everything a fresh server needs to be the old one:
 The restored directory is the live directory in the clear. Treat it like the running server's
 `data/`.
 
-**This procedure is for SQLite deployments.** A capsule carries `data/ky_server.db` because the
-collector snapshots SQLite with `VACUUM INTO`; on `KY_DB_DRIVER=postgres` no snapshot is
-possible, so no capsule is made at all and there is nothing here to restore from. Back a
-Postgres deployment up with `pg_dump` on its own schedule, guard that dump as the plaintext of
-everything above, and copy `data/encryption.key` and `data/recovery.pub` separately — the
-recovery key pin, the pairing and the schedule are rows in the database and come back with the
-dump, but nothing in it can be decrypted without `encryption.key`.
+Both drivers produce the same capsule. On SQLite the collector snapshots the file with
+`VACUUM INTO`; on PostgreSQL it copies every scaffold table from one read-only transaction into
+a SQLite file, so `data/ky_server.db` is a SQLite database either way and Steps 1 and 2 are the
+same. Steps 3 and 4 below put it back on SQLite; [Restoring a PostgreSQL deployment](#restoring-a-postgresql-deployment)
+moves it into an empty PostgreSQL database instead. A derived product with extra tables or
+columns gets no capsule until it ships its own adapter; the backup refuses rather than seal
+part of the database.
 
 ## Before you start
 
@@ -204,26 +204,25 @@ sudo sh -c 'rm -rf data/* data/.[!.]*'
 sudo ls -A data | wc -l
 ```
 
-With `0` confirmed, copy the restored files in. Before the server starts, delete the
-restored sessions: they are database rows, so every session cookie minted before the capsule,
-including one revoked or stolen since, would sign in again the moment the server listens.
-Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
+With `0` confirmed, copy the restored files in. `restore` has already deleted the restored
+sessions and said how many: they are database rows, so every session cookie minted before the
+capsule, including one revoked or stolen since, would otherwise sign in again the moment the
+server listens. Everyone signs in again. The files come out of Step 1 owned by you, but the shipped container
 runs as root and refuses an `encryption.key` it does not own, so hand them to root (or to the
 UID of a `user:` override, if you run one; on rootless Docker or Podman, where container root
 is your own UID, leave out the `chown`). The `chmod` comes first: `cp -a` gives `data/` the
 restored directory's mode 0700, so once root owns it your shell can no longer list
-`data/*`. Then start; the chain stops before the start if any step fails (install the
-`sqlite3` CLI first if the host lacks it):
+`data/*`. Then start; the chain stops before the start if any step fails:
 
 ```bash
 sudo cp -a restored/data/. data/ && sudo chmod 600 data/* && sudo chown -R 0:0 data \
-  && sudo sqlite3 data/ky_server.db 'DELETE FROM sessions;' \
   && docker compose up -d
 ```
 
-`restore` has already turned scheduled deposits off in the restored copy and said so: it may
+`restore` has also turned scheduled deposits off in the restored copy and said so: it may
 be a drill or a migration beside a server still in service, and two servers depositing under
-one pairing would alternate KyRecovery's newest capsule between two databases.
+one pairing would alternate KyRecovery's newest capsule between two databases. It removed the
+replica configuration record too, so a restored PostgreSQL deployment records its own.
 
 Keep `KY_APP_URL` and `KY_APP_NAME` identical to the old deployment, from
 `config/settings.json`: the app name is what every capsule is sealed under and what
@@ -237,8 +236,8 @@ one on a command line: it lands in scrollback, session recordings and shell hist
 must produce the hex form, write it straight into the compose project's `.env` with
 `umask 077` and nothing else on stdout.
 
-**Bare binary.** Run `sqlite3 restored/data/ky_server.db 'DELETE FROM sessions;'`, point
-`KY_DATA_DIR` at `restored/data`, set `KY_APP_URL` and `KY_APP_NAME` as before, and start.
+**Bare binary.** Point `KY_DATA_DIR` at `restored/data`, set `KY_APP_URL` and `KY_APP_NAME`
+as before, and start.
 
 ## Step 4: prove it
 
@@ -261,7 +260,7 @@ The restore proves the service works. It does not make the restored state curren
 Everything comes back as of the capsule's `created_at`: users, passwords, SCIM state,
 sessions. Anything you revoked or changed after that moment is undone.
 
-1. Sessions: Step 3 deleted the restored ones before the server started. There is no
+1. Sessions: `restore` deleted the restored ones before the server started. There is no
    per-user control in the UI and no global revoke. After hardware loss that is enough.
 2. Walk the old audit log in `old-data/ky_server.db` from `created_at` to the moment the old
    server was lost (the restored server's log stops at `created_at`), and re-apply what
@@ -285,6 +284,43 @@ sessions. Anything you revoked or changed after that moment is undone.
 
    Then confirm with a Back up now so the recovered server has a capsule that reflects the
    rotation.
+
+## Restoring a PostgreSQL deployment
+
+Only existing commands are used, and the old database is never written. Application replicas
+share one PostgreSQL; this restores its contents, it does not make PostgreSQL highly
+available.
+
+1. Stop every replica (`docker compose stop app`, or each host's service). Mixed old and
+   restored servers on one pairing would alternate KyRecovery's newest capsule.
+2. Run Steps 1 and 2 above into an **empty** directory: `restore -capsule <file> -to <dir>`
+   with the shares on stdin. It prints that scheduled deposits are off, how many sessions it
+   deleted and that the replica configuration record is gone.
+3. Provision an **empty** database or schema and keep its DSN in a mode-0600 file as
+   `KY_MIGRATE_POSTGRES_DSN`, never on a command line. Then check, and copy:
+
+   ```bash
+   docker compose run --rm --no-deps --env-from-file migration.env \
+     -v "$PWD/restored:/restored:ro" app migrate-postgres --source /restored/data/ky_server.db --check
+   docker compose run --rm --no-deps --env-from-file migration.env \
+     -v "$PWD/restored:/restored:ro" app migrate-postgres --source /restored/data/ky_server.db
+   ```
+
+   A target with any row in it is refused and left as it was.
+4. Install the restored `data/encryption.key` on every replica: as `KY_ENCRYPTION_KEY` (its
+   hex, written straight into each `.env` with `umask 077`, never echoed) or as each
+   replica's `data/encryption.key`. `recovery.pub` needs no copying: each replica writes it
+   from the pin in the database before its first backup, and refuses to start if a stale
+   file there names another key. Point `KY_DB_DSN` at the new database.
+5. Start **one** replica and verify as in Step 4: sign in, the recovery key ID, the drill,
+   the audit log. Then start the rest; each checks the shared configuration against the
+   record the first one wrote and refuses to start, naming the fields, if it differs.
+6. Only once these servers are the ones in service, turn the schedule back on in Backup &
+   recovery and click Back up now.
+
+Rollback: before the first write to the new database, point the replicas back at the
+previous DSN (the old database is untouched) and drop the scratch target. After the new
+database has accepted writes, going back would lose them; plan a reverse migration instead.
 
 ## Afterwards
 

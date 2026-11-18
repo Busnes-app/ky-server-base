@@ -18,7 +18,10 @@ services:
       - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:?Set KY_SCIM_TOKEN; every replica uses the same value}
       # 64 hex characters, retained: it decrypts the sealed settings every replica shares.
       - KY_ENCRYPTION_KEY=${KY_ENCRYPTION_KEY:?Set KY_ENCRYPTION_KEY to the retained 32-byte key in hex}
-      - KY_TRUSTED_PROXIES=${KY_PROXY_IP:?Set KY_PROXY_IP to the proxy address inside KY_REPLICA_SUBNET}/32
+      # HAProxy, plus the TLS proxy in front of it as HAProxy sees it (with the default loopback
+      # publish, the replicas network gateway) when KY_EDGE_TRUSTED_PROXIES is set; otherwise
+      # every client is counted as that edge address. Never a whole range or 0.0.0.0/0.
+      - KY_TRUSTED_PROXIES=${KY_PROXY_IP:?Set KY_PROXY_IP to the proxy address inside KY_REPLICA_SUBNET}/32${KY_EDGE_TRUSTED_PROXIES:+,${KY_EDGE_TRUSTED_PROXIES}}
     # Each container gets its own anonymous /app/data and /app/backups (the image's volumes):
     # replicas share no files. recovery.pub is rewritten from the database; local capsules
     # stay in the volume of the replica that sealed them (docker compose cp --index N).

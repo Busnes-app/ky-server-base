@@ -344,12 +344,37 @@ jobs:
           path: tested-image.tar.gz
           retention-days: 1
 
+  # docker-compose.replicas.yml against this commit's image: replicas killed, stopped and cut
+  # off from PostgreSQL through HAProxy, plus a real-binary PostgreSQL restore drill.
+  replicas:
+    name: Compose replicas and failover
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Replica overlay merges
+        run: python3 scripts/check-replicas-compose.py
+      - name: Build image
+        run: docker build -t ky_server_base:local .
+      - name: Failure tests
+        env:
+          KY_E2E_COMPOSE: "1"
+          KY_IMAGE: ky_server_base:local
+          PUSH_RELAY_URL: ""
+          APNS_RELAY_URL: ""
+        run: go test -count=1 -v -timeout 20m ./e2e
+
   # Publishes the image CI tested: only for pushes to master, only
   # after every job passed, and with no checkout and no build of its own, so
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, postgres, web, browser, security, smoke, docker, reuse]
+    needs: [go, postgres, web, browser, security, smoke, docker, replicas, reuse]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10

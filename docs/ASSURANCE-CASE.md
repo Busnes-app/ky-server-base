@@ -29,7 +29,8 @@ ties them together and points at the evidence. Paths are relative to the reposit
 | Signed-in ordinary user | Use their own session | Reach admin routes or other users' data |
 | Malicious web page in the user's browser | Make cross-site requests with the user's cookies | Act as the user (CSRF), inject script |
 | Forged identity provider or directory | Send tokens or provisioning requests | Sign in as someone, change roles |
-| Someone with the database file or a backup | Read the SQLite file or a `pg_dump` | Sessions, recovery tokens, retired TOTP secrets |
+| Someone with the database file or a backup | Read the SQLite file, a database dump or a restored capsule | Sessions, recovery tokens, retired TOTP secrets |
+| Someone who can write the shared database | Change rows every replica reads | Force replica refusals, change pins (they already control the data) |
 | Network attacker at KyRecovery pairing | Answer the pairing request | Substitute a recovery key whose shares they hold |
 
 Out of scope: an attacker who runs code on the host or holds both the database and
@@ -101,8 +102,10 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 - **SQLite rate limits/replay records are per process**; SQLite is restricted to one local
   server. PostgreSQL coordinates admission and CAPTCHA spending atomically across replicas;
   distributed source addresses still need edge admission controls.
-- **Postgres deployments have no sealed backup**; their `pg_dump` is plaintext and their own to
-  protect ([Disaster recovery](DISASTER-RECOVERY.md#disaster-recovery)).
+- **Application replicas do not make PostgreSQL highly available.** Its replication,
+  failover and storage redundancy stay the operator's ([Replicas](REPLICAS.md)).
+- **A database writer can deny service** by editing the replica fingerprint (startup refuses)
+  or the recovery key record (backups refuse); either fails closed.
 - **Pairing with KyRecovery is trust on first use** unless the operator compares the key ID or
   pins the key by hand.
 - **No step-up re-authentication** for destructive admin actions; admin-only is the scaffold's
@@ -140,6 +143,37 @@ cancellation and idempotency. SQLite locks are local and cannot coordinate netwo
 The migration command opens the original SQLite read-only, upgrades a private snapshot,
 refuses unknown schemas/populated targets, and verifies normalized contents inside the target
 transaction. Source data/keys/configuration remain available for rollback before new writes.
-PostgreSQL has no capsule snapshot adapter; database recovery remains an explicit operator duty.
+PostgreSQL capsules copy every scaffold table from one `REPEATABLE READ READ ONLY`
+transaction into a SQLite file in a 0700 scratch directory under the data directory, removed
+after sealing; plaintext leaves the process only inside a sealed `kycap/3`, and KyRecovery
+stays a blind store. Unknown schemas are refused, never sealed in part. `restore` deletes
+every session (all bearer credentials minted before the capsule), turns deposits off and
+drops the replica fingerprint; restores go into an empty database and never write the old one.
+
+**Health probes.** `/livez` and `/readyz` are unauthenticated and answer only a status word
+(no error text, driver or version); readiness pings at most once a second behind a mutex,
+so probe floods cannot load the database. The proxy may keep both internal.
+
+**Replica configuration.** At startup on PostgreSQL, under the bootstrap lock, each shared
+setting is fingerprinted as HMAC-SHA256 keyed by the encryption key, so someone who reads the
+database cannot brute-force low-entropy values such as URLs or network lists. A replica that
+differs refuses to start, naming fields, never values; a differing encryption key is
+reported alone. `accept-replica-config` is the one audited (`admin.replica_config_accepted`,
+field names only) way to rewrite the record, never an environment switch left on. The record
+never appears in the settings API or logs.
+
+**Recovery key across replicas.** The pinned public key is also stored in settings (public
+data). A replica writes its missing `recovery.pub` from it only through the library's
+write-once `StoreRecoveryKey`, which refuses a key other than the pin; a local file that
+differs from the pin refuses startup.
+
+**Replica proxy.** The Compose replica overlay binds HAProxy to loopback, publishes no app or
+database port, keeps PostgreSQL on an internal network with a required password, pins images
+by digest and trusts only HAProxy's `/32` (plus an explicit edge address) for
+`X-Forwarded-For`. HAProxy retries only GET/HEAD after a request reached a replica.
+
 Tests: `internal/store/coordination_test.go`, `internal/store/migrate_postgres_test.go`,
-`internal/api/replicas_test.go` and `internal/worker/worker_test.go`.
+`internal/store/snapshot_test.go`, `internal/api/replicas_test.go`,
+`internal/api/health_test.go`, `internal/api/replica_key_test.go`,
+`internal/backup/postgres_test.go`, `cmd/server/replica_test.go`,
+`cmd/server/pgbackup_test.go`, `internal/worker/worker_test.go` and `e2e/compose_test.go`.

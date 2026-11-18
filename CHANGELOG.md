@@ -29,6 +29,50 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- `GET|HEAD /livez` (process alive, no database access) and `/readyz` (ready only when not
+  draining and a database ping answers within 1 s, at most one ping a second) answer only a
+  status word with `Cache-Control: no-store`. The base Compose service health-checks
+  `/readyz`.
+- SIGTERM turns `/readyz` to 503, cancels backup work and keeps serving for 5 s before the
+  listener closes, so a proxy probing every second stops routing first. The shutdown budget
+  is 20 s, inside the 30 s Compose and Kubernetes grace periods.
+- PostgreSQL deployments get the same sealed `kycap/3` capsules as SQLite: every scaffold
+  table is read in one `REPEATABLE READ READ ONLY` transaction, written into a SQLite file in
+  a private scratch directory, verified per table and by integrity and foreign-key checks,
+  and sealed as the usual `data/ky_server.db` member. Deposits, local copies, drills, export
+  and the schedule work on PostgreSQL; an unknown schema refuses with 412 and seals nothing.
+  The Backup page drops its PostgreSQL notice.
+- On PostgreSQL every start compares a fingerprint of the shared settings (HMAC keyed by the
+  encryption key) with the one the first replica recorded, and refuses to start naming the
+  differing fields, never their values. `accept-replica-config` records a deliberate change
+  and audits `admin.replica_config_accepted` with field names only.
+- A pairing or hand pin on one replica is shared through the database: the others write
+  their own `recovery.pub` before a backup and at startup, and refuse to start when theirs
+  names another key.
+- `restore` now also deletes every restored session and the replica fingerprint, in the same
+  transaction that turns the schedule off, and says so. The runbook's manual
+  `DELETE FROM sessions` step is gone. PostgreSQL restores go through `migrate-postgres` into
+  an empty database ([runbook](docs/RESTORE.md#restoring-a-postgresql-deployment)).
+- `docker-compose.replicas.yml` runs replicas on one host behind HAProxy with per-replica
+  readiness checks and retries for GET/HEAD only; a new CI job kills replicas, stops one,
+  kills the elected worker and pauses and stops PostgreSQL through the proxy, then restores a
+  PostgreSQL capsule with the real binary.
+
+### Upgrade impact
+
+- PostgreSQL now needs `KY_DB_MAX_OPEN_CONNS` of at least 4 (was 3); lower refuses startup.
+- On the first PostgreSQL start the configuration fingerprint is recorded. A replica started
+  later with a different shared setting refuses to start; make the settings equal, or after a
+  deliberate change on all replicas run `accept-replica-config` once.
+- Stop every replica before upgrading; mixed versions are not supported. SQLite deployments
+  change only by the health routes, the 5 s drain at shutdown and `restore` deleting sessions.
+- The base Compose service gains a `/readyz` healthcheck; nothing restarts on it.
+- Application replicas still do not make PostgreSQL highly available.
+
+## Archived source 51ba2c030379620ec41c99c2102de067f7ef6189
+
+### Changes
+
 - CI and `make ci` run a strict production npm audit and the full audit with one visible,
   time-limited acceptance of development-only picomatch 4.0.7 / GHSA-fc5q-39xc-vjpf.
   The package remains vulnerable with no published patch; every other high/critical finding,
