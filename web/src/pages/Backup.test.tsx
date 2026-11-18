@@ -60,17 +60,12 @@ describe('Backup', () => {
     expect(screen.getByRole('button', { name: /unpair/i })).toBeTruthy();
   });
 
-  it('says so on Postgres, where no capsule carries the database', async () => {
-    mockStatus({ ...PAIRED, database_driver: 'postgres' });
-    render(<Backup />);
-    expect(await screen.findByText(/No backups are made on PostgreSQL/)).toBeTruthy();
-  });
-
-  it('does not warn about the database on SQLite', async () => {
-    mockStatus(PAIRED);
+  // PostgreSQL is snapshotted into the same capsule member as SQLite: neither gets a notice.
+  it.each(['sqlite', 'postgres'])('does not warn about the database on %s', async (driver) => {
+    mockStatus({ ...PAIRED, database_driver: driver });
     render(<Backup />);
     await screen.findByText('https://recovery.example');
-    expect(screen.queryByText(/No backups are made on PostgreSQL/)).toBeNull();
+    expect(screen.queryByText(/No backups are made|pg_dump/)).toBeNull();
   });
 });
 
