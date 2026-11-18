@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:browser": "playwright test",
     "prebuild": "node src/ky-ui/check-vendor.mjs",
-    "pretest": "node src/ky-ui/check-vendor.mjs"
+    "pretest": "node src/ky-ui/check-vendor.mjs",
+    "audit": "node --test ../scripts/npm-audit.test.mjs && node ../scripts/npm-audit.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.72.0",

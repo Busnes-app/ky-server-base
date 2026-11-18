@@ -26,6 +26,8 @@ Owns user interface components, service worker caching, PWA installation manifes
 - `SCIMAdmin.tsx` lists every account (with its source: Local, KyIdentity or SCIM) from the admin route GET `/api/admin/users`, 50 per page, shows the load error instead of an empty directory, and shows the token field only when a real token is supplied; otherwise it asks for `KY_SCIM_TOKEN`.
 
 ## Verification
+- `npm run audit` runs the shared audit gate and regression checks; `../docs/NPM-AUDIT.md`
+  owns its scoped, expiring build-tool exception.
 - Browser setup: build the frontend, run `go build -o .browser/server ./cmd/server` at the repo root, then `cd web && npx playwright install chromium && npm run test:browser`. CI runs it in the pinned Playwright container, whose tag must match `@playwright/test` in `package-lock.json`.
 - `make test-web` or `cd web && npm ci && npm test`, then `npm run build` (vitest with jsdom; `src/pages/Backup.test.tsx` renders the recovery screen against a stubbed status route). Commit `web/dist` after a build; CI diffs it.
 

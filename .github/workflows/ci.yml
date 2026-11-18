@@ -199,7 +199,7 @@ jobs:
         run: git diff --exit-code -- web/dist
 
       - name: npm audit
-        run: npm audit --audit-level=high
+        run: npm run audit
         working-directory: web
 
   browser:

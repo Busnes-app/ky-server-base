@@ -29,6 +29,13 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- CI and `make ci` run a strict production npm audit and the full audit with one visible,
+  time-limited acceptance of development-only picomatch 4.0.7 / GHSA-fc5q-39xc-vjpf.
+  The package remains vulnerable with no published patch; every other high/critical finding,
+  production exposure, changed advisory/version and the 2026-12-01 UTC expiry fail the gate.
+  [Audit scope and removal](docs/NPM-AUDIT.md) records the evidence and remaining build risk.
+
+
 - PostgreSQL replicas share login/password-change limits, office budgets and spent CAPTCHA
   challenges. Successful logins refund only their original window; database failures refuse
   admission. Office-network exemption removals take effect on other replicas without restart.

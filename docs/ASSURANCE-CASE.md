@@ -93,7 +93,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 | Oversized requests | Request bodies capped at 1 MiB, smaller on backup routes | `internal/api/server.go`, `internal/api/backup_handlers.go` |
 | Header spoofing | `ClientIP` and the proxy allow-list; fuzzed | `internal/auth`, `internal/config`, `FuzzClientIP`, `FuzzParseTrustedProxies` |
 | Weak randomness | `crypto/rand` only; fresh 12-byte GCM nonce per encryption | `internal/crypto/crypto.go` |
-| Vulnerable dependencies | `govulncheck` and `npm audit --audit-level=high` on every push and non-draft pull request; Dependabot | `.github/workflows/ci.yml` |
+| Vulnerable dependencies | `govulncheck` and `npm run audit` on every push and non-draft pull request; production audit is strict, the full audit has one expiring development-tool exception ([scope](NPM-AUDIT.md)); Dependabot | `.github/workflows/ci.yml` |
 | Supply-chain tampering | Actions pinned by commit; base images pinned by digest; the published image is the tested one, attested and verified before `:latest` moves | `.github/workflows/ci.yml`, `Dockerfile`, [RESTORE.md](RESTORE.md) |
 
 ## Residual risk

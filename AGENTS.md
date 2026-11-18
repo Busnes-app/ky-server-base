@@ -98,13 +98,14 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
 - `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 17
 - Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
-- `govulncheck` and `npm audit --audit-level=high`
+- `govulncheck` and `npm run audit`: strict production audit plus full high/critical audit,
+  with the single dated development-tool exception in `docs/NPM-AUDIT.md`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
 - Chromium regressions against the built server: production CSP/worker, themes, responsive layout and keyboard dialogs; the browser job gates publishing.
 - On a push to `master` that passes every job (`reuse` included in `publish.needs`), `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
-Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
+Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available.
 Release changes require a new Current source summary and upgrade impact in
 `CHANGELOG.md`, including dependency, CI and documentation-only publications.
 Archive the previous shipped summary under its known commit. `make notes-check`
@@ -163,3 +164,6 @@ describe implemented scaffold behavior and explicitly identify unwired helpers.
 opt-in Compose overlay preserves existing image/build, DNS, network and storage
 settings while replacing the public HTTP port with loopback. Never regenerate
 retained encryption/recovery keys to satisfy the profile.
+
+`docs/NPM-AUDIT.md` owns frontend audit scope, temporary advisory acceptance and removal.
+Keep new advisories/production exposure failing; exception expiry requires reviewed changes.
