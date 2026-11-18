@@ -101,6 +101,9 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 - `govulncheck` and `npm run audit`: strict production audit plus full high/critical audit,
   with the single dated development-tool exception in `docs/NPM-AUDIT.md`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
+- `scripts/test_ky_init.py`: runs the initializer against the current Compose template;
+  a product gets its own overridable recovery service label, and a changed template
+  refuses before creating target files. Runs in `make smoke` and the hosted smoke job.
 - Docker image build and container HTTP check
 - Chromium regressions against the built server: production CSP/worker, themes, responsive layout and keyboard dialogs; the browser job gates publishing.
 - On a push to `master` that passes every job (`reuse` included in `publish.needs`), `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
@@ -178,3 +181,7 @@ retained encryption/recovery keys to satisfy the profile.
 
 `docs/NPM-AUDIT.md` owns frontend audit scope, temporary advisory acceptance and removal.
 Keep new advisories/production exposure failing; exception expiry requires reviewed changes.
+
+`scripts/ky-init.sh` owns product scaffolding: app names must be valid KyRecovery service
+labels. Preserve Compose's `KY_APP_NAME` override while replacing its default with the
+product name; refuse an unknown template before creating the target.

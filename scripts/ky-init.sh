@@ -13,6 +13,18 @@ APP_NAME="$1"
 TARGET_DIR="${2:-../$APP_NAME}"
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ || "$APP_NAME" == *..* ]]; then
+    echo "Error: app-name must be a KyRecovery service label (1-64 letters, digits, dots, underscores or hyphens; start with a letter or digit; no '..')." >&2
+    exit 1
+fi
+
+# shellcheck disable=SC2016 # Match Compose interpolation literally, without shell expansion.
+APP_NAME_TEMPLATE='      - KY_APP_NAME=${KY_APP_NAME:-Busnes.app}'
+if ! grep -qxF "$APP_NAME_TEMPLATE" "$BASE_DIR/docker-compose.yml"; then
+    echo "Error: KY_APP_NAME template changed in docker-compose.yml; update ky-init.sh before scaffolding." >&2
+    exit 1
+fi
+
 echo "🚀 Initializing new Busnes.app product: ${APP_NAME}..."
 echo "📂 Target Directory: ${TARGET_DIR}"
 
@@ -71,7 +83,7 @@ fi
 # Update Docker Compose container name
 if [ -f "docker-compose.yml" ]; then
     sed -i "s|container_name: ky_server_base|container_name: ${APP_NAME}|g" docker-compose.yml
-    sed -i "s|KY_APP_NAME=Busnes.app Base|KY_APP_NAME=${APP_NAME}|g" docker-compose.yml
+    sed -i "s|${APP_NAME_TEMPLATE}|      - KY_APP_NAME=\${KY_APP_NAME:-${APP_NAME}}|g" docker-compose.yml
 fi
 
 # Point image and repository coordinates (compose image, attestation --repo/--cert-identity,

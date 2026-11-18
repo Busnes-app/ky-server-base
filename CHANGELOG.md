@@ -29,6 +29,9 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Product scaffolding gives each generated server its own overridable KyRecovery service
+  label and refuses a changed Compose template before creating files. A scaffold regression
+  runs in local and hosted smoke checks.
 - Pairing refresh and unpair commit the recovery URL and sealed bearer credential together.
   Backup operations read one coherent pair across replicas; failed refreshes preserve
   deployed credentials without changing their format or encryption label.
@@ -92,6 +95,8 @@ These are human summaries, not a raw version-control log.
 
 ### Upgrade impact
 
+- `ky-init.sh` requires a wire-valid product name and keeps `KY_APP_NAME` configurable.
+  Existing product repositories are unchanged; new products no longer inherit the base label.
 - Keep existing SCIM credentials when moving to replicas; edit existing `.env` lines rather
   than appending duplicate secrets. Compose now defaults to the wire-valid `Busnes.app`.
   Preserve a working service label explicitly; restore older local capsules with their

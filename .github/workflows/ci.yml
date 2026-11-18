@@ -269,6 +269,7 @@ jobs:
           cache: true
 
       - run: shellcheck scripts/*.sh
+      - run: python3 -B -m unittest discover -s scripts -p test_ky_init.py
       - run: scripts/check-no-binaries.sh
       - run: go build -o ky_server_base ./cmd/server
       - run: scripts/smoke-test.sh

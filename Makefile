@@ -50,6 +50,7 @@ lint:
 	@go vet ./...
 
 smoke: build
+	@python3 -B -m unittest discover -s scripts -p test_ky_init.py
 	@./scripts/smoke-test.sh
 
 notes-check:
