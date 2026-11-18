@@ -363,7 +363,9 @@ recorded backup. A deposit in flight when the server is told to stop answers 503
 snapshot or upload is cancelled, the interruption is audited, and the scheduled backup
 runs again after the restart. These shared formats are supplied by the pinned ky-primitives module.
 
-Status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
+Status returns 503 when settings cannot be read or its deadline expires; it never reports
+missing pairing or key state based on a failed read. Retry while retaining the last good
+status. A successful status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
 `allow_private_recovery`, `database_driver` and `members` (payload names).
 Conditional fields are `recovery_url`, `recovery_key_id`, `threshold`, `total_shares`,
 `recovery_key_error`, `database_path_error` (the SQLite database is not `<KY_DATA_DIR>/ky_server.db`, so nothing is sealed), `last_deposit` (receipt), `local_dir`, `local_keep`,

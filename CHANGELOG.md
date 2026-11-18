@@ -62,6 +62,8 @@ These are human summaries, not a raw version-control log.
 - Ordinary requests, including backup status and management, end after 14 s, leaving time
   to reply before the 15 s listener deadline. Only capsule deposit, drill and export get
   the long budget. The proxy limits other requests to 8 s without timeout retries.
+- Backup status reports a settings-read failure as 503 rather than a successful unpaired
+  state. An attempt to change a pinned custodian topology returns 409.
 - Recovery key ID and topology use database conditional inserts: a stale lock owner cannot
   overwrite a different pin during heartbeat detection. PostgreSQL readiness probes TCP,
   so the bundled database is not healthy during its temporary initialization server.

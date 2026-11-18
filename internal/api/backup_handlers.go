@@ -93,6 +93,8 @@ func pinErrorStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, fs.ErrExist):
 		return http.StatusConflict, "Already pinned to a different recovery key"
+	case errors.Is(err, recoveryclient.ErrKeyMismatch):
+		return http.StatusConflict, "Recovery key or custodian topology differs from the existing pin"
 	case errors.Is(err, backup.ErrPinBusy), errors.Is(err, backup.ErrPinOwnershipLost):
 		return http.StatusServiceUnavailable, err.Error()
 	}
@@ -497,6 +499,21 @@ func (s *Server) handleSetSchedule(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{"interval_sec": sec})
 }
 
+// statusSettings remembers failed reads even when a library status helper falls back to a
+// default. A store failure must not turn a paired installation into a successful "no key".
+type statusSettings struct {
+	recoveryclient.Settings
+	readErr error
+}
+
+func (s *statusSettings) Get(key string) (string, error) {
+	v, err := s.Settings.Get(key)
+	if err != nil && !errors.Is(err, recoveryclient.ErrNotFound) && s.readErr == nil {
+		s.readErr = err
+	}
+	return v, err
+}
+
 // handleBackupStatus reports pairing and the last receipt. It never decrypts or echoes the
 // credential.
 func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
@@ -505,7 +522,7 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	settings := backup.Settings(ctx, s.store.Settings())
+	settings := &statusSettings{Settings: backup.Settings(ctx, s.store.Settings())}
 	out := map[string]any{
 		"paired":                 false,
 		"key_pinned":             false,
@@ -519,7 +536,7 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 	if err := backup.CheckDatabasePath(s.config); err != nil {
 		out["database_path_error"] = err.Error()
 	}
-	if u, err := s.store.Settings().GetSetting(ctx, "kyrecovery_url"); err == nil {
+	if u, err := settings.Get("kyrecovery_url"); err == nil {
 		out["recovery_url"] = u
 	}
 	syncErr := s.syncRecoveryKey(ctx)
@@ -556,6 +573,10 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		if next, ok, err := recoveryclient.NextRun(s.config.Backup.DepositInterval, settings); err == nil && ok {
 			out["next_run_at"] = next.Format(time.RFC3339)
 		}
+	}
+	if ctx.Err() != nil || settings.readErr != nil {
+		s.writeError(w, http.StatusServiceUnavailable, "Could not read backup status; try again")
+		return
 	}
 	s.writeJSON(w, http.StatusOK, out)
 }

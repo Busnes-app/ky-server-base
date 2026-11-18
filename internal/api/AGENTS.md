@@ -17,7 +17,7 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   status word only. Readiness is `!draining && Store.Ping` within 1s, cached 1s behind a
   mutex held across the Ping; `StartDraining` (SIGTERM) turns it 503 while other routes serve.
 - Pin and pairing handlers pin through `backup.PinRecoveryKey` (database-wide `recovery-pin`
-  lock, read back; `fs.ErrExist` → 409, `ErrPinBusy`/`ErrPinOwnershipLost` → 503); export
+  lock, read back; `fs.ErrExist`/`ErrKeyMismatch` → 409, `ErrPinBusy`/`ErrPinOwnershipLost` → 503); export
   and status call `backup.SyncRecoveryKey` first, and its `ErrRecoveryKeyUnavailable` is the
   status route's `recovery_key_error` and a 412 on export and deposit.
 - `ServeHTTP` ends ordinary request contexts before `WriteTimeout` (14s with the 15s
@@ -25,6 +25,9 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   the longer budget; backup status and management stay bounded.
   `TestStalledRequestEndsAtTheWriteDeadline` and `TestFrozenDatabaseStillAllowsAnErrorReply`
   cover the route classification and real listener response.
+- Backup status returns 503 on a deadline or failed settings read, never a successful
+  guessed unpaired state. `TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired` freezes
+  settings after authentication and also covers immediate store errors.
 - All JSON API endpoints return structured errors `{"error": "message"}` upon failure.
 - Non-API routes fall back to serving `web.Handler()` for client-side SPA routing.
 - New routes are unauthenticated only by deliberate choice; privileged ones are registered wrapped in `s.requireAdmin` in `routes()`, so the trust level of every route is readable in one place.

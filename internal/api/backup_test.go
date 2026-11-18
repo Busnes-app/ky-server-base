@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,6 +87,9 @@ func TestPinKeyIsWriteOnce(t *testing.T) {
 		t.Fatalf("same key again: got %d: %s", w.Code, w.Body.String())
 	}
 	other, _ := recoverykey.Generate()
+	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(first.Public(), 3, 5)); w.Code != http.StatusConflict {
+		t.Fatalf("different custodian topology: got %d, want 409: %s", w.Code, w.Body.String())
+	}
 	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(other.Public(), 2, 3)); w.Code != http.StatusConflict {
 		t.Fatalf("different key: got %d, want 409: %s", w.Code, w.Body.String())
 	}
@@ -104,6 +108,70 @@ func TestPinKeyIsWriteOnce(t *testing.T) {
 	status := statusOf(t, srv, session)
 	if status["key_pinned"] != true || status["recovery_key_id"] != first.Public().ID() {
 		t.Errorf("status after pin: %v", status)
+	}
+}
+
+type failingStatusStore struct {
+	store.Store
+	armed atomic.Bool
+	stall bool
+}
+
+func (s *failingStatusStore) Settings() store.SettingsStore {
+	return failingStatusSettings{SettingsStore: s.Store.Settings(), owner: s}
+}
+
+type failingStatusSettings struct {
+	store.SettingsStore
+	owner *failingStatusStore
+}
+
+func (s failingStatusSettings) GetSetting(ctx context.Context, key string) (string, error) {
+	if !s.owner.armed.Load() {
+		return s.SettingsStore.GetSetting(ctx, key)
+	}
+	if s.owner.stall {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	return "", errors.New("database read failed: private connection details")
+}
+
+func TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired(t *testing.T) {
+	for _, stall := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timeout=%v", stall), func(t *testing.T) {
+			srv, st, cfg := setupTestServer(t)
+			session := loginAs(t, srv, st, "status-admin", "admin")
+			key, err := recoverykey.Generate()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(key.Public(), 2, 3)); w.Code != http.StatusOK {
+				t.Fatalf("pin fixture: %d %s", w.Code, w.Body.String())
+			}
+			if err := storePairing(t, cfg, st, "https://recovery.example.test", "status-test-token"); err != nil {
+				t.Fatal(err)
+			}
+			cfg.Server.WriteTimeout = 500 * time.Millisecond
+			wrapped := &failingStatusStore{Store: st, stall: stall}
+			srv = api.NewServer(cfg, wrapped)
+			if before := statusOf(t, srv, session); before["paired"] != true || before["key_pinned"] != true {
+				t.Fatalf("healthy fixture: %v", before)
+			}
+			// Authentication stays healthy; only the handler's settings reads fail.
+			wrapped.armed.Store(true)
+			w := do(t, srv, "GET", "/api/backup/status", session)
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("failed settings read: %d %s", w.Code, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "key_pinned") || strings.Contains(w.Body.String(), "private connection details") {
+				t.Fatalf("failed status exposed a guessed state or backend error: %s", w.Body.String())
+			}
+			wrapped.armed.Store(false)
+			if after := statusOf(t, srv, session); after["paired"] != true || after["key_pinned"] != true {
+				t.Fatalf("read failure changed pairing state: %v", after)
+			}
+		})
 	}
 }
 
