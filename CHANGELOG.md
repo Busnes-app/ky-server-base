@@ -29,6 +29,102 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Migration resolves relative SQLite sources before opening the recovery-key preflight,
+  so the bare-binary default `./data/ky_server.db` works like an explicit absolute path.
+- Product scaffolding gives each generated server its own overridable KyRecovery service
+  label, including when deriving from another generated product, and refuses a changed
+  Compose template before creating files. A scaffold regression
+  runs in local and hosted smoke checks.
+- Pairing refresh and unpair commit the recovery URL and sealed bearer credential together.
+  Backup operations read one coherent pair across replicas; failed refreshes preserve
+  deployed credentials without changing their format or encryption label.
+- `GET|HEAD /livez` (process alive, no database access) and `/readyz` (ready only when not
+  draining and a database ping answers within 1 s, at most one ping a second) answer only a
+  status word with `Cache-Control: no-store`. The base Compose service health-checks
+  `/readyz`.
+- SIGTERM turns `/readyz` to 503, cancels backup work and keeps serving for 5 s before the
+  listener closes, so a proxy probing every second stops routing first. The shutdown budget
+  is 20 s, inside the 30 s Compose and Kubernetes grace periods.
+- PostgreSQL deployments get the same sealed `kycap/3` capsules as SQLite: every scaffold
+  table is read in one `REPEATABLE READ READ ONLY` transaction, written into a SQLite file in
+  a private scratch directory, verified per table and by integrity and foreign-key checks,
+  and sealed as the usual `data/ky_server.db` member. Deposits, local copies, drills, export
+  and the schedule work on PostgreSQL; an unknown schema refuses with 412 and seals nothing.
+  The Backup page drops its PostgreSQL notice.
+- On PostgreSQL every start compares a fingerprint of the shared settings (HMAC keyed by the
+  encryption key) with the one the first replica recorded, and refuses to start naming the
+  differing fields, never their values. `accept-replica-config` records a deliberate change
+  and audits `admin.replica_config_accepted` with field names only.
+- A pairing or hand pin on one replica is shared through the database: the others write
+  their own `recovery.pub` before a backup and at startup, and refuse to start when theirs
+  names another key. Pins, pairings and that sync run under one database-wide
+  `recovery-pin` lock and are read back before they count, so two replicas pinning
+  different keys at once give one success and one 409. A pin no replica has published (for
+  example a deployment pinned before this release, moved to fresh replica volumes) is
+  reported on the Backup page, in the log and in the audit row of every scheduled run,
+  with the repair: pin the same key by hand on any replica.
+- `migrate-postgres` records the source's pinned recovery public key from the
+  `recovery.pub` beside the database, and refuses, before copying anything, a source whose
+  pin has no matching file.
+- Startup removes `snapshot-*` scratch directories (plaintext database copies) that a killed
+  process left in the data directory; a directory another process still holds is kept.
+- Ordinary requests, including backup status and management, end after 14 s, leaving time
+  to reply before the 15 s listener deadline. Only capsule deposit, drill and export get
+  the long budget. The proxy limits other requests to 8 s without timeout retries.
+- A shared recovery-key read failure is 503 even on a replica without its local file;
+  status, export and deposit distinguish unreadable state from a missing pin.
+- Compose now respects `KY_APP_NAME` with the wire-valid default `Busnes.app`; existing
+  valid service names and old capsules retain their identities. Cutover preserves SCIM
+  credentials, and the product rollout contract requires every sequence to be advanced.
+- Backup status reports a settings-read failure as 503 rather than a successful unpaired
+  state. An attempt to change a pinned custodian topology returns 409.
+- Recovery key ID and topology use database conditional inserts: a stale lock owner cannot
+  overwrite a different pin during heartbeat detection. PostgreSQL readiness probes TCP,
+  so the bundled database is not healthy during its temporary initialization server.
+- `accept-replica-config` refuses a differing `KY_ENCRYPTION_KEY`; it cannot be rotated.
+- `restore` now also deletes every restored session and the replica fingerprint, in the same
+  transaction that turns the schedule off, and says so. The runbook's manual
+  `DELETE FROM sessions` step is gone. PostgreSQL restores go through `migrate-postgres` into
+  an empty database ([runbook](docs/RESTORE.md#restoring-a-postgresql-deployment)).
+- `docker-compose.replicas.yml` runs `KY_REPLICAS` replicas on one host behind HAProxy with
+  per-replica readiness checks, one server slot per replica, an 8 s upstream timeout and
+  retries only for GET/HEAD requests that never got an answer. Replicas keep their own
+  `/app/data` and share `./backups`, whose writes and pruning run under the database-wide
+  `backup-run` lock, so local capsules survive `down`/`up` and scaling and every replica
+  lists the same ones. The bundled PostgreSQL uses its own `pgdata-replicas` volume. A new
+  CI job, on the image the Docker job tested, kills replicas, stops one, kills the elected
+  worker and pauses and stops PostgreSQL through the proxy, then restores a PostgreSQL
+  capsule with the runbook's own commands.
+
+### Upgrade impact
+
+- Bare-binary `migrate-postgres` supports its default relative data path while retaining
+  the original SQLite database and pinned recovery key.
+- `ky-init.sh` requires a wire-valid product name and keeps `KY_APP_NAME` configurable.
+  Existing product repositories are unchanged; new products no longer inherit the base label.
+- Keep existing SCIM credentials when moving to replicas; edit existing `.env` lines rather
+  than appending duplicate secrets. Compose now defaults to the wire-valid `Busnes.app`.
+  Preserve a working service label explicitly; restore older local capsules with their
+  original `-service`, including `Busnes.app Base` from the old Compose default.
+- PostgreSQL now needs `KY_DB_MAX_OPEN_CONNS` of at least 4 (was 3); lower refuses startup.
+- On the first PostgreSQL start the configuration fingerprint is recorded. A replica started
+  later with a different shared setting refuses to start; make the settings equal, or after a
+  deliberate change on all replicas run `accept-replica-config` once.
+- Stop every replica before upgrading; mixed versions are not supported. With the replica
+  overlay: `docker compose pull && docker compose stop app && docker compose up -d --wait`
+  (source install: `build` instead of `pull`). SQLite deployments change only by the health
+  routes, the 5 s drain at shutdown, `restore` deleting sessions, the startup removal of
+  leftover snapshots, write-once recovery topology and the 14 s ordinary request deadline.
+- The base Compose service gains a `/readyz` healthcheck; nothing restarts on it.
+- Application replicas still do not make PostgreSQL highly available. When the database
+  freezes, new requests get a 503 from HAProxy within seconds and a request already inside
+  a replica gets a 504 after 8 s. Behind another proxy, its upstream timeout (or the
+  server's own 14 s request deadline) is the bound.
+
+## Archived source 51ba2c030379620ec41c99c2102de067f7ef6189
+
+### Changes
+
 - CI and `make ci` run a strict production npm audit and the full audit with one visible,
   time-limited acceptance of development-only picomatch 4.0.7 / GHSA-fc5q-39xc-vjpf.
   The package remains vulnerable with no published patch; every other high/critical finding,

@@ -269,6 +269,7 @@ jobs:
           cache: true
 
       - run: shellcheck scripts/*.sh
+      - run: python3 -B -m unittest discover -s scripts -p test_ky_init.py
       - run: scripts/check-no-binaries.sh
       - run: go build -o ky_server_base ./cmd/server
       - run: scripts/smoke-test.sh
@@ -331,25 +332,52 @@ jobs:
           fi
           grep -q 'KY_SESSION_SECRET must contain at least 16 bytes' profile-refusal.txt
 
-      # Hand the exact image the checks above ran against to the publish job,
-      # so what gets pushed is what was tested, never a second build.
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        run: |
+      # Hand the exact image the checks above ran against to the replica tests and the
+      # publish job, so what is failure-tested and pushed is what was tested, never a rebuild.
+      - run: |
           set -euo pipefail
           docker save ky_server_base:ci | gzip > tested-image.tar.gz
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tested-image
           path: tested-image.tar.gz
           retention-days: 1
+
+  # docker-compose.replicas.yml against the image the docker job tested: replicas killed, stopped and cut
+  # off from PostgreSQL through HAProxy, plus a real-binary PostgreSQL restore drill.
+  replicas:
+    name: Compose replicas and failover
+    if: github.event.pull_request.draft != true
+    needs: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Replica overlay merges
+        run: python3 scripts/check-replicas-compose.py
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tested-image
+      - name: Load the tested image
+        run: docker load < tested-image.tar.gz
+      - name: Failure tests
+        env:
+          KY_E2E_COMPOSE: "1"
+          KY_IMAGE: ky_server_base:ci
+          PUSH_RELAY_URL: ""
+          APNS_RELAY_URL: ""
+        run: go test -count=1 -v -timeout 20m ./e2e
 
   # Publishes the image CI tested: only for pushes to master, only
   # after every job passed, and with no checkout and no build of its own, so
   # the pushed bytes are the tested bytes. A pull request from a fork must
   # never reach this job or write a package.
   publish:
-    needs: [go, postgres, web, browser, security, smoke, docker, reuse]
+    needs: [go, postgres, web, browser, security, smoke, docker, replicas, reuse]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10

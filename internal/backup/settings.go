@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -12,24 +13,65 @@ import (
 const recoveryTokenLabel = "ky_server_base:setting:kyrecovery_token"
 
 type settingsAdapter struct {
-	ctx context.Context
-	s   store.SettingsStore
+	ctx     context.Context
+	s       store.SettingsStore
+	pairing map[string]string
 }
 
 // Settings binds the request context to the settings store for one call into the lib.
 func Settings(ctx context.Context, s store.SettingsStore) recoveryclient.Settings {
-	return settingsAdapter{ctx: ctx, s: s}
+	return &settingsAdapter{ctx: ctx, s: s}
 }
 
-func (a settingsAdapter) Get(key string) (string, error) {
+func (a *settingsAdapter) Get(key string) (string, error) {
+	if key == "kyrecovery_url" || key == "kyrecovery_token_enc" {
+		// The library reads these separately. One SQL statement gives each operation
+		// a coherent pair even if another replica refreshes or clears it in between.
+		if a.pairing == nil {
+			var err error
+			a.pairing, err = a.s.GetAllSettings(a.ctx)
+			if err != nil {
+				return "", err
+			}
+		}
+		v, ok := a.pairing[key]
+		if !ok {
+			return "", recoveryclient.ErrNotFound
+		}
+		return v, nil
+	}
 	v, err := a.s.GetSetting(a.ctx, key)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", recoveryclient.ErrNotFound
 	}
 	return v, err
 }
-func (a settingsAdapter) Set(key, val string) error { return a.s.SetSetting(a.ctx, key, val) }
-func (a settingsAdapter) Delete(key string) error   { return a.s.DeleteSetting(a.ctx, key) }
+func (a *settingsAdapter) Set(key, val string) error {
+	if key == "kyrecovery_url" || key == "kyrecovery_token_enc" {
+		a.pairing = nil
+	}
+	switch key {
+	case pinKeyID, pinThreshold, pinTotalShares:
+		// Ownership probes cannot fence a stale owner. The database itself preserves
+		// the first key and topology, including during the lock-loss detection window.
+		pinned, err := a.s.SetSettingIfAbsent(a.ctx, key, val)
+		if err != nil || pinned == val {
+			return err
+		}
+		if key == pinKeyID {
+			return &recoveryclient.PinnedError{PinnedKeyID: pinned, OfferedKeyID: val}
+		}
+		return fmt.Errorf("%w: recovery topology is already pinned", recoveryclient.ErrKeyMismatch)
+	default:
+		return a.s.SetSetting(a.ctx, key, val)
+	}
+}
+func (a *settingsAdapter) Delete(key string) error {
+	if key == "kyrecovery_url" || key == "kyrecovery_token_enc" {
+		a.pairing = nil
+	}
+	return a.s.DeleteSetting(a.ctx, key)
+}
 
 // NewSealer seals the KyRecovery token under the deployment key, domain-separated so a row
 // copied from another setting will not open.

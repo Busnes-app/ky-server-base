@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/ky_server_base/internal/api"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/backup"
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
@@ -76,7 +78,7 @@ func auditRows(t *testing.T, st store.Store, action string) []*store.AuditRecord
 }
 
 func TestPinKeyIsWriteOnce(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	session := loginAs(t, srv, st, "alice", "admin")
 	first, _ := recoverykey.Generate()
 	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(first.Public(), 2, 3)); w.Code != http.StatusOK {
@@ -86,6 +88,9 @@ func TestPinKeyIsWriteOnce(t *testing.T) {
 		t.Fatalf("same key again: got %d: %s", w.Code, w.Body.String())
 	}
 	other, _ := recoverykey.Generate()
+	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(first.Public(), 3, 5)); w.Code != http.StatusConflict {
+		t.Fatalf("different custodian topology: got %d, want 409: %s", w.Code, w.Body.String())
+	}
 	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(other.Public(), 2, 3)); w.Code != http.StatusConflict {
 		t.Fatalf("different key: got %d, want 409: %s", w.Code, w.Body.String())
 	}
@@ -107,8 +112,115 @@ func TestPinKeyIsWriteOnce(t *testing.T) {
 	}
 }
 
+type failingStatusStore struct {
+	store.Store
+	armed   atomic.Bool
+	stall   bool
+	onlyKey string
+}
+
+func (s *failingStatusStore) Settings() store.SettingsStore {
+	return failingStatusSettings{SettingsStore: s.Store.Settings(), owner: s}
+}
+
+type failingStatusSettings struct {
+	store.SettingsStore
+	owner *failingStatusStore
+}
+
+func (s failingStatusSettings) GetSetting(ctx context.Context, key string) (string, error) {
+	if !s.owner.armed.Load() || (s.owner.onlyKey != "" && key != s.owner.onlyKey) {
+		return s.SettingsStore.GetSetting(ctx, key)
+	}
+	if s.owner.stall {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	return "", errors.New("database read failed: private connection details")
+}
+
+func TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired(t *testing.T) {
+	for _, stall := range []bool{false, true} {
+		t.Run(fmt.Sprintf("timeout=%v", stall), func(t *testing.T) {
+			srv, st, cfg := setupTestServer(t)
+			session := loginAs(t, srv, st, "status-admin", "admin")
+			key, err := recoverykey.Generate()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(key.Public(), 2, 3)); w.Code != http.StatusOK {
+				t.Fatalf("pin fixture: %d %s", w.Code, w.Body.String())
+			}
+			if err := storePairing(t, cfg, st, "https://recovery.example.test", "status-test-token"); err != nil {
+				t.Fatal(err)
+			}
+			cfg.Server.WriteTimeout = 500 * time.Millisecond
+			wrapped := &failingStatusStore{Store: st, stall: stall}
+			srv = api.NewServer(cfg, wrapped)
+			if before := statusOf(t, srv, session); before["paired"] != true || before["key_pinned"] != true {
+				t.Fatalf("healthy fixture: %v", before)
+			}
+			// Authentication stays healthy; only the handler's settings reads fail.
+			wrapped.armed.Store(true)
+			w := do(t, srv, "GET", "/api/backup/status", session)
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("failed settings read: %d %s", w.Code, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "key_pinned") || strings.Contains(w.Body.String(), "private connection details") {
+				t.Fatalf("failed status exposed a guessed state or backend error: %s", w.Body.String())
+			}
+			wrapped.armed.Store(false)
+			if after := statusOf(t, srv, session); after["paired"] != true || after["key_pinned"] != true {
+				t.Fatalf("read failure changed pairing state: %v", after)
+			}
+		})
+	}
+}
+
+func TestBackupEndpointsDoNotHideARecoveryRecordReadFailure(t *testing.T) {
+	srv, st, cfg := setupTestServer(t)
+	if st.Driver() != "postgres" {
+		t.Skip("replica key materialization requires PostgreSQL")
+	}
+	session := loginAs(t, srv, st, "record-admin", "admin")
+	key, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(key.Public(), 2, 3)); w.Code != http.StatusOK {
+		t.Fatalf("pin fixture: %d %s", w.Code, w.Body.String())
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.example.test", "record-test-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(recoveryclient.RecoveryKeyPath(cfg.Database.DataDir)); err != nil {
+		t.Fatal(err)
+	}
+	wrapped := &failingStatusStore{Store: st, onlyKey: backup.RecoveryKeyRecordSetting}
+	srv = api.NewServer(cfg, wrapped)
+	api.SetRecoveryClientForTest(srv, fakePairer{}) // no outbound requests in a failure test
+	wrapped.armed.Store(true)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/backup/status"},
+		{"POST", "/api/backup/export-capsule"},
+		{"POST", "/api/backup/deposit"},
+	} {
+		w := adminDo(t, srv, session, tc.method, tc.path, nil)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s with an unreadable shared record: %d %s", tc.path, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "key_pinned") || strings.Contains(w.Body.String(), "private connection details") {
+			t.Errorf("%s exposed guessed state or backend details: %s", tc.path, w.Body.String())
+		}
+	}
+	wrapped.armed.Store(false)
+	if after := statusOf(t, srv, session); after["key_pinned"] != true || after["paired"] != true {
+		t.Fatalf("retry did not materialize the existing pin: %v", after)
+	}
+}
+
 func TestPinKeyBadTopology(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	session := loginAs(t, srv, st, "alice", "admin")
 	priv, _ := recoverykey.Generate()
 	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(priv.Public(), 1, 3)); w.Code != http.StatusBadRequest {
@@ -123,7 +235,7 @@ func TestPinKeyBadTopology(t *testing.T) {
 }
 
 func TestRunWithPinnedKeyAndNoDestination(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	cfg.Backup.Dir = ""
 	fake := &fakeDepositor{}
 	api.SetRecoveryClientForTest(srv, fake)
@@ -142,7 +254,7 @@ func TestRunWithPinnedKeyAndNoDestination(t *testing.T) {
 }
 
 func TestRunWritesLocalCopy0600(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	cfg.Backup.Dir = filepath.Join(t.TempDir(), "capsules")
 	cfg.Backup.Keep = 3
 	fake := &fakeDepositor{}
@@ -194,7 +306,7 @@ func TestRunWritesLocalCopy0600(t *testing.T) {
 }
 
 func TestUnpairKeepsPin(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	priv, _ := recoverykey.Generate()
 	api.SetRecoveryClientForTest(srv, fakePairer{result: recoveryclient.PairingResult{
 		APIToken: "kyrec_live_t",
@@ -229,7 +341,7 @@ func TestUnpairKeepsPin(t *testing.T) {
 }
 
 func TestScheduleBounds(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	session := loginAs(t, srv, st, "alice", "admin")
 	for _, tc := range []struct {
 		sec  int64
@@ -250,7 +362,7 @@ func TestScheduleBounds(t *testing.T) {
 }
 
 func TestStatusNeverCarriesToken(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	priv, _ := recoverykey.Generate()
 	ctx := context.Background()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
@@ -275,7 +387,7 @@ func TestStatusNeverCarriesToken(t *testing.T) {
 // A session without the CSRF header stops at the middleware. With no key pinned, the handler
 // itself would answer 412, so 403 proves it never ran.
 func TestExportCapsuleRequiresCSRF(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	req := httptest.NewRequest("POST", "/api/backup/export-capsule", nil)
 	req.AddCookie(loginAs(t, srv, st, "alice", "admin"))
 	w := httptest.NewRecorder()
@@ -288,7 +400,7 @@ func TestExportCapsuleRequiresCSRF(t *testing.T) {
 // The SPA catch-all may answer a wrong-method request, so the property pinned is that no
 // method but POST produces a capsule attachment.
 func TestExportCapsuleOnlyPOST(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(context.Background(), st), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
 		t.Fatal(err)
@@ -319,7 +431,7 @@ func TestExportCapsuleOnlyPOST(t *testing.T) {
 func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	session := loginAs(t, srv, st, "drill-admin", "admin")
 	f, err := os.OpenFile(filepath.Join(cfg.Database.DataDir, "drill.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -363,7 +475,7 @@ func TestDrillReportsBusyAndRunsDecodedChecks(t *testing.T) {
 // A stored KyRecovery URL that now resolves private is not a server fault: the run must name
 // the switch that admits it, the way pairing does, rather than answer a bare 500.
 func TestRunRefusesAPrivateDestination(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
@@ -388,11 +500,10 @@ func TestRunRefusesAPrivateDestination(t *testing.T) {
 	}
 }
 
-// Only SQLite can be snapshotted into a capsule, so on Postgres "Back up now" can never
-// succeed. It must say why -- the driver, in the body -- not answer a bare 500, which is what
-// docs/DISASTER-RECOVERY.md and the screen's standing warning promise.
+// A driver no collector can snapshot makes "Back up now" fail. It must say why -- the driver,
+// in the body -- not answer a bare 500.
 func TestRunRefusesWithoutADatabaseSnapshot(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
@@ -406,13 +517,13 @@ func TestRunRefusesWithoutADatabaseSnapshot(t *testing.T) {
 	api.SetRecoveryClientForTest(srv, fake)
 	// The store stays SQLite so the fixture works; the collector reads the driver from the
 	// config, which is what decides whether a snapshot is possible.
-	cfg.Database.Driver = "postgres"
+	cfg.Database.Driver = "mysql"
 
 	w := adminPost(t, srv, loginAs(t, srv, st, "alice", "admin"), "/api/backup/deposit")
 	if w.Code != http.StatusPreconditionFailed {
 		t.Fatalf("no database snapshot: got %d, want 412: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "snapshot") || !strings.Contains(w.Body.String(), "postgres") {
+	if !strings.Contains(w.Body.String(), "snapshot") || !strings.Contains(w.Body.String(), "mysql") {
 		t.Errorf("body does not name the snapshot refusal and the driver: %s", w.Body.String())
 	}
 	if fake.got != nil {
@@ -441,7 +552,7 @@ func (b brokenReceiptSettings) SetSetting(ctx context.Context, key, val string) 
 // result fields it reads, and receipt_unrecorded. A shape change here silently lies to the
 // admin about what KyRecovery is holding.
 func TestRunReportsAnUnrecordedReceipt(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st),
@@ -501,7 +612,7 @@ func (c *cancellingPairer) ClaimPairing(ctx context.Context, serverURL, pairingC
 // pin, the stored pairing and the audit row must all land even if the admin's connection is
 // gone, or the instance is left half-paired with nothing on record.
 func TestPairRemoteOutlivesTheRequest(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	reqCtx, cancel := context.WithCancel(ctx)
@@ -565,7 +676,7 @@ func (b *blockingPairer) ClaimPairing(ctx context.Context, serverURL, pairingCod
 // knows nothing about them. WaitDetached is what stands between them and the store closing, so
 // it must not return while one is still running.
 func TestWaitDetachedBlocksUntilAPairingFinishes(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	priv, _ := recoverykey.Generate()
 	pairer := &blockingPairer{
 		fakePairer: fakePairer{result: recoveryclient.PairingResult{APIToken: "kyrec_live_t",
@@ -625,7 +736,7 @@ func (b *blockingBody) Read(p []byte) (int, error) {
 // the wait returns and the store closes under a request that is about to pair. Registration has
 // to happen before the first byte is read.
 func TestDetachedHandlerRegistersBeforeReadingItsBody(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	session := loginAs(t, srv, st, "alice", "admin")
 	body := &blockingBody{reading: make(chan struct{}), release: make(chan struct{})}
 
@@ -682,7 +793,7 @@ func (b *blockingSessionStore) Sessions() store.SessionStore { return b.sessions
 // otherwise WaitDetached sees zero, returns, and the store closes under a request that is about
 // to enter handlePinKey and pin a key. Registration inside the handler is too late.
 func TestDetachedRegistrationCoversTheAuthLookup(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	session := loginAs(t, srv, st, "alice", "admin")
 
 	blocked := &blockingSessions{SessionStore: st.Sessions(), entered: make(chan struct{}), release: make(chan struct{})}
@@ -758,7 +869,7 @@ func (b *blockingDepositor) Deposit(ctx context.Context, url, token string, cont
 // green, while a SIGTERM mid-upload closes the store under the run and leaves KyRecovery holding
 // a capsule this instance has no receipt for.
 func TestDetachedTrackingCoversADepositInFlight(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backupSettings(ctx, st), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {
@@ -817,7 +928,7 @@ func (d *stalledDepositor) Deposit(ctx context.Context, _, _ string, _ []byte) (
 // with its audit row written, WaitDetached returns in seconds rather than after the upload
 // budget, no receipt is invented, and the schedule runs the backup again after the restart.
 func TestStopDetachedInterruptsADepositInFlight(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	cfg.Backup.DepositInterval = time.Hour
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()

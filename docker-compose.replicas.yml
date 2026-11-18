@@ -1,0 +1,87 @@
+# Application replicas on one host: KY_REPLICAS app containers on one PostgreSQL, behind
+# HAProxy, which checks every replica's /readyz each second. Append this file LAST to the
+# COMPOSE_FILE chain in .env (after docker-compose.build.yml for a source install; never with
+# docker-compose.static-ip.yml, which gives one container one address). See docs/REPLICAS.md.
+# This is not PostgreSQL high availability: every replica depends on the one database.
+services:
+  app:
+    container_name: !reset null
+    ports: !reset []
+    deploy:
+      replicas: ${KY_REPLICAS:-2}
+    environment:
+      - KY_DB_DRIVER=postgres
+      # Protected .env only, never argv. sslmode=disable is for the private database network
+      # below; use verified TLS for a database on another host.
+      - KY_DB_DSN=${KY_DB_DSN:?Set KY_DB_DSN, e.g. postgres://ky_server:<KY_POSTGRES_PASSWORD>@postgres:5432/ky_server?sslmode=disable}
+      - KY_SESSION_SECRET=${KY_SESSION_SECRET:?Set KY_SESSION_SECRET; every replica uses the same value}
+      - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:?Set KY_SCIM_TOKEN; every replica uses the same value}
+      # 64 hex characters, retained: it decrypts the sealed settings every replica shares.
+      - KY_ENCRYPTION_KEY=${KY_ENCRYPTION_KEY:?Set KY_ENCRYPTION_KEY to the retained 32-byte key in hex}
+      # HAProxy, plus the TLS proxy in front of it as HAProxy sees it (with the default loopback
+      # publish, the replicas network gateway) when KY_EDGE_TRUSTED_PROXIES is set; otherwise
+      # every client is counted as that edge address. Never a whole range or 0.0.0.0/0. Only
+      # the default loopback publish makes the gateway host-only, so setting KY_PROXY_BIND too
+      # is refused: another host could then arrive as the gateway and forge X-Forwarded-For.
+      - KY_TRUSTED_PROXIES=${KY_PROXY_IP:?Set KY_PROXY_IP to the proxy address inside KY_REPLICA_SUBNET}/32${KY_EDGE_TRUSTED_PROXIES:+,${KY_EDGE_TRUSTED_PROXIES}${KY_PROXY_BIND:+${KY_EDGE_WITH_PROXY_BIND:?KY_EDGE_TRUSTED_PROXIES is safe only with the default loopback publish; unset KY_PROXY_BIND or KY_EDGE_TRUSTED_PROXIES}}}
+    # Each container gets its own anonymous /app/data (the image's volume): replicas share no
+    # data files, and recovery.pub is rewritten from the database. ./backups is one archive for
+    # every replica: each write and prune runs under the database-wide backup-run lock, and it
+    # survives down/up and scaling.
+    volumes: !override
+      - ./backups:/app/backups
+    networks:
+      - replicas
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+    container_name: !reset null
+    profiles: !reset []
+    ports: !reset []
+    environment:
+      POSTGRES_USER: ky_server
+      POSTGRES_PASSWORD: ${KY_POSTGRES_PASSWORD:?Set KY_POSTGRES_PASSWORD; there is no default}
+      POSTGRES_DB: ky_server
+    # Not the base file's pgdata, which the postgres profile initializes with a public password.
+    volumes: !override
+      - pgdata-replicas:/var/lib/postgresql/data
+    healthcheck:
+      # The entrypoint's temporary initialization server has only a Unix socket.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ky_server", "-d", "ky_server"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    networks:
+      - database
+
+  proxy:
+    image: haproxy:3.2-alpine@sha256:1c3568e520453cc8ba98c39501febcf450429c80e6cc27ecad779961d76e597c
+    restart: unless-stopped
+    volumes:
+      - ./deploy/replicas/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    # One server slot per replica; change the count through KY_REPLICAS, never --scale.
+    environment:
+      KY_REPLICAS: ${KY_REPLICAS:-2}
+    # Loopback by default: put your TLS proxy in front, or set KY_PROXY_BIND deliberately
+    # (refused together with KY_EDGE_TRUSTED_PROXIES, above).
+    ports:
+      - "${KY_PROXY_BIND:-127.0.0.1}:${KY_PROXY_PORT:-8080}:8080"
+    networks:
+      replicas:
+        ipv4_address: ${KY_PROXY_IP:?Set KY_PROXY_IP to the proxy address inside KY_REPLICA_SUBNET}
+
+volumes:
+  pgdata-replicas:
+
+networks:
+  replicas:
+    ipam:
+      config:
+        - subnet: ${KY_REPLICA_SUBNET:?Set KY_REPLICA_SUBNET, e.g. 172.31.250.0/24}
+  # No route out: only the replicas reach the database.
+  database:
+    internal: true

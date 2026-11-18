@@ -23,6 +23,14 @@ Owns environment variable parsing, configuration validation, default fallbacks, 
   compatibility but have no effect. A nonempty environment value logs a startup warning
   to use KyIdentity's SCIM connector at `/scim/v2`, never the value itself.
 
+- On PostgreSQL `KY_DB_MAX_OPEN_CONNS` below `MinPostgresOpenConns` (4) fails startup.
+- `replica.go`: `sharedFields` is the one list of settings every PostgreSQL replica must
+  share (a product appends its own); per-host settings stay out. `ReplicaFingerprint` is
+  HMAC-SHA256 per field keyed by the encryption key, plus the key's own check value;
+  `DiffFingerprint` names differing fields only (the key alone when it differs) and ignores
+  names one side lacks, which `MergeFingerprint` adds. `ReplicaConfigSetting` is the row.
+  A new `Config` field must change the fingerprint or be listed in `notShared` in
+  `replica_test.go` with its reason; `TestEveryConfigFieldIsClassified` fails otherwise.
 - `KY_BACKUP_DEPOSIT_INTERVAL` is a Go duration (default `24h`), only the default for the schedule the admin screen stores; `0` is off, anything else below `MinDepositInterval` (15m) or negative fails startup. `KY_BACKUP_DIR` (default empty, off) is the sealed local-copy directory and `KY_BACKUP_KEEP` (default 7) how many to retain; below 1 fails startup because the lib refuses it at write time. `KY_BACKUP_ALLOW_PRIVATE_RECOVERY` (default false) admits RFC1918 and CGNAT KyRecovery destinations only.
 
 ## Verification

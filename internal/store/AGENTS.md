@@ -7,13 +7,28 @@ Provides the unified Database Abstraction Layer (DAL) supporting pluggable backe
 Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `AuditStore`, `SettingsStore`), dialect translations, and schema migrations.
 
 ## Local Contracts
+- `SettingsStore.UpdateSettings` commits related upserts and deletes in one transaction;
+  any failure rolls everything back. Recovery pairing uses it for the URL and sealed token.
+  `GetAllSettings` returns one statement's snapshot and propagates scan and row errors.
 - `Coordination` persists PostgreSQL security windows and spent CAPTCHA salts using database
   time. Refunds match the admitting window's expiry; failures deny admission.
 - `WithLock` uses PostgreSQL session advisory key space 3, scoped to current schema and job;
-  probe failures cancel work and the physical connection is discarded on exit. SQLite uses
+  probe failures cancel work within about two seconds; this does not fence stale writes.
+  `SettingsStore.SetSettingIfAbsent` atomically retains the first value and returns it; the
+  recovery adapter uses it for write-once key ID and topology rows. The physical connection
+  is discarded on exit. SQLite uses
   persistent OS file locks next to its database. Session pooling is required for PostgreSQL.
 - PostgreSQL schema migration and username-index creation run under one lock. Pools need
-  at least three connections for worker, job ownership and queries.
+  at least `config.MinPostgresOpenConns` (4): worker lock, backup-run lock, the snapshot
+  transaction and one for queries and readiness (`TestSnapshotLeavesAConnectionAtThePoolFloor`).
+- `Store.SnapshotToSQLite` (PostgreSQL only) reads every `migrationTables` table in one
+  `REPEATABLE READ READ ONLY` transaction on one pooled connection, writes a fresh SQLite file
+  opened with `Open` (current scaffold schema), verifies per-table counts and row digests
+  against that transaction, then integrity and foreign keys, and leaves one self-contained
+  file. An unknown table/column, a missing table or a non-current migration history is
+  `ErrSnapshotSchema`; nothing partial is produced. It shares `copyTable`/`tableDigest`/
+  `migrationValues` with `MigrateToPostgres`; `migrationTables` is the single ordered list for
+  both directions.
 - `MigrateToPostgres` validates original migration history before upgrading a private snapshot,
   preflights destination rows before any DDL, refuses unknown source/target schemas and
   populated targets, copies all scaffold tables in one transaction, verifies counts/content,

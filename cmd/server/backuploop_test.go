@@ -59,9 +59,9 @@ func TestBackupLoopClosesDoneOnCancel(t *testing.T) {
 // default is 10s. Past either, SIGKILL lands before an interrupted backup has recorded its
 // outcome.
 func TestShutdownBudgetFitsTheGracePeriods(t *testing.T) {
-	budget := shutdownTimeout + backupWaitTimeout
+	budget := readinessDrainDelay + shutdownTimeout + backupWaitTimeout
 	if limit := 20 * time.Second; budget > limit {
-		t.Errorf("shutdownTimeout+backupWaitTimeout is %s; keep it within %s so a 30s termination grace has margin", budget, limit)
+		t.Errorf("readinessDrainDelay+shutdownTimeout+backupWaitTimeout is %s; keep it within %s so a 30s termination grace has margin", budget, limit)
 	}
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yml"))
 	if err != nil {
@@ -76,7 +76,7 @@ func TestShutdownBudgetFitsTheGracePeriods(t *testing.T) {
 		t.Fatalf("stop_grace_period %q: %v", m[1], err)
 	}
 	if grace <= budget {
-		t.Errorf("stop_grace_period %s does not cover shutdownTimeout+backupWaitTimeout (%s)", grace, budget)
+		t.Errorf("stop_grace_period %s does not cover readinessDrainDelay+shutdownTimeout+backupWaitTimeout (%s)", grace, budget)
 	}
 }
 

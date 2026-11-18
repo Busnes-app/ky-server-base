@@ -13,6 +13,26 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   PostgreSQL read the current stored list per request; diagnostic exemption counts stay local.
 - Update `docs/INTERFACES.md` when a route's inputs, outputs, permissions or errors change.
 - POST `/api/auth/change-password` accepts any local-account session (restricted or not; federated accounts get 409), current password and a different policy-valid new password. Browser CSRF and per-IP/account limits apply. Success revokes all sessions and requires sign-in again; flagged sessions get `password_change_required` on protected routes and public-only settings.
+- `GET|HEAD /livez` and `/readyz` (`health.go`) are unauthenticated, `Cache-Control: no-store`,
+  status word only. Readiness is `!draining && Store.Ping` within 1s, cached 1s behind a
+  mutex held across the Ping; `StartDraining` (SIGTERM) turns it 503 while other routes serve.
+- Pin and pairing handlers pin through `backup.PinRecoveryKey` (database-wide `recovery-pin`
+  lock, read back; `fs.ErrExist`/`ErrKeyMismatch` → 409, `ErrPinBusy`/`ErrPinOwnershipLost` → 503); export
+  and status call `backup.SyncRecoveryKey` first, and its `ErrRecoveryKeyUnavailable` is the
+  status route's `recovery_key_error` and a 412 on export and deposit.
+- Pairing refresh and unpair use `backup.StorePairing`/`ClearPairing` to commit the URL and
+  sealed credential together; readers use the operation's coherent settings snapshot.
+- `ServeHTTP` ends ordinary request contexts before `WriteTimeout` (14s with the 15s
+  default), leaving time for an error reply. Only deposit, drill and export-capsule have
+  the longer budget; backup status and management stay bounded.
+  `TestStalledRequestEndsAtTheWriteDeadline` and `TestFrozenDatabaseStillAllowsAnErrorReply`
+  cover the route classification and real listener response.
+- Backup status returns 503 on a deadline or failed settings read, never a successful
+  guessed unpaired state. `TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired` freezes
+  settings after authentication and also covers immediate store errors. A failure confined
+  to shared-key synchronization is also 503 for status, export and deposit, not an absent
+  pin; `TestBackupEndpointsDoNotHideARecoveryRecordReadFailure` covers a replica without
+  its local public-key file and successful materialization on retry.
 - All JSON API endpoints return structured errors `{"error": "message"}` upon failure.
 - Non-API routes fall back to serving `web.Handler()` for client-side SPA routing.
 - New routes are unauthenticated only by deliberate choice; privileged ones are registered wrapped in `s.requireAdmin` in `routes()`, so the trust level of every route is readable in one place.
@@ -42,10 +62,10 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
 - The KyIdentity callback adopts the SCIM row whose externalId equals the subject (`adoptSCIMUser`) before provisioning; a username collision is 409 and a disabled account 403. It then applies `IdentityClaims.LocalRole()` (per-app `roles`, else legacy `role`, else unchanged) with `UpdateUserRole` (role alone, so a concurrent SCIM profile edit stays; it revokes the other sessions in the same transaction) before issuing the session.
 - Capsule export, restore drill and deposit extend their write deadline to `depositWriteBudget`; the listener's 15 s `WriteTimeout` is for JSON replies.
 - API request bodies are capped at 1 MiB and all responses receive baseline CSP, anti-framing, MIME-sniffing, and referrer-policy headers.
-- `GET /api/settings` tiers its payload: public fields for the login screen, `db_driver`/`scim_enabled` for any session, and `extra_settings` for admins only; KyRecovery tokens are omitted in both sealed and legacy plaintext forms, dropped by the `kyrecovery_token` key prefix rather than by literal key name.
+- `GET /api/settings` tiers its payload: public fields for the login screen, `db_driver`/`scim_enabled` for any session, and `extra_settings` for admins only; KyRecovery tokens are omitted in both sealed and legacy plaintext forms, dropped by the `kyrecovery_token` key prefix rather than by literal key name, and `replica_config_fingerprint` is dropped too.
 
 ## Verification
-- `go test -v ./internal/api/...` (`authz_test.go` pins the per-role exposure of every privileged route; `backup_test.go` the backup routes, on SQLite only because a run snapshots the database)
+- `go test -v ./internal/api/...` (`authz_test.go` pins the per-role exposure of every privileged route; `backup_test.go` the backup routes on both drivers; `health_test.go` probes, cache, drain and the request deadline; `replica_key_test.go` cross-replica key materialization, concurrent pins on two replicas and the PostgreSQL unknown-schema 412)
 - `scripts/smoke-test.sh` asserts the same boundaries against a running binary
 
 ## Child DOX Index

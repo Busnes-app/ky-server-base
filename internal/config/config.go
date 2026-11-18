@@ -122,6 +122,11 @@ const DefaultPoWDifficulty = 500000
 // and uploads it, and KyRecovery admits 60 deposits per token per 15 minutes.
 const MinDepositInterval = 15 * time.Minute
 
+// MinPostgresOpenConns is the smallest PostgreSQL pool accepted: a scheduled backup holds the
+// worker lock, the backup-run lock and the snapshot transaction at once, and readiness probes
+// and requests need one more (store.TestSnapshotLeavesAConnectionAtThePoolFloor).
+const MinPostgresOpenConns = 4
+
 // DefaultAppName is the service name an unconfigured instance runs under. Capsules are sealed
 // under it, so the restore CLI has to agree with it without loading a whole Config.
 const DefaultAppName = "Busnes.app"
@@ -188,6 +193,11 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("KY_BACKUP_KEEP: must be at least 1, got %d", backupKeep)
 	}
 
+	maxOpenConns := getEnvInt("KY_DB_MAX_OPEN_CONNS", 25)
+	if driver == "postgres" && maxOpenConns < MinPostgresOpenConns {
+		return nil, fmt.Errorf("KY_DB_MAX_OPEN_CONNS: PostgreSQL needs at least %d connections, got %d", MinPostgresOpenConns, maxOpenConns)
+	}
+
 	trustedProxies, err := ParseTrustedProxies(getEnv("KY_TRUSTED_PROXIES", ""))
 	if err != nil {
 		return nil, fmt.Errorf("KY_TRUSTED_PROXIES: %w", err)
@@ -223,7 +233,7 @@ func LoadFromEnv() (*Config, error) {
 			Driver:          driver,
 			DSN:             dsn,
 			DataDir:         dataDir,
-			MaxOpenConns:    getEnvInt("KY_DB_MAX_OPEN_CONNS", 25),
+			MaxOpenConns:    maxOpenConns,
 			MaxIdleConns:    getEnvInt("KY_DB_MAX_IDLE_CONNS", 5),
 			ConnMaxLifetime: 15 * time.Minute,
 		},

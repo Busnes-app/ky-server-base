@@ -29,15 +29,25 @@ services:
     pull_policy: missing
     container_name: ky_server_base
     restart: unless-stopped
-    # Covers cmd/server's shutdownTimeout (5s HTTP drain) plus backupWaitTimeout (10s for an
-    # interrupted backup to record its outcome). Docker's default is 10s.
+    # Covers cmd/server's readinessDrainDelay (5s at 503), shutdownTimeout (5s HTTP drain) and
+    # backupWaitTimeout (10s for an interrupted backup to record its outcome). Docker's
+    # default is 10s.
     stop_grace_period: 30s
+    # /readyz is 503 while the database is unreachable or the server is draining. busybox wget
+    # is in the image; no extra binary.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     ports:
       - "8080:8080"
     environment:
       - KY_PORT=8080
       - KY_HOST=0.0.0.0
-      - KY_APP_NAME=Busnes.app Base
+      # Also the KyRecovery service label; keep an existing valid identity unchanged.
+      - KY_APP_NAME=${KY_APP_NAME:-Busnes.app}
       - KY_APP_URL=${KY_APP_URL:-http://localhost:8080}
       - KY_DB_DRIVER=sqlite
       - KY_DATA_DIR=/app/data
@@ -51,7 +61,9 @@ services:
       - KY_SSO_ENABLED=true
       - KY_SCIM_ENABLED=true
       # Read from .env, so rotating either there and running `docker compose up -d` takes
-      # effect. Left empty, the server mints a fresh one at every start.
+      # effect. Left empty, the server mints a fresh one at every start. PostgreSQL replicas:
+      # follow docs/REPLICAS.md Rotation (accept-replica-config first), or every replica
+      # refuses to start.
       - KY_SESSION_SECRET=${KY_SESSION_SECRET:-}
       - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:-}
     # Every other setting in docs/INTERFACES.md is read from .env: KY_KYSIGNON_*,

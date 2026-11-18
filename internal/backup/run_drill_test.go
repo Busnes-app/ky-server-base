@@ -38,7 +38,7 @@ func TestRunDrillSerializesProcessesAndReleasesAfterExit(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "test")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

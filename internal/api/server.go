@@ -53,6 +53,9 @@ type Server struct {
 	// upload, and the pairing claim. StopDetached cancels it; a dropped connection does not.
 	stopping     context.Context
 	stopDetached context.CancelFunc
+	// draining turns /readyz to 503 on shutdown; ready caches its store Ping.
+	draining atomic.Bool
+	ready    readiness
 }
 
 // StopDetached aborts the slow legs of every detached handler in flight: a backup's snapshot
@@ -292,6 +295,11 @@ func (s *Server) allowPerIP(r *http.Request, bucket string, limit int, window ti
 }
 
 func (s *Server) routes() {
+	// Probes are unauthenticated and say only ok/ready/unready; a proxy may keep them internal.
+	// A GET pattern also answers HEAD.
+	s.mux.HandleFunc("GET /livez", s.handleLivez)
+	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+
 	// Auth
 	s.mux.HandleFunc("/api/auth/pow-challenge", s.handlePoWChallenge)
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -409,6 +417,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	}
+	// Leave response time before the listener's write deadline. Only the three long
+	// capsule operations extend that deadline; backup status and management stay bounded.
+	longBackup := r.URL.Path == "/api/backup/deposit" || r.URL.Path == "/api/backup/drill" || r.URL.Path == "/api/backup/export-capsule"
+	if d := s.config.Server.WriteTimeout; d > 0 && !longBackup {
+		ctx, cancel := context.WithTimeout(r.Context(), d-min(time.Second, d/10))
+		defer cancel()
+		r = r.WithContext(ctx)
 	}
 
 	// SCIM middleware

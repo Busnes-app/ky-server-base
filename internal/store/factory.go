@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,9 +91,9 @@ func openPostgresDB(ctx context.Context, dsn string, maxOpen, maxIdle int, maxLi
 	if maxOpen <= 0 {
 		maxOpen = 25
 	}
-	if maxOpen < 3 {
+	if maxOpen < config.MinPostgresOpenConns {
 		_ = db.Close()
-		return nil, errors.New("PostgreSQL needs at least three connections: worker ownership, job ownership and queries")
+		return nil, fmt.Errorf("PostgreSQL needs at least %d connections: worker ownership, job ownership, a backup snapshot and queries", config.MinPostgresOpenConns)
 	}
 	if maxIdle <= 0 {
 		maxIdle = 5

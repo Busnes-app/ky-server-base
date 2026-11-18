@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -242,6 +243,9 @@ type fakePairer struct {
 }
 
 func (f fakePairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`).MatchString(serviceName) || strings.Contains(serviceName, "..") {
+		return recoveryclient.PairingResult{}, errors.New("KyRecovery refuses this service label")
+	}
 	return f.result, nil
 }
 
@@ -345,7 +349,7 @@ func TestPairRemoteStoresTheRecoveryKey(t *testing.T) {
 // A recovery.pub swapped under a live instance must stop the export, not produce a capsule
 // sealed to a key the suite's custodians cannot open.
 func TestExportCapsuleRefusesAMismatchedRecoveryKey(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 
 	pinned, err := recoverykey.Generate()
@@ -727,8 +731,8 @@ func storePairing(t *testing.T, cfg *config.Config, st store.Store, url, token s
 	return recoveryclient.StorePairing(backup.Settings(context.Background(), st.Settings()), sealer, url, token)
 }
 
-// setupSQLiteServer is setupTestServer pinned to SQLite: deposits snapshot the database, and
-// only the SQLite path can. The Postgres CI job would otherwise (correctly) refuse them.
+// setupSQLiteServer is pinned to SQLite for tests that construct SQLite files directly.
+// Other API tests use setupTestServer to exercise both backends in CI.
 func setupSQLiteServer(t *testing.T) (*api.Server, store.Store, *config.Config) {
 	t.Helper()
 	t.Setenv("KY_TEST_POSTGRES_DSN", "")
@@ -736,7 +740,7 @@ func setupSQLiteServer(t *testing.T) (*api.Server, store.Store, *config.Config) 
 }
 
 func TestDepositRequiresAPairing(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	fake := &fakeDepositor{}
 	api.SetRecoveryClientForTest(srv, fake)
 	session := loginAs(t, srv, st, "alice", "admin")
@@ -749,7 +753,7 @@ func TestDepositRequiresAPairing(t *testing.T) {
 }
 
 func TestDepositSealsToThePinnedKeyAndAudits(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, err := recoverykey.Generate()
 	if err != nil {
@@ -873,7 +877,7 @@ func (c *cancellingDepositor) Deposit(ctx context.Context, url, token string, co
 // admin's connection is gone; otherwise KyRecovery holds a capsule this instance has no
 // record of, which is the value a restore is checked against.
 func TestDepositOutlivesTheRequest(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backup.Settings(ctx, st.Settings()), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {

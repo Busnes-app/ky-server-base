@@ -353,12 +353,6 @@ export const Backup: React.FC = () => {
       {status?.database_path_error && (
         <Alert kind="error">No backups are made: {status.database_path_error}.</Alert>
       )}
-      {status && status.database_driver !== 'sqlite' && (
-        <Alert kind="warn">
-          No backups are made on PostgreSQL: a capsule can only snapshot SQLite, so nothing is sealed, copied or
-          deposited. Back this database up with pg_dump on its own schedule.
-        </Alert>
-      )}
       {status && !keyPinned && <Alert kind="warn">No backups are being made. Pair with KyRecovery or pin the suite recovery key below.</Alert>}
       {status && keyPinned && !paired && !hasLocal && (
         <Alert kind="warn">A key is pinned but capsules have nowhere to go. Pair with KyRecovery, or set KY_BACKUP_DIR to keep copies on this host.</Alert>

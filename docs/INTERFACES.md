@@ -58,6 +58,16 @@ without method restrictions; do not rely on extra methods. The SPA catch-all can
 return HTML with 200 for an unknown path or wrong-method backup request. Check the
 response media type and documented body, not just the status code.
 
+## Health
+
+Unauthenticated, registered ahead of the SPA, `Cache-Control: no-store`, nothing beyond the
+status word. A proxy may keep them internal. Source: [health](../internal/api/health.go).
+
+| Method and path | Output |
+|---|---|
+| GET or HEAD `/livez` | 200 `{"status":"ok"}`; never touches the database |
+| GET or HEAD `/readyz` | 200 `{"status":"ready"}` when not draining and a database ping succeeds within 1 s; otherwise 503 `{"status":"unready"}`. One ping a second at most, cached behind a lock. On SIGTERM it turns 503 five seconds before the listener closes |
+
 ## Authentication
 
 Sources: [auth handlers](../internal/api/auth_handlers.go),
@@ -327,9 +337,18 @@ must be HTTPS; redirects and reserved destinations are refused, with an explicit
 opt-in for private/CGNAT LAN destinations. Compare the recovery-key fingerprint out
 of band. Manual pinning uses standard Base64 of the 1216-byte suite public key and
 the ceremony's topology (`2 <= threshold <= total_shares <= 255`). A different
-existing pin is 409. Pairing/pinning are write-once; unpair deletes only the URL and
+existing pin is 409. Pins and pairings take a database-wide lock and are read back, so on
+PostgreSQL replicas two different keys pinned at once give one 200 and one 409; another
+replica holding the lock past 10 seconds, or an unconfirmed operation after lock loss, is
+503. Some write-once rows may already have committed: inspect status/audit and retry with
+the same key and topology to complete them. Pairing/pinning are write-once; unpair deletes only the URL and
 sealed token, leaving the pin, receipts and local copies. A KyRecovery administrator
 must separately revoke the remote token. See the [operational guide](DISASTER-RECOVERY.md#disaster-recovery).
+
+Pairing refresh commits the URL and sealed token together; a failed write keeps the
+previous pairing. Unpair removes both together. Each backup operation reads a coherent
+pair, including when another replica changes it. An operation already in flight may
+finish with its earlier pairing; unpair does not revoke the remote token.
 
 Schedule seconds must be zero (off) or at least 900; invalid values return 400.
 The stored setting overrides the environment default. A drill's HTTP 200 describes
@@ -350,18 +369,22 @@ recorded backup. A deposit in flight when the server is told to stop answers 503
 snapshot or upload is cancelled, the interruption is audited, and the scheduled backup
 runs again after the restart. These shared formats are supplied by the pinned ky-primitives module.
 
-Status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
+Status returns 503 when settings cannot be read or its deadline expires; it never reports
+missing pairing or key state based on a failed read. Retry while retaining the last good
+status. A successful status always includes `paired`, `key_pinned`, `app_name`, `app_version`,
 `allow_private_recovery`, `database_driver` and `members` (payload names).
 Conditional fields are `recovery_url`, `recovery_key_id`, `threshold`, `total_shares`,
 `recovery_key_error`, `database_path_error` (the SQLite database is not `<KY_DATA_DIR>/ky_server.db`, so nothing is sealed), `last_deposit` (receipt), `local_dir`, `local_keep`,
 `local_copies:[{name,size_bytes,created_at}]`, `local_error`, `interval_sec`,
 `min_interval_sec` and `next_run_at`. The recovery bearer token is never returned.
 
-Capsule creation currently requires SQLite at `<KY_DATA_DIR>/ky_server.db`, the only
+On SQLite, capsule creation requires the database at `<KY_DATA_DIR>/ky_server.db`, the only
 path a capsule restores; a `KY_DB_DSN` pointing elsewhere refuses to seal (412, failed
-drill). No consistent PostgreSQL snapshot is implemented. Export/deposit return 412 for missing prerequisites (key, destination,
-database snapshot, or disallowed private destination as applicable); a PostgreSQL
-drill returns 200 with `passed:false`. A changed pin or concurrent deposit is 409;
+drill). On PostgreSQL the database is snapshotted from one read-only transaction into the same
+member; a schema with unknown tables, columns or migration history refuses (412, failed
+drill) naming the product adapter it needs. Export/deposit return 412 for missing
+prerequisites (key, destination, database snapshot, or disallowed private destination as
+applicable); a drill without a snapshot returns 200 with `passed:false`. A changed pin or concurrent deposit is 409;
 capsule size-cap failure is 413; remote deposit refusal is 502, which may still
 report a successful local copy. Other local failures are 500. Pairing with invalid
 input or a failed remote claim is 400; unpair while unpaired is 412. Pair, pin and
@@ -378,13 +401,14 @@ normally go to stderr. Setup/operational failures return a nonzero exit status.
 | Invocation after `ky_server_base` | Inputs and effect | Output |
 |---|---|---|
 | No subcommand | Load environment, open store, bootstrap if empty, serve HTTP and run configured backup schedule | Startup/operation logs; listener defaults to `:8080` |
-| `migrate-postgres [--source PATH] [--check]` | Stopped SQLite source and empty PostgreSQL target from `KY_MIGRATE_POSTGRES_DSN`; verify a private snapshot and copy transactionally; check-only rolls back target rows | JSON row counts and a cutover reminder on stdout; nonzero on failure |
+| `migrate-postgres [--source PATH] [--check]` | Stopped SQLite source and empty PostgreSQL target from `KY_MIGRATE_POSTGRES_DSN`; the source directory must be writable (lock and private snapshot); verify a private snapshot and copy transactionally; check-only rolls back target rows. A source pin with no `recovery_public_key` record is recorded from the `recovery.pub` beside the source; a pin without that file is refused before anything is copied | JSON row counts and a cutover reminder on stdout; nonzero on failure |
+| `accept-replica-config` | PostgreSQL only (refused on SQLite); under the bootstrap lock, rewrite the shared-configuration fingerprint from this process's environment after a deliberate change; audited as `admin.replica_config_accepted` with the changed field names. A differing `KY_ENCRYPTION_KEY` is refused, never recorded | The changed field names on stdout; never values or fingerprints |
 | `version` | No inputs or data-directory access | Version text on stdout; use the source commit/image digest for exact build identity |
 | `init-admin -username NAME -password VALUE [-promote]` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions, require password replacement. An existing non-local account is refused; an existing local account that is not an active administrator is refused unless `-promote` is given (exit 1 either way) | Confirmation, and the previous role and status of an existing account, on stderr |
-| `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
+| `backup-drill` | Collect the payload (SQLite file, or a PostgreSQL snapshot); seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
 | `export-capsule [-out PATH]` | Require suite pin; seal payload to custodian public key; default output `<capsule-id>.kycap` | File plus capsule/key/size confirmation on stderr |
 | `deposit` | Seal once and deliver to configured destinations | Audit record; remote success logs capsule/time/digest on stderr; failures on stderr; no JSON stdout contract |
-| `restore -capsule PATH -to DIRECTORY [-service NAME]` | Read custodian shares from stdin, one `ky2-…` line each; target must be empty; expected service defaults to `KY_APP_NAME`, then `Busnes.app` | Authenticated manifest/restore result on stdout; optional terminal prompt on stderr. Sets the restored database's backup schedule to off (`backup_interval_sec` = 0) and says so; the admin turns it back on |
+| `restore -capsule PATH -to DIRECTORY [-service NAME]` | Read custodian shares from stdin, one `ky2-…` line each; target must be empty; expected service defaults to `KY_APP_NAME`, then `Busnes.app` | Authenticated manifest/restore result on stdout; optional terminal prompt on stderr. In the restored database, in one transaction: the backup schedule off (`backup_interval_sec` = 0), every `sessions` row deleted and the `replica_config_fingerprint` row deleted; it prints all three. The admin turns the schedule back on |
 
 `init-admin` currently takes its password in argv, so it can be visible in process
 listings or shell history. Custodian shares are accepted only on stdin. `backup-drill`
@@ -414,7 +438,7 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_DATA_DIR` | `./data` | Local database/key directory |
 | `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly. A SQLite DSN other than `<KY_DATA_DIR>/ky_server.db` disables backups |
 | `KY_MIGRATE_POSTGRES_DSN` | Empty | Target DSN read only by `migrate-postgres`; keep in a protected environment file |
-| `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections; PostgreSQL requires at least 3 |
+| `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections; PostgreSQL requires at least 4 (worker lock, backup-run lock, snapshot transaction, one for requests and probes); lower refuses startup |
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
 | `KY_SESSION_SECRET` | Fresh 32-byte random hex on development SQLite | Required in production and with PostgreSQL; same value on every replica. PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
@@ -444,8 +468,10 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 
 Loading configuration can create the encryption-key file. The fixed read/write
 timeouts are 15 seconds, session lifetime seven days and database connection lifetime
-15 minutes; these are not environment options. Backup deposit extends its response
-write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
+15 minutes; these are not environment options. Ordinary requests, including backup status
+and management, end after 14 seconds, leaving one second to write an error before the
+listener deadline. Only `/api/backup/deposit`, `/api/backup/export-capsule` and
+`/api/backup/drill` extend their response write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
 at most 10 more for interrupted backup work to record its outcome, so a 30-second stop
 grace period is enough. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
 stored schedule precedence, container DNS overrides and backup retention. Compose's
@@ -468,10 +494,24 @@ an elected scheduled worker; no Kubernetes API is required.
 
 `migrate-postgres [--source <SQLite file>] [--check]` requires `KY_MIGRATE_POSTGRES_DSN`
 from the environment and stopped servers. The default source is
-`<KY_DATA_DIR>/ky_server.db`. It verifies a private snapshot's contents against the empty
-target before committing, prints JSON row counts followed by a cutover reminder, and exits
+`<KY_DATA_DIR>/ky_server.db` (`./data/ky_server.db` when unset). Relative source paths resolve
+from the command's working directory before the read-only preflight and copy. It verifies a
+private snapshot's contents against the empty target before committing, prints JSON row
+counts followed by a cutover reminder, and exits
 nonzero on failure. `--check` rolls back copied rows but may initialize empty target tables.
 Unknown product tables/columns require an adapter. Original SQLite, keys and configuration
-stay in place. PostgreSQL capsules remain unsupported; configure protected PostgreSQL backups.
+stay in place. PostgreSQL capsules snapshot the database from one read-only transaction into
+the same `data/ky_server.db` member; an unknown schema answers 412 (`ErrNoDatabaseSnapshot`).
 With PostgreSQL, `KY_SESSION_SECRET` and (if SCIM is enabled) `KY_SCIM_TOKEN` must be explicit,
-identical across replicas; `KY_DB_MAX_OPEN_CONNS` must be at least 3.
+identical across replicas; `KY_DB_MAX_OPEN_CONNS` must be at least 4. On PostgreSQL every
+start compares the shared settings with the recorded fingerprint and refuses, naming the
+fields, when they differ; `accept-replica-config` records a deliberate change. A replica
+writes its missing `recovery.pub` from the pin in the database (`recovery_public_key`
+setting, public data) under the `recovery-pin` lock and refuses to start when its file
+names another key; a pin no replica has published is reported on the status route
+(`recovery_key_error`), at startup and in scheduled-run audit rows, and export/deposit
+answer 412 with the repair. Startup removes leftover `snapshot-*` scratch directories.
+`docker-compose.replicas.yml` adds `KY_REPLICAS`, `KY_DB_DSN`, `KY_POSTGRES_PASSWORD`,
+`KY_ENCRYPTION_KEY`, `KY_PROXY_IP`, `KY_REPLICA_SUBNET`, `KY_EDGE_TRUSTED_PROXIES` (refused
+together with `KY_PROXY_BIND`), `KY_PROXY_BIND` and `KY_PROXY_PORT`
+([Replicas](REPLICAS.md#compose-replicas-on-one-host)).

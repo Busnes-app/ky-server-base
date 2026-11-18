@@ -37,6 +37,9 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "accept-replica-config":
+			runAcceptReplicaConfig()
+			return
 		case "init-admin":
 			runInitAdmin(os.Args[2:])
 			return
@@ -61,14 +64,18 @@ func main() {
 	runServer()
 }
 
+// readinessDrainDelay is how long a stopping server keeps serving with /readyz at 503: five
+// one-second proxy probes. Part of the shutdown budget below.
+const readinessDrainDelay = 5 * time.Second
+
 // shutdownTimeout drains in-flight HTTP requests. Backup work is cancelled before the drain
 // starts, so an interrupted deposit request can still answer inside it.
 const shutdownTimeout = 5 * time.Second
 
 // backupWaitTimeout bounds the wait for cancelled backup work to unwind. The snapshot and the
 // upload stop at once; what may still be running is the sealing and local copy of one capsule
-// already collected, and the database writes that record the outcome. The two timeouts
-// together must stay inside Kubernetes' default 30s termination grace and docker-compose.yml's
+// already collected, and the database writes that record the outcome. With the drain delay the
+// three must stay inside Kubernetes' default 30s termination grace and docker-compose.yml's
 // stop_grace_period; TestShutdownBudgetFitsTheGracePeriods holds them in step.
 const backupWaitTimeout = 10 * time.Second
 
@@ -97,6 +104,84 @@ func runServer() {
 	runConfiguredServer(cfg)
 }
 
+// bootstrap runs once per start under the shared "bootstrap" lock: the first admin on an empty
+// database, then the replica configuration check on PostgreSQL.
+func bootstrap(ctx context.Context, cfg *config.Config, st store.Store) error {
+	for {
+		won, err := st.Coordination().WithLock(ctx, "bootstrap", func(ctx context.Context) error {
+			if err := ensureBootstrapAdmin(ctx, st); err != nil {
+				return err
+			}
+			if st.Driver() != "postgres" {
+				return nil
+			}
+			return checkReplicaConfig(ctx, cfg, st.Settings())
+		})
+		if err != nil || won {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// prepareStart is everything that must pass before the server listens: bootstrap and the
+// replica configuration check, removal of plaintext snapshots a killed process left, and the
+// recovery key. A recovery.pub naming another key refuses the start; a pin no replica can
+// load is repaired from the screen, so it is logged and the server starts.
+func prepareStart(ctx context.Context, cfg *config.Config, st store.Store) error {
+	if err := bootstrap(ctx, cfg, st); err != nil {
+		return fmt.Errorf("bootstrap failed: %w", err)
+	}
+	if n, err := backup.RemoveStaleSnapshots(cfg.Database.DataDir); err != nil {
+		log.Printf("[BACKUP] leftover snapshot scratch under %s not removed: %v", cfg.Database.DataDir, err)
+	} else if n > 0 {
+		log.Printf("[BACKUP] removed %d snapshot scratch directories a stopped process left", n)
+	}
+	err := backup.SyncRecoveryKey(ctx, cfg, st)
+	if errors.Is(err, backup.ErrRecoveryKeyUnavailable) {
+		log.Printf("[BACKUP] %s", recoveryclient.AuditSafe(err.Error()))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("recovery key: %w (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten; for the replica overlay see the app-volume repair in docs/REPLICAS.md)", err)
+	}
+	return nil
+}
+
+// ensureBootstrapAdmin creates the default admin if the database has no users.
+func ensureBootstrapAdmin(ctx context.Context, st store.Store) error {
+	count, err := st.Users().CountUsers(ctx)
+	if err != nil || count != 0 {
+		return err
+	}
+	adminPass := os.Getenv("KY_ADMIN_PASSWORD")
+	if adminPass == "" {
+		adminPass = crypto.RandomHex(12)
+		log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
+	}
+	hash, err := password.Hash(adminPass)
+	if err != nil {
+		return fmt.Errorf("hash bootstrap password: %w", err)
+	}
+	if err := st.Users().CreateUser(ctx, &store.User{
+		ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+		Username:           "admin",
+		DisplayName:        "Administrator",
+		PasswordHash:       hash,
+		Role:               "admin",
+		Status:             "active",
+		SSOProvider:        "local",
+		MustChangePassword: true,
+	}); err != nil {
+		return fmt.Errorf("create bootstrap admin: %w", err)
+	}
+	return nil
+}
+
 func runConfiguredServer(cfg *config.Config) {
 	if cfg.Backup.AllowPrivateRecovery {
 		log.Printf("[BACKUP] KY_BACKUP_ALLOW_PRIVATE_RECOVERY is on: RFC1918 and CGNAT destinations admitted; loopback, link-local and other reserved addresses remain refused (HTTPS still required)")
@@ -116,45 +201,8 @@ func runConfiguredServer(cfg *config.Config) {
 	}
 	defer st.Close()
 
-	for {
-		won, err := st.Coordination().WithLock(ctx, "bootstrap", func(ctx context.Context) error {
-			// Ensure default admin user exists if database is empty
-			count, err := st.Users().CountUsers(ctx)
-			if err != nil {
-				return err
-			}
-			if count == 0 {
-				adminPass := os.Getenv("KY_ADMIN_PASSWORD")
-				if adminPass == "" {
-					adminPass = crypto.RandomHex(12)
-					log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
-				}
-				hash, err := password.Hash(adminPass)
-				if err != nil {
-					return fmt.Errorf("hash bootstrap password: %w", err)
-				}
-				if err := st.Users().CreateUser(ctx, &store.User{
-					ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-					Username:           "admin",
-					DisplayName:        "Administrator",
-					PasswordHash:       hash,
-					Role:               "admin",
-					Status:             "active",
-					SSOProvider:        "local",
-					MustChangePassword: true,
-				}); err != nil {
-					return fmt.Errorf("create bootstrap admin: %w", err)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			log.Fatalf("Bootstrap failed: %v", err)
-		}
-		if won {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	if err := prepareStart(ctx, cfg, st); err != nil {
+		log.Fatal(err)
 	}
 
 	srv := api.NewServer(cfg, st)
@@ -183,16 +231,25 @@ func runConfiguredServer(cfg *config.Config) {
 	}()
 
 	<-stop
-	log.Println("[KY-BASE] Shutting down gracefully...")
+	gracefulStop(srv, httpServer, stopBackups, cancel, backupDone, readinessDrainDelay)
+}
+
+// gracefulStop is the SIGTERM order: /readyz turns 503, backup work is cancelled, the server
+// keeps serving for drain so a proxy probing every second takes this replica out of rotation,
+// then the listener drains in-flight requests and the cancelled backup work unwinds.
+func gracefulStop(srv *api.Server, httpServer *http.Server, stopBackups, cancel func(), backupDone <-chan struct{}, drain time.Duration) {
+	srv.StartDraining()
+	log.Printf("[KY-BASE] draining: /readyz answers 503; serving %s more before closing the listener", drain)
 
 	// Backups first: a snapshot or upload in flight is aborted now and runs again after the
 	// restart, so the waits below take seconds whatever the backup was doing.
 	stopBackups()
 	srv.StopDetached()
+	time.Sleep(drain)
+	log.Println("[KY-BASE] Shutting down gracefully...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
-
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
@@ -275,7 +332,7 @@ func backupLoop(ctx context.Context, cfg *config.Config, st store.Store, client 
 			if err != nil || !on || time.Now().Before(next) {
 				return err
 			}
-			res, err := backup.Run(ctx, cfg, rc, st.Settings(), client)
+			res, err := backup.Run(ctx, cfg, rc, st, client)
 			if !errors.Is(err, recoveryclient.ErrNotPaired) && !errors.Is(err, recoveryclient.ErrNoDestination) {
 				recordRun(context.WithoutCancel(ctx), st, "system", res, err)
 			}
@@ -394,8 +451,8 @@ func initAdmin(ctx context.Context, st store.Store, username, pass string, promo
 }
 
 // collectFiles is what every CLI seal uses; the sealed-only members are safe here and nowhere else.
-func collectFiles(ctx context.Context, cfg *config.Config) recoveryclient.Payload {
-	payload, err := backup.Collect(ctx, cfg, appVersion)
+func collectFiles(ctx context.Context, cfg *config.Config, st store.Store) recoveryclient.Payload {
+	payload, err := backup.Collect(ctx, cfg, st, appVersion)
 	if err != nil {
 		log.Fatalf("Failed to collect backup files: %v", err)
 	}
@@ -414,7 +471,7 @@ func runBackupDrill(args []string) {
 	}
 	defer st.Close()
 
-	payload := collectFiles(ctx, cfg)
+	payload := collectFiles(ctx, cfg, st)
 	result, err := backup.RunDrill(ctx, cfg, payload)
 	if err != nil {
 		log.Fatalf("Drill execution error: %v", err)
@@ -452,11 +509,15 @@ func runExportCapsule(args []string) {
 	}
 	defer st.Close()
 
-	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backup.Settings(ctx, st.Settings()))
+	settings := backup.Settings(ctx, st.Settings())
+	if err := backup.SyncRecoveryKey(ctx, cfg, st); err != nil {
+		log.Fatalf("Recovery key: %v", err)
+	}
+	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, settings)
 	if err != nil {
 		log.Fatalf("Recovery key: %v", err)
 	}
-	raw, m, err := recoveryclient.Seal(collectFiles(ctx, cfg), key)
+	raw, m, err := recoveryclient.Seal(collectFiles(ctx, cfg, st), key)
 	if err != nil {
 		log.Fatalf("Seal: %v", err)
 	}
@@ -475,7 +536,9 @@ func runExportCapsule(args []string) {
 // touched; the authenticated manifest printed for comparison with KyRecovery's record.
 // The restored copy has scheduled deposits off: it may be a drill or a migration beside a
 // server still in service, and two servers depositing under one pairing alternate
-// KyRecovery's newest capsule between diverging databases.
+// KyRecovery's newest capsule between diverging databases. Its sessions are deleted (every
+// bearer credential minted before the capsule) and the replica fingerprint is dropped, so a
+// restore with rotated settings records its own.
 func restore(capsulePath, targetDir, expectService string, shares []string, stdout io.Writer) error {
 	if err := recoveryclient.Restore(capsulePath, targetDir, expectService, shares, stdout); err != nil {
 		return err
@@ -484,23 +547,47 @@ func restore(capsulePath, targetDir, expectService string, shares []string, stdo
 	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err := disableScheduledDeposits(dbPath); err != nil {
-		return fmt.Errorf("files restored, but scheduled deposits could not be turned off in %s (do not start it until they are): %w", dbPath, err)
+	sessions, err := prepareRestoredDatabase(dbPath)
+	if err != nil {
+		return fmt.Errorf("files restored, but %s could not be made safe to start (do not start it until it is): %w", dbPath, err)
 	}
 	fmt.Fprintln(stdout, "Scheduled deposits are OFF in the restored copy. Turn them back on in Backup & recovery once this server is the one in service.")
+	fmt.Fprintf(stdout, "Sessions deleted from the restored copy: %d. Everyone signs in again.\n", sessions)
+	fmt.Fprintln(stdout, "Replica configuration record removed from the restored copy; its first PostgreSQL start records a new one.")
 	return nil
 }
 
-// disableScheduledDeposits writes the "off" schedule (recoveryclient's backup_interval_sec
-// = 0) the admin screen writes, so the database setting wins over KY_BACKUP_DEPOSIT_INTERVAL.
-func disableScheduledDeposits(dbPath string) error {
+// prepareRestoredDatabase, in one transaction, writes the "off" schedule (recoveryclient's
+// backup_interval_sec = 0) the admin screen writes, so the database setting wins over
+// KY_BACKUP_DEPOSIT_INTERVAL; deletes every session; and deletes the replica fingerprint.
+// A product adds its own session-like tables here.
+func prepareRestoredDatabase(dbPath string) (int64, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = db.Exec(`INSERT INTO server_settings (key, value, updated_at) VALUES ('backup_interval_sec', '0', ?)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, time.Now().UTC())
-	return errors.Join(err, db.Close())
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO server_settings (key, value, updated_at) VALUES ('backup_interval_sec', '0', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM sessions`)
+	if err != nil {
+		return 0, err
+	}
+	sessions, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM server_settings WHERE key = ?`, config.ReplicaConfigSetting); err != nil {
+		return 0, err
+	}
+	return sessions, tx.Commit()
 }
 
 // stdinIsTerminal reports whether a human is typing, so a pipeline gets no stray prompt.

@@ -84,7 +84,8 @@ func TestRestoreRefusesOneShare(t *testing.T) {
 }
 
 // A restored copy may be a drill beside the live server: it must not deposit on its own,
-// even when the old server had a schedule saved.
+// even when the old server had a schedule saved. It also carries no session minted before
+// the capsule and no replica fingerprint.
 func TestRestoreTurnsScheduledDepositsOff(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "ky_server.db")
 	db, err := sql.Open("sqlite", src)
@@ -92,7 +93,10 @@ func TestRestoreTurnsScheduledDepositsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`CREATE TABLE server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at DATETIME NOT NULL);
-INSERT INTO server_settings VALUES ('backup_interval_sec', '86400', '2026-01-01 00:00:00');`); err != nil {
+INSERT INTO server_settings VALUES ('backup_interval_sec', '86400', '2026-01-01 00:00:00');
+INSERT INTO server_settings VALUES ('replica_config_fingerprint', '{}', '2026-01-01 00:00:00');
+CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL);
+INSERT INTO sessions VALUES ('a', 'u1'), ('b', 'u2');`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -108,8 +112,10 @@ INSERT INTO server_settings VALUES ('backup_interval_sec', '86400', '2026-01-01 
 	if err := restore(path, target, "busnes_app", shares, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Scheduled deposits are OFF") {
-		t.Fatalf("restore does not say deposits are off: %s", out.String())
+	for _, said := range []string{"Scheduled deposits are OFF", "Sessions deleted from the restored copy: 2", "Replica configuration record removed"} {
+		if !strings.Contains(out.String(), said) {
+			t.Fatalf("restore does not say %q: %s", said, out.String())
+		}
 	}
 	db, err = sql.Open("sqlite", filepath.Join(target, "data", "ky_server.db"))
 	if err != nil {
@@ -119,6 +125,10 @@ INSERT INTO server_settings VALUES ('backup_interval_sec', '86400', '2026-01-01 
 	var v string
 	if err := db.QueryRow(`SELECT value FROM server_settings WHERE key = 'backup_interval_sec'`).Scan(&v); err != nil || v != "0" {
 		t.Fatalf("backup_interval_sec = %q, %v; want 0", v, err)
+	}
+	var sessions, fingerprints int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM server_settings WHERE key = 'replica_config_fingerprint')`).Scan(&sessions, &fingerprints); err != nil || sessions != 0 || fingerprints != 0 {
+		t.Fatalf("restored copy keeps %d sessions and %d fingerprint rows (%v)", sessions, fingerprints, err)
 	}
 	entries, _ := os.ReadDir(filepath.Join(target, "data"))
 	if len(entries) != 1 {

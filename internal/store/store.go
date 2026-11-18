@@ -25,6 +25,10 @@ type Store interface {
 	Settings() SettingsStore
 	Coordination() CoordinationStore
 
+	// SnapshotToSQLite copies a PostgreSQL database, as of one transaction, into a new SQLite
+	// file; ErrSnapshotSchema for a schema this build does not know.
+	SnapshotToSQLite(ctx context.Context, dest string) error
+
 	Driver() string
 	Ping(ctx context.Context) error
 	Close() error
@@ -36,8 +40,9 @@ type CoordinationStore interface {
 	ReleaseAttempt(ctx context.Context, key string, expires int64) error
 	SpendChallenge(ctx context.Context, salt string, expires int64) (bool, error)
 	CleanExpired(ctx context.Context) error
-	// WithLock runs work only on the winner. Loss of the PostgreSQL connection cancels
-	// work; callbacks must honour cancellation. A losing contender returns false, nil.
+	// WithLock runs work on the winner. Connection loss cancels work when its next
+	// probe detects it (within about two seconds); it does not fence database writes.
+	// Irreversible writes need their own database invariant. A losing contender returns false, nil.
 	WithLock(ctx context.Context, name string, work func(context.Context) error) (bool, error)
 }
 
@@ -118,6 +123,10 @@ type AuditStore interface {
 type SettingsStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	SetSetting(ctx context.Context, key, val string) error
+	// UpdateSettings commits related writes and removals together.
+	UpdateSettings(ctx context.Context, values map[string]string, deleteKeys ...string) error
+	// SetSettingIfAbsent preserves an existing value and returns the value actually stored.
+	SetSettingIfAbsent(ctx context.Context, key, val string) (string, error)
 	DeleteSetting(ctx context.Context, key string) error
 	GetAllSettings(ctx context.Context) (map[string]string, error)
 }

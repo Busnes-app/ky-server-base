@@ -59,17 +59,24 @@ func (e databasePathError) Error() string        { return string(e) }
 func (e databasePathError) Is(target error) bool { return target == ErrNoDatabaseSnapshot }
 
 // Collect assembles the payload every sealing caller uses: the local application files
-// (SQLite database, configuration) plus the members that may only ever travel inside a
-// sealed capsule (the encryption key, the pinned recovery public key). Nothing that returns
-// from here may leave the process except through a Sealer.
-func Collect(ctx context.Context, cfg *config.Config, appVersion string) (recoveryclient.Payload, error) {
-	if strings.ToLower(cfg.Database.Driver) != "sqlite" {
+// (the database as one SQLite file, configuration) plus the members that may only ever travel
+// inside a sealed capsule (the encryption key, the pinned recovery public key). Nothing that
+// returns from here may leave the process except through a Sealer. st is read only on
+// PostgreSQL, which is snapshotted into the same data/ky_server.db member SQLite produces.
+func Collect(ctx context.Context, cfg *config.Config, st store.Store, appVersion string) (recoveryclient.Payload, error) {
+	var dbBytes []byte
+	var err error
+	switch strings.ToLower(cfg.Database.Driver) {
+	case "sqlite":
+		if err := CheckDatabasePath(cfg); err != nil {
+			return recoveryclient.Payload{}, err
+		}
+		dbBytes, err = snapshotSQLite(ctx, cfg.Database.DSN, cfg.Database.DataDir)
+	case "postgres":
+		dbBytes, err = snapshotPostgres(ctx, st, cfg.Database.DataDir)
+	default:
 		return recoveryclient.Payload{}, fmt.Errorf("%w: %s", ErrNoDatabaseSnapshot, cfg.Database.Driver)
 	}
-	if err := CheckDatabasePath(cfg); err != nil {
-		return recoveryclient.Payload{}, err
-	}
-	dbBytes, err := snapshotSQLite(ctx, cfg.Database.DSN, cfg.Database.DataDir)
 	if err != nil {
 		return recoveryclient.Payload{}, err
 	}
@@ -130,17 +137,44 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 		return nil, err
 	}
 	defer db.Close()
-	dir, err := os.MkdirTemp(dataDir, "snapshot-*")
+	dir, release, err := snapshotScratch(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer release()
 	path := filepath.Join(dir, "ky_server.db")
 	if err := recoveryclient.SQLiteSnapshot(ctx, db, path); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoDatabaseSnapshot, err)
 	}
-	// A capsule member cannot exceed the library limit, so refuse before reading a snapshot
-	// that could not be sealed anyway: reading a large one could exhaust the server's memory.
+	return readSnapshot(path)
+}
+
+// snapshotPostgres copies the live PostgreSQL schema, as of one transaction, into a SQLite
+// file in a private (0700) scratch directory under the data directory, removed on return
+// (RemoveStaleSnapshots after a crash).
+// A schema this build does not know is refused, never copied in part.
+func snapshotPostgres(ctx context.Context, st store.Store, dataDir string) ([]byte, error) {
+	dir, release, err := snapshotScratch(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	path := filepath.Join(dir, "ky_server.db")
+	if err := st.SnapshotToSQLite(ctx, path); err != nil {
+		if errors.Is(err, store.ErrSnapshotSchema) {
+			return nil, fmt.Errorf("%w: %v", ErrNoDatabaseSnapshot, err)
+		}
+		return nil, err
+	}
+	if snapshotTaken != nil {
+		snapshotTaken(dir)
+	}
+	return readSnapshot(path)
+}
+
+// readSnapshot refuses before reading a snapshot no capsule member could carry: reading a
+// large one could exhaust the server's memory.
+func readSnapshot(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -153,6 +187,9 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 	}
 	return os.ReadFile(path)
 }
+
+// snapshotTaken observes the scratch directory while it holds a PostgreSQL snapshot (tests only).
+var snapshotTaken func(dir string)
 
 // maxSnapshotBytes is the largest database snapshot a capsule can carry (a variable for tests).
 var maxSnapshotBytes = recoveryclient.MaxCapsuleFileBytes
