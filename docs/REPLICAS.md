@@ -108,7 +108,9 @@ What it sets up:
   failures take a replica out, two passes bring it back. A request whose connection failed
   is sent to another replica; a GET or HEAD that died mid-request or timed out is retried
   there too; any other method is never sent twice. `/api/backup/*` gets the server's 16-minute
-  budget. With every replica unready HAProxy answers 503 at once.
+  budget. With every replica unready HAProxy answers 503 at once; a request already inside a
+  replica when the database froze waits for it, up to HAProxy's 30-second server timeout
+  (measured: new requests got 503 4.3 s after a pause, 1.8 s after a stop).
 
 HAProxy publishes on loopback. Put your TLS proxy in front of it. HAProxy appends the peer
 it saw to `X-Forwarded-For`; with the default loopback publish that peer is the replicas

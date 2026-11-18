@@ -67,7 +67,9 @@ These are human summaries, not a raw version-control log.
 - Stop every replica before upgrading; mixed versions are not supported. SQLite deployments
   change only by the health routes, the 5 s drain at shutdown and `restore` deleting sessions.
 - The base Compose service gains a `/readyz` healthcheck; nothing restarts on it.
-- Application replicas still do not make PostgreSQL highly available.
+- Application replicas still do not make PostgreSQL highly available. When the database
+  freezes, new requests get a 503 from HAProxy within seconds, but a request already inside
+  a replica waits for the database until the proxy's 30 s server timeout.
 
 ## Archived source 51ba2c030379620ec41c99c2102de067f7ef6189
 
