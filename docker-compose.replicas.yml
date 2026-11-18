@@ -50,7 +50,8 @@ services:
     volumes: !override
       - pgdata-replicas:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "ky_server", "-d", "ky_server"]
+      # The entrypoint's temporary initialization server has only a Unix socket.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ky_server", "-d", "ky_server"]
       interval: 2s
       timeout: 2s
       retries: 15

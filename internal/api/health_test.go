@@ -149,8 +149,8 @@ type frozenStore struct{ store.Store }
 
 func (f frozenStore) Sessions() store.SessionStore { return frozenSessions{f.Store.Sessions()} }
 
-// A request stalled on the database ends at the listener's write deadline, whatever proxy is
-// in front; backup routes keep their own longer budget.
+// Ordinary and backup management requests leave response time before the write deadline.
+// Only capsule operations keep the long budget.
 func TestStalledRequestEndsAtTheWriteDeadline(t *testing.T) {
 	_, st, cfg := setupTestServer(t)
 	cfg.Server.WriteTimeout = 200 * time.Millisecond
@@ -172,13 +172,55 @@ func TestStalledRequestEndsAtTheWriteDeadline(t *testing.T) {
 		t.Fatal("a request stalled on the database outlived its write deadline")
 	}
 
-	var seen lookup
-	srv = api.NewServer(cfg, deadlineStore{Store: st, seen: &seen})
-	breq := httptest.NewRequest("GET", "/api/backup/status", nil)
-	breq.AddCookie(&http.Cookie{Name: "ky_session", Value: "any"})
-	srv.ServeHTTP(httptest.NewRecorder(), breq)
-	if !seen.called || !seen.deadline.IsZero() {
-		t.Fatalf("backup route session lookup: called=%v deadline=%v, want no JSON request deadline", seen.called, seen.deadline)
+	for _, tc := range []struct {
+		method, path string
+		long         bool
+	}{
+		{"GET", "/api/backup/status", false},
+		{"PUT", "/api/backup/schedule", false},
+		{"DELETE", "/api/backup/pairing", false},
+		{"POST", "/api/backup/pin-key", false},
+		{"POST", "/api/backup/pair-remote", false},
+		{"POST", "/api/backup/deposit", true},
+		{"POST", "/api/backup/drill", true},
+		{"POST", "/api/backup/export-capsule", true},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			var seen lookup
+			srv := api.NewServer(cfg, deadlineStore{Store: st, seen: &seen})
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.AddCookie(&http.Cookie{Name: "ky_session", Value: "any"})
+			req.AddCookie(&http.Cookie{Name: "ky_csrf", Value: "csrf"})
+			req.Header.Set("X-CSRF-Token", "csrf")
+			start := time.Now()
+			srv.ServeHTTP(httptest.NewRecorder(), req)
+			if !seen.called || seen.deadline.IsZero() != tc.long {
+				t.Fatalf("session lookup called=%v deadline=%v, long operation=%v", seen.called, seen.deadline, tc.long)
+			}
+			if !tc.long && !seen.deadline.Before(start.Add(cfg.Server.WriteTimeout)) {
+				t.Fatal("no time left to write the response")
+			}
+		})
+	}
+}
+
+func TestFrozenDatabaseStillAllowsAnErrorReply(t *testing.T) {
+	_, st, cfg := setupTestServer(t)
+	cfg.Server.WriteTimeout = 2 * time.Second
+	srv := httptest.NewUnstartedServer(api.NewServer(cfg, frozenStore{st}))
+	srv.Config.WriteTimeout = cfg.Server.WriteTimeout
+	srv.Start()
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/api/backup/status", nil)
+	req.AddCookie(&http.Cookie{Name: "ky_session", Value: "stalled"})
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("stalled request lost its error reply: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("frozen session lookup answered 200")
 	}
 }
 

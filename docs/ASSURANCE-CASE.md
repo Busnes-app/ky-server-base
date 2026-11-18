@@ -168,9 +168,11 @@ never appears in the settings API or logs.
 
 **Recovery key across replicas.** The pinned public key is also stored in settings (public
 data). Pins, pairings and every write of the pin, that record or a `recovery.pub` take one
-database-wide `recovery-pin` lock, write on the lock's context (a lost lock connection fails
-the write within two seconds) and read the pin back before reporting success, so the
-library's write-once rule holds across replicas that no longer share `recovery.pub`. A
+database-wide `recovery-pin` lock and read the pin back before reporting success. Conditional
+database inserts preserve the first key ID and topology even while a stale owner's context
+is still live during lock-loss detection. Cancellation follows the next ownership probe;
+it does not fence writes. The library's write-once rule therefore also holds across replicas
+that no longer share `recovery.pub`. A
 replica writes its missing file only through the library's `StoreRecoveryKey`, which refuses
 a key other than the pin; a local file that differs from the pin refuses startup; a pin no
 replica can load, or a record without a pin, is reported and never guessed.
@@ -180,8 +182,10 @@ database port, keeps PostgreSQL on an internal network with a required password,
 by digest and trusts only HAProxy's `/32` (plus an explicit edge address, refused unless the
 proxy publishes on the default loopback) for `X-Forwarded-For`. HAProxy retries only GET/HEAD
 that got an empty answer, never a timed-out request; its 8-second upstream timeout and the
-server's 15-second request deadline bound a request stalled on a frozen database. The bundled
-PostgreSQL has its own volume, so the base profile's public-password volume is never reused.
+server's 14-second request deadline bound ordinary requests stalled on a frozen database,
+including backup status and management. Only deposit, drill and export-capsule have the long
+budget. The bundled PostgreSQL has its own volume, so the base profile's public-password volume
+is never reused; its TCP readiness probe waits for the final server after initialization.
 Replicas share only the capsule archive, whose writes are serialized by `backup-run`.
 
 Tests: `internal/store/coordination_test.go`, `internal/store/migrate_postgres_test.go`,

@@ -159,6 +159,11 @@ func startProject(t *testing.T) *project {
 			t.Logf("compose down: %v\n%s", err, out)
 		}
 	})
+	// A fresh database must be ready for the runbook's immediate createdb command,
+	// not merely healthy while the image's temporary socket-only init server runs.
+	p.compose("up", "-d", "--wait", "--wait-timeout", "180", "postgres")
+	p.compose("exec", "-T", "postgres", "createdb", "-U", "ky_server", "replica_readiness_probe")
+	p.compose("exec", "-T", "postgres", "dropdb", "-U", "ky_server", "replica_readiness_probe")
 	p.compose("up", "-d", "--wait", "--wait-timeout", "180")
 	return p
 }
@@ -364,6 +369,7 @@ func (p *project) deposit(s session) []byte {
 // then: a request is never left hanging on the frozen database.
 func (p *project) burst(s session) func() {
 	type answer struct {
+		path       string
 		code       int
 		sent, took time.Duration
 		err        error
@@ -371,14 +377,14 @@ func (p *project) burst(s session) func() {
 	start := time.Now()
 	answers := make(chan answer, 16)
 	c := &http.Client{Timeout: 12 * time.Second}
-	send := func() {
+	send := func(path string) {
 		sent := time.Now()
-		req, _ := http.NewRequest("GET", p.url+"/api/auth/me", nil)
+		req, _ := http.NewRequest("GET", p.url+path, nil)
 		for _, ck := range s {
 			req.AddCookie(ck)
 		}
 		resp, err := c.Do(req)
-		a := answer{sent: sent.Sub(start), took: time.Since(sent), err: err}
+		a := answer{path: path, sent: sent.Sub(start), took: time.Since(sent), err: err}
 		if err == nil {
 			a.code = resp.StatusCode
 			resp.Body.Close()
@@ -386,14 +392,15 @@ func (p *project) burst(s session) func() {
 		answers <- a
 	}
 	n := 0
-	for range 4 {
+	paths := []string{"/api/auth/me", "/api/backup/status"}
+	for i := range 4 {
 		n++
-		go send()
+		go send(paths[i%len(paths)])
 	}
 	go func() {
-		for range 10 {
+		for i := range 10 {
 			time.Sleep(500 * time.Millisecond)
-			go send()
+			go send(paths[i%len(paths)])
 		}
 	}()
 	n += 10
@@ -412,7 +419,7 @@ func (p *project) burst(s session) func() {
 			case a.code != http.StatusGatewayTimeout && a.sent+a.took <= 10*time.Second:
 				quick = true
 			}
-			p.t.Logf("frozen database: sent +%s, %d after %s", a.sent.Round(100*time.Millisecond), a.code, a.took.Round(100*time.Millisecond))
+			p.t.Logf("frozen database: %s sent +%s, %d after %s", a.path, a.sent.Round(100*time.Millisecond), a.code, a.took.Round(100*time.Millisecond))
 		}
 		if !quick {
 			p.t.Error("no request got a 502/503 within 10 s of the freeze")

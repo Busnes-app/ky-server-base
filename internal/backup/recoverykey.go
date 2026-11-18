@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -89,7 +90,8 @@ func RecordRecoveryKeyFromFile(dir string, settings recoveryclient.Settings) err
 }
 
 // PinRecoveryKey is the lib's write-once StoreRecoveryKey made global: under the recovery-pin
-// lock, with every write on the lock's context (a lost lock fails the write), then read back.
+// lock, with write-once pin rows enforced by Settings even before lock loss is detected.
+// Every write uses the lock's context and the pin is read back before success.
 // A pin that did not stick is an error, and a recovery.pub it created is removed again.
 func PinRecoveryKey(ctx context.Context, cfg *config.Config, st store.Store, k recoveryclient.RecoveryKey) error {
 	dir := cfg.Database.DataDir
@@ -115,7 +117,9 @@ func PinRecoveryKey(ctx context.Context, cfg *config.Config, st store.Store, k r
 		}
 		// The pin stands; the record is only how other replicas learn it, and the next sync
 		// on this replica writes it from recovery.pub if this write failed.
-		_ = RecordRecoveryKey(settings, k)
+		if err := RecordRecoveryKey(settings, k); err != nil {
+			log.Printf("[BACKUP] key %s is pinned but its replica record was not stored: %v", k.Public.ID(), err)
+		}
 		return nil
 	})
 }

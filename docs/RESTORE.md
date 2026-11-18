@@ -302,6 +302,7 @@ available.
    echoing the password:
 
    ```bash
+   docker compose up -d --wait postgres
    docker compose exec postgres createdb -U ky_server ky_server_restored
    (umask 077; printf 'KY_MIGRATE_POSTGRES_DSN=postgres://ky_server:%s@postgres:5432/ky_server_restored?sslmode=disable\n' \
      "$(sed -n 's/^KY_POSTGRES_PASSWORD=//p' .env)" > migration.env)
@@ -332,8 +333,9 @@ available.
    as its `data/encryption.key` instead. `recovery.pub` needs no copying: each replica writes
    it from the database before its first backup, and refuses to start if a stale file there
    names another key. Point `KY_DB_DSN` at the new database and remove `migration.env`.
-5. Start **one** replica and verify as in Step 4: sign in, the recovery key ID, the drill,
-   the audit log. Then start the rest; each checks the shared configuration against the
+5. Start **one** replica (`KY_REPLICAS=1 docker compose up -d --wait`) and verify as in
+   Step 4: sign in, the recovery key ID, the drill, the audit log. Then run
+   `docker compose up -d --wait` to start the configured replica count; each checks the shared configuration against the
    record the first one wrote and refuses to start, naming the fields, if it differs.
 6. Only once these servers are the ones in service, turn the schedule back on in Backup &
    recovery and click Back up now.

@@ -46,9 +46,11 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   library's private, disposable subdirectories. Drills use throwaway keys, not custodian shares.
 - `PinRecoveryKey` is the only pin path (HTTP pin and pairing): the lib's write-once
   `StoreRecoveryKey` under the `recovery-pin` lock (waiting up to 10 s, then `ErrPinBusy`),
-  every write on the lock's context, the pin rows read back (`ErrPinOwnershipLost` when the
-  lock connection died), a `recovery.pub` it created removed on failure, then the public
-  `recovery_public_key` record. `SyncRecoveryKey(ctx, cfg, st)` (PostgreSQL only) plans
+  every write on the lock's context and pin rows read back. `Settings.Set` uses atomic
+  conditional inserts for the key ID and topology, so a stale lock owner cannot overwrite
+  another pin before the heartbeat cancels it. A newly created `recovery.pub` is removed on
+  failure. The public `recovery_public_key` record follows the pin; a failed record write
+  is logged and backfilled by sync. `SyncRecoveryKey(ctx, cfg, st)` (PostgreSQL only) plans
   without the lock and writes only under it, re-planning there: a missing file from a
   record that matches the pin, a missing or stale record from a file that matches the pin.
   A file naming another key is `ErrKeyMismatch` (startup refuses); a pin with no record and

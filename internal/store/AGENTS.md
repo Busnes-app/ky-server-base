@@ -10,7 +10,10 @@ Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `
 - `Coordination` persists PostgreSQL security windows and spent CAPTCHA salts using database
   time. Refunds match the admitting window's expiry; failures deny admission.
 - `WithLock` uses PostgreSQL session advisory key space 3, scoped to current schema and job;
-  probe failures cancel work and the physical connection is discarded on exit. SQLite uses
+  probe failures cancel work within about two seconds; this does not fence stale writes.
+  `SettingsStore.SetSettingIfAbsent` atomically retains the first value and returns it; the
+  recovery adapter uses it for write-once key ID and topology rows. The physical connection
+  is discarded on exit. SQLite uses
   persistent OS file locks next to its database. Session pooling is required for PostgreSQL.
 - PostgreSQL schema migration and username-index creation run under one lock. Pools need
   at least `config.MinPostgresOpenConns` (4): worker lock, backup-run lock, the snapshot

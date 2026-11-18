@@ -904,6 +904,15 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.upd
 	return err
 }
 
+func (s *settingsStore) SetSettingIfAbsent(ctx context.Context, key, val string) (string, error) {
+	q := s.store.rebind(`INSERT INTO server_settings (key, value, updated_at)
+VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING`)
+	if _, err := s.store.db.ExecContext(ctx, q, key, val, time.Now().UTC()); err != nil {
+		return "", err
+	}
+	return s.GetSetting(ctx, key)
+}
+
 func (s *settingsStore) DeleteSetting(ctx context.Context, key string) error {
 	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM server_settings WHERE key = ?`), key)
 	return err

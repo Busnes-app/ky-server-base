@@ -147,7 +147,7 @@ func prepareStart(ctx context.Context, cfg *config.Config, st store.Store) error
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("recovery key: %w (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten)", err)
+		return fmt.Errorf("recovery key: %w (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten; for the replica overlay see the app-volume repair in docs/REPLICAS.md)", err)
 	}
 	return nil
 }

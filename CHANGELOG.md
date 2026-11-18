@@ -59,8 +59,12 @@ These are human summaries, not a raw version-control log.
   pin has no matching file.
 - Startup removes `snapshot-*` scratch directories (plaintext database copies) that a killed
   process left in the data directory; a directory another process still holds is kept.
-- Every request outside `/api/backup/` ends at the listener's 15 s write deadline, so one
-  stalled on a frozen database answers instead of hanging behind any proxy.
+- Ordinary requests, including backup status and management, end after 14 s, leaving time
+  to reply before the 15 s listener deadline. Only capsule deposit, drill and export get
+  the long budget. The proxy limits other requests to 8 s without timeout retries.
+- Recovery key ID and topology use database conditional inserts: a stale lock owner cannot
+  overwrite a different pin during heartbeat detection. PostgreSQL readiness probes TCP,
+  so the bundled database is not healthy during its temporary initialization server.
 - `accept-replica-config` refuses a differing `KY_ENCRYPTION_KEY`; it cannot be rotated.
 - `restore` now also deletes every restored session and the replica fingerprint, in the same
   transaction that turns the schedule off, and says so. The runbook's manual
@@ -86,12 +90,12 @@ These are human summaries, not a raw version-control log.
   overlay: `docker compose pull && docker compose stop app && docker compose up -d --wait`
   (source install: `build` instead of `pull`). SQLite deployments change only by the health
   routes, the 5 s drain at shutdown, `restore` deleting sessions, the startup removal of
-  leftover snapshots and the 15 s request deadline.
+  leftover snapshots, write-once recovery topology and the 14 s ordinary request deadline.
 - The base Compose service gains a `/readyz` healthcheck; nothing restarts on it.
 - Application replicas still do not make PostgreSQL highly available. When the database
   freezes, new requests get a 503 from HAProxy within seconds and a request already inside
   a replica gets a 504 after 8 s. Behind another proxy, its upstream timeout (or the
-  server's own 15 s deadline) is the bound.
+  server's own 14 s request deadline) is the bound.
 
 ## Archived source 51ba2c030379620ec41c99c2102de067f7ef6189
 

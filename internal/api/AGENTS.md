@@ -20,9 +20,11 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   lock, read back; `fs.ErrExist` → 409, `ErrPinBusy`/`ErrPinOwnershipLost` → 503); export
   and status call `backup.SyncRecoveryKey` first, and its `ErrRecoveryKeyUnavailable` is the
   status route's `recovery_key_error` and a 412 on export and deposit.
-- `ServeHTTP` ends every request's context outside `/api/backup/` at the listener's
-  `WriteTimeout` (`TestStalledRequestEndsAtTheWriteDeadline`); backup routes extend their own
-  write deadline instead.
+- `ServeHTTP` ends ordinary request contexts before `WriteTimeout` (14s with the 15s
+  default), leaving time for an error reply. Only deposit, drill and export-capsule have
+  the longer budget; backup status and management stay bounded.
+  `TestStalledRequestEndsAtTheWriteDeadline` and `TestFrozenDatabaseStillAllowsAnErrorReply`
+  cover the route classification and real listener response.
 - All JSON API endpoints return structured errors `{"error": "message"}` upon failure.
 - Non-API routes fall back to serving `web.Handler()` for client-side SPA routing.
 - New routes are unauthenticated only by deliberate choice; privileged ones are registered wrapped in `s.requireAdmin` in `routes()`, so the trust level of every route is readable in one place.

@@ -213,6 +213,81 @@ AND l.objid::bigint = (hashtext(current_schema() || ':recovery-pin')::bigint + 4
 	assertPinned(t, st, other, cfg.Database.DataDir)
 }
 
+type pinReadStore struct {
+	store.Store
+	settings store.SettingsStore
+}
+
+func (s pinReadStore) Settings() store.SettingsStore { return s.settings }
+
+type pinReadSettings struct {
+	store.SettingsStore
+	afterRead func()
+}
+
+func (s pinReadSettings) GetSetting(ctx context.Context, key string) (string, error) {
+	v, err := s.SettingsStore.GetSetting(ctx, key)
+	if key == backup.PinRows[0] {
+		s.afterRead()
+	}
+	return v, err
+}
+
+// Kill the owner after its stale read, then let a new owner finish before the heartbeat
+// can cancel the old one. Write-once must hold even while the old context is still live.
+func TestPinCannotOverwriteTheWinnerAfterItsLockIsLost(t *testing.T) {
+	cfg, st := postgresInstance(t)
+	db, err := sql.Open("pgx", cfg.Database.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfgB, stB := replica(t, cfg)
+	a, b := newKey(t, 2, 3), newKey(t, 3, 5)
+	var once sync.Once
+	settings := pinReadSettings{SettingsStore: st.Settings(), afterRead: func() {
+		once.Do(func() {
+			var n int
+			err := db.QueryRow(`SELECT count(pg_terminate_backend(l.pid)) FROM pg_locks l
+WHERE l.locktype = 'advisory' AND l.granted AND l.classid = 3
+AND l.objid::bigint = (hashtext(current_schema() || ':recovery-pin')::bigint + 4294967296) % 4294967296`).Scan(&n)
+			if err != nil || n != 1 {
+				t.Fatalf("terminate stale owner's lock: n=%d err=%v", n, err)
+			}
+			if err := backup.PinRecoveryKey(context.Background(), cfgB, stB, b); err != nil {
+				t.Fatalf("new owner pin: %v", err)
+			}
+		})
+	}}
+	err = backup.PinRecoveryKey(context.Background(), cfg, pinReadStore{st, settings}, a)
+	if err == nil {
+		t.Fatal("stale owner overwrote a key another replica successfully pinned")
+	}
+	assertPinned(t, st, b, cfgB.Database.DataDir)
+	if _, err := os.Lstat(recoveryclient.RecoveryKeyPath(cfg.Database.DataDir)); !os.IsNotExist(err) {
+		t.Fatalf("stale owner left its losing key file: %v", err)
+	}
+	if err := backup.SyncRecoveryKey(context.Background(), cfg, st); err != nil {
+		t.Fatal(err)
+	}
+	assertPinned(t, st, b, cfg.Database.DataDir)
+}
+
+func TestPinnedTopologyCannotChange(t *testing.T) {
+	cfg, st := postgresInstance(t)
+	k := newKey(t, 2, 3)
+	if err := backup.PinRecoveryKey(context.Background(), cfg, st, k); err != nil {
+		t.Fatal(err)
+	}
+	cfgB, stB := replica(t, cfg)
+	changed := k
+	changed.Threshold, changed.TotalShares = 3, 5
+	if err := backup.PinRecoveryKey(context.Background(), cfgB, stB, changed); !errors.Is(err, recoveryclient.ErrKeyMismatch) {
+		t.Fatalf("changed pinned topology: %v", err)
+	}
+	assertPinned(t, st, k, cfg.Database.DataDir)
+}
+
 // A pin made before records existed is backfilled by the replica holding its file, while
 // another replica tries to pin a different key: the old pin stays and becomes the record.
 func TestSyncBackfillRacesAPin(t *testing.T) {

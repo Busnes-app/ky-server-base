@@ -57,7 +57,10 @@ The base Compose service has a `/readyz` healthcheck (busybox `wget`, already in
    lands on whichever replica gets the request; the others write their own
    `data/recovery.pub` from the pin in the database before their next backup and at startup
    ([recovery key](#the-recovery-key-on-replicas)). A replica whose `recovery.pub` names
-   another key refuses to start; remove the stale file and it is rewritten.
+   another key refuses to start; remove the stale file and it is rewritten. With the replica
+   overlay, recreate only its disposable app volumes:
+   `docker compose rm -sfv app && docker compose up -d --wait`. This command is for this
+   overlay only: its database and backup archive are separate and retained.
 4. Point a **health-checking** reverse proxy at the application servers, probing `/readyz`.
    Sticky sessions are unnecessary: sessions, revocations, login windows, office budgets and
    spent CAPTCHA challenges are shared in PostgreSQL. Configure `KY_TRUSTED_PROXIES` for the
@@ -121,8 +124,9 @@ What it sets up:
   failures take a replica out, two passes bring it back. A request whose connection failed
   is sent to another replica; a GET or HEAD that got an empty answer (its replica died) is
   retried there too; a timed-out request is never retried, and any other method is never
-  sent twice. Replies get 8 seconds (`timeout server`); `/api/backup/*` gets the server's
-  16-minute budget. When the database freezes, a request already inside a replica gets a 504
+  sent twice. Replies get 8 seconds (`timeout server`); only `/api/backup/deposit`,
+  `/api/backup/drill` and `/api/backup/export-capsule` get the 16-minute budget. Status,
+  schedule, pinning, pairing and unpairing keep the short upstream timeout. When the database freezes, a request already inside a replica gets a 504
   after 8 seconds and new requests a 503 once the checks take the replicas out (the e2e
   test fires authenticated requests from the moment of a pause and requires every answer
   within 10 seconds).
@@ -192,9 +196,9 @@ step 4 of the migration below, with `KY_ENCRYPTION_KEY` supplied too), behind yo
 health-checking proxy. Give the proxy `/readyz` as the probe, a one-second interval, and
 retries for idempotent requests only, never for a request that timed out. When the database
 freezes, a request already inside a server waits until your proxy's upstream timeout (set it
-to about 8 seconds, with a longer one for `/api/backup/`, which may take 16 minutes) or the
-server's own deadline: every request outside `/api/backup/` ends at the 15-second write
-deadline.
+to about 8 seconds, with up to 16 minutes only for deposit, drill and export-capsule) or the
+server's own deadline: ordinary requests, including backup status and management, end after
+14 seconds, leaving one second to write an error before the 15-second listener deadline.
 
 nginx and Nginx Proxy Manager have no active health checks in their open-source builds:
 `max_fails`/`fail_timeout` mark an upstream down only after real requests fail, and
@@ -230,7 +234,7 @@ never shown by the settings API or logged; `restore` removes it from a restored 
 
 **Rotation.** To change a shared setting deliberately (for example `KY_SESSION_SECRET`):
 
-1. Stop every replica.
+1. Stop every replica (`docker compose stop app`); leave PostgreSQL running.
 2. Change the value everywhere it is configured.
 3. Run once, with the new configuration:
    `docker compose run --rm --no-deps app accept-replica-config`

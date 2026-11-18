@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -28,8 +29,24 @@ func (a settingsAdapter) Get(key string) (string, error) {
 	}
 	return v, err
 }
-func (a settingsAdapter) Set(key, val string) error { return a.s.SetSetting(a.ctx, key, val) }
-func (a settingsAdapter) Delete(key string) error   { return a.s.DeleteSetting(a.ctx, key) }
+func (a settingsAdapter) Set(key, val string) error {
+	switch key {
+	case pinKeyID, pinThreshold, pinTotalShares:
+		// Ownership probes cannot fence a stale owner. The database itself preserves
+		// the first key and topology, including during the lock-loss detection window.
+		pinned, err := a.s.SetSettingIfAbsent(a.ctx, key, val)
+		if err != nil || pinned == val {
+			return err
+		}
+		if key == pinKeyID {
+			return &recoveryclient.PinnedError{PinnedKeyID: pinned, OfferedKeyID: val}
+		}
+		return fmt.Errorf("%w: recovery topology is already pinned", recoveryclient.ErrKeyMismatch)
+	default:
+		return a.s.SetSetting(a.ctx, key, val)
+	}
+}
+func (a settingsAdapter) Delete(key string) error { return a.s.DeleteSetting(a.ctx, key) }
 
 // NewSealer seals the KyRecovery token under the deployment key, domain-separated so a row
 // copied from another setting will not open.

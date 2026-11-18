@@ -418,11 +418,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	}
-	// A reply past the listener's write deadline cannot reach the client, so the request's
-	// work ends there too: one stalled on a frozen database answers instead of hanging. Backup
-	// routes set their own, longer write deadline and budget.
-	if d := s.config.Server.WriteTimeout; d > 0 && !strings.HasPrefix(r.URL.Path, "/api/backup/") {
-		ctx, cancel := context.WithTimeout(r.Context(), d)
+	// Leave response time before the listener's write deadline. Only the three long
+	// capsule operations extend that deadline; backup status and management stay bounded.
+	longBackup := r.URL.Path == "/api/backup/deposit" || r.URL.Path == "/api/backup/drill" || r.URL.Path == "/api/backup/export-capsule"
+	if d := s.config.Server.WriteTimeout; d > 0 && !longBackup {
+		ctx, cancel := context.WithTimeout(r.Context(), d-min(time.Second, d/10))
 		defer cancel()
 		r = r.WithContext(ctx)
 	}

@@ -57,6 +57,7 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     assert "profiles" not in db, "PostgreSQL stays behind a profile"
     assert db["environment"]["POSTGRES_PASSWORD"] == required["KY_POSTGRES_PASSWORD"]
     assert set(db["networks"]) == {"database"}
+    assert db["healthcheck"]["test"] == ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ky_server", "-d", "ky_server"], "PostgreSQL readiness must wait for its final TCP server"
     db_mounts = [(v["type"], v["source"], v["target"]) for v in db["volumes"]]
     assert db_mounts == [("volume", "pgdata-replicas", "/var/lib/postgresql/data")], \
         f"PostgreSQL mounts {db_mounts}; the base pgdata volume carries a public password"

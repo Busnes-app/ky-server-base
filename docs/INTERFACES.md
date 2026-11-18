@@ -460,9 +460,10 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 
 Loading configuration can create the encryption-key file. The fixed read/write
 timeouts are 15 seconds, session lifetime seven days and database connection lifetime
-15 minutes; these are not environment options. Every request outside `/api/backup/` has its
-context end at the 15-second write deadline, so one stalled on the database answers. Backup
-deposit, export and drill extend their response write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
+15 minutes; these are not environment options. Ordinary requests, including backup status
+and management, end after 14 seconds, leaving one second to write an error before the
+listener deadline. Only `/api/backup/deposit`, `/api/backup/export-capsule` and
+`/api/backup/drill` extend their response write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
 at most 10 more for interrupted backup work to record its outcome, so a 30-second stop
 grace period is enough. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
 stored schedule precedence, container DNS overrides and backup retention. Compose's

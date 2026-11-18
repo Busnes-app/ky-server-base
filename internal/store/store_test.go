@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -231,5 +233,34 @@ func TestDeleteSettingIsIdempotent(t *testing.T) {
 	_ = st.Settings().DeleteSetting(ctx, "k")
 	if _, err := st.Settings().GetSetting(ctx, "k"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestSetSettingIfAbsentPreservesTheWinner(t *testing.T) {
+	st := newTestStore(t)
+	const n = 12
+	values := make(chan string, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v, err := st.Settings().SetSettingIfAbsent(context.Background(), "write-once", fmt.Sprint(i))
+			if err != nil {
+				t.Errorf("conditional insert: %v", err)
+			}
+			values <- v
+		}()
+	}
+	wg.Wait()
+	close(values)
+	want, err := st.Settings().GetSetting(context.Background(), "write-once")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for got := range values {
+		if got != want {
+			t.Errorf("conditional insert returned %q, persisted winner %q", got, want)
+		}
 	}
 }
