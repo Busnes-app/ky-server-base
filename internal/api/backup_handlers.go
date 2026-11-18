@@ -171,6 +171,9 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 	if err := s.syncRecoveryKey(ctx); errors.Is(err, backup.ErrRecoveryKeyUnavailable) {
 		s.writeError(w, http.StatusPreconditionFailed, err.Error())
 		return
+	} else if errors.Is(err, backup.ErrRecoveryKeySync) {
+		s.writeError(w, http.StatusServiceUnavailable, "Could not read recovery key state; try again")
+		return
 	}
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	if errors.Is(err, recoveryclient.ErrNotPaired) {
@@ -348,6 +351,8 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, backup.ErrInterrupted):
 			s.writeError(w, http.StatusServiceUnavailable, "The server is shutting down; the backup did not finish")
+		case errors.Is(err, backup.ErrRecoveryKeySync):
+			s.writeError(w, http.StatusServiceUnavailable, "Could not read recovery key state; try again")
 		case errors.Is(err, recoveryclient.ErrKeyPinMissing):
 			s.writeError(w, http.StatusPreconditionFailed, "Paired, but recovery.pub is missing or does not match the pin")
 		case errors.Is(err, backup.ErrRecoveryKeyUnavailable):
@@ -540,6 +545,10 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		out["recovery_url"] = u
 	}
 	syncErr := s.syncRecoveryKey(ctx)
+	if errors.Is(syncErr, backup.ErrRecoveryKeySync) {
+		s.writeError(w, http.StatusServiceUnavailable, "Could not read recovery key state; try again")
+		return
+	}
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	switch {
 	case errors.Is(syncErr, backup.ErrRecoveryKeyUnavailable):

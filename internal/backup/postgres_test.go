@@ -7,8 +7,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +32,7 @@ func postgresInstance(t *testing.T) (*config.Config, store.Store) {
 	}
 	db.DataDir = t.TempDir()
 	cfg := &config.Config{}
-	cfg.Server.AppName = "busnes_app"
+	cfg.Server.AppName = config.DefaultAppName
 	cfg.Server.Port = 8080
 	cfg.Database = db
 	cfg.Security.EncryptionKey = bytes.Repeat([]byte{1}, 32)
@@ -50,6 +52,10 @@ func (d *recordingDepositor) Deposit(_ context.Context, _, _ string, raw []byte)
 	m, err := capsule.ReadUnverifiedManifest(raw)
 	if err != nil {
 		return recoveryclient.Receipt{}, err
+	}
+	// Enforce the KyRecovery claim/deposit service-name contract, not just kycap syntax.
+	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`).MatchString(m.ServiceName) || strings.Contains(m.ServiceName, "..") {
+		return recoveryclient.Receipt{}, fmt.Errorf("KyRecovery refuses service name %q", m.ServiceName)
 	}
 	sum := sha256.Sum256(raw)
 	return recoveryclient.Receipt{CapsuleID: m.CapsuleID, Digest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw)), DepositedAt: time.Now().UTC()}, nil

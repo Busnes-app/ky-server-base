@@ -339,8 +339,9 @@ of band. Manual pinning uses standard Base64 of the 1216-byte suite public key a
 the ceremony's topology (`2 <= threshold <= total_shares <= 255`). A different
 existing pin is 409. Pins and pairings take a database-wide lock and are read back, so on
 PostgreSQL replicas two different keys pinned at once give one 200 and one 409; another
-replica holding the lock past 10 seconds, or a lost lock connection, is 503 (nothing
-pinned; retry). Pairing/pinning are write-once; unpair deletes only the URL and
+replica holding the lock past 10 seconds, or an unconfirmed operation after lock loss, is
+503. Some write-once rows may already have committed: inspect status/audit and retry with
+the same key and topology to complete them. Pairing/pinning are write-once; unpair deletes only the URL and
 sealed token, leaving the pin, receipts and local copies. A KyRecovery administrator
 must separately revoke the remote token. See the [operational guide](DISASTER-RECOVERY.md#disaster-recovery).
 

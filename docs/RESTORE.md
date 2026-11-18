@@ -69,7 +69,9 @@ ky_server_base restore -capsule Busnes_2eapp.cap-XXXXXXXX.kycap -to ./restored
 
 `-service` defaults to `KY_APP_NAME`, then `Busnes.app`. Pass it only when the backup was made
 under a different app name; the capsule's service name must match or the restore stops before
-reading a share.
+reading a share. Older Compose installs used the literal `Busnes.app Base`; restore their
+local capsules with `-service 'Busnes.app Base'`, even after the runtime name changes.
+The encryption and recovery keys stay the same.
 
 For a published-image install, and always on a fresh recovery machine, pin the commit you
 intend to run (normally the one that made the backup, or the current tip) to a digest you have

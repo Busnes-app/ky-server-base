@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -242,6 +243,9 @@ type fakePairer struct {
 }
 
 func (f fakePairer) ClaimPairing(ctx context.Context, serverURL, pairingCode, serviceName, appName string) (recoveryclient.PairingResult, error) {
+	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`).MatchString(serviceName) || strings.Contains(serviceName, "..") {
+		return recoveryclient.PairingResult{}, errors.New("KyRecovery refuses this service label")
+	}
 	return f.result, nil
 }
 

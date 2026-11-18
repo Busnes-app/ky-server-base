@@ -2,6 +2,7 @@
 """Render docker-compose.replicas.yml merges with synthetic inputs; start no containers."""
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -50,6 +51,9 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     assert app["volumes"][0]["source"] == str(root / "backups"), app["volumes"][0]["source"]
     env = app["environment"]
     assert env["KY_DB_DRIVER"] == "postgres"
+    # KyRecovery claim/deposit contract (limits.go): one path-safe service label.
+    service = env["KY_APP_NAME"]
+    assert service == "Busnes.app" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", service) and ".." not in service, service
     assert env["KY_TRUSTED_PROXIES"] == required["KY_PROXY_IP"] + "/32", env["KY_TRUSTED_PROXIES"]
     assert env["KY_ENCRYPTION_KEY"] == required["KY_ENCRYPTION_KEY"]
     assert set(app["networks"]) == {"replicas", "database"}
@@ -75,6 +79,11 @@ assert edge.returncode == 0, edge.stderr
 trusted = json.loads(edge.stdout)["services"]["app"]["environment"]["KY_TRUSTED_PROXIES"]
 assert trusted == required["KY_PROXY_IP"] + "/32,172.31.250.1/32", trusted
 print("PASS replicas: KY_EDGE_TRUSTED_PROXIES extends only the trusted list")
+
+named = compose(files, base_env | required | {"KY_APP_NAME": "existing-service"})
+assert named.returncode == 0, named.stderr
+assert json.loads(named.stdout)["services"]["app"]["environment"]["KY_APP_NAME"] == "existing-service", "configured service name was overwritten"
+print("PASS replicas: wire-valid default and retained configured service name")
 
 for bind in ["0.0.0.0", "127.0.0.1"]:
     both = compose(files, base_env | required | {"KY_EDGE_TRUSTED_PROXIES": "172.31.250.1/32", "KY_PROXY_BIND": bind})

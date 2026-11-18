@@ -85,6 +85,8 @@ service on every host, then start the new version on each.
 
 ## Compose replicas on one host
 
+This overlay requires Docker Compose 2.24.4 or later (`!override`).
+
 `docker-compose.replicas.yml` runs `KY_REPLICAS` (default 2) app containers on one PostgreSQL
 behind HAProxy. Append it **last** to the `COMPOSE_FILE` chain in `.env` (after
 `docker-compose.build.yml` for a source install). Never combine it with
@@ -150,18 +152,29 @@ SIGTERM. A killed or stopped replica is restarted by `restart: unless-stopped` o
 Run from the repository directory, with the SQLite server stopped (`docker compose stop app`)
 and backed up. Nothing below prints a secret.
 
-1. Keep the encryption key: write it into `.env` without echoing it.
+1. Keep `.env` private (mode 0600), with exactly one line per setting. Edit an existing
+   line rather than appending a duplicate: Compose silently uses the last value. Retain an
+   existing `KY_ENCRYPTION_KEY` exactly. Only if it is missing, import the retained file
+   without echoing it; a failed read must not install an empty key:
 
    ```bash
-   (umask 077; printf 'KY_ENCRYPTION_KEY=%s\n' "$(sudo cat data/encryption.key)" >> .env)
+   (umask 077; replica_retained_key=$(sudo cat data/encryption.key) &&
+     printf 'KY_ENCRYPTION_KEY=%s\n' "$replica_retained_key" >> .env)
    ```
 
-2. Add the shared secrets and the overlay variables to `.env` in the same way
-   (`KY_SESSION_SECRET`, `KY_SCIM_TOKEN`, `KY_POSTGRES_PASSWORD` from
-   `openssl rand -hex 32`; `KY_REPLICA_SUBNET`, `KY_PROXY_IP`; `KY_DB_DSN` naming the
-   bundled database, `postgres://ky_server:<KY_POSTGRES_PASSWORD>@postgres:5432/ky_server?sslmode=disable`),
-   then append `docker-compose.replicas.yml` last to `COMPOSE_FILE`. `docker compose config
-   --quiet` names anything missing.
+2. Retain the effective **`KY_SCIM_TOKEN`**, including a token held in another deployment
+   secret. Keep `KY_SESSION_SECRET` until the deliberate cutover rotation in step 5. Generate only missing secrets (`openssl rand -hex 32`)
+   and add each once; never replace a working SCIM token on the product alone. If the
+   connector's current token cannot be recovered, coordinate its rotation in KyIdentity
+   and the product before restarting, then verify provisioning and deprovisioning.
+   Add a missing `KY_POSTGRES_PASSWORD`, `KY_REPLICA_SUBNET`, `KY_PROXY_IP` and the
+   `KY_DB_DSN` for the bundled database
+   (`postgres://ky_server:<KY_POSTGRES_PASSWORD>@postgres:5432/ky_server?sslmode=disable`).
+   Keep an existing working `KY_APP_NAME`: it is also the KyRecovery service label.
+   New installs default to `Busnes.app`; labels must match
+   `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}` and contain no `..`.
+   Append `docker-compose.replicas.yml` last to `COMPOSE_FILE`;
+   `docker compose config --quiet` names anything missing.
 3. Start only the database and make the empty migration target. The bundled database has
    no host port, so the migration runs in a one-off app container on its network:
 
@@ -184,10 +197,26 @@ and backed up. Nothing below prints a secret.
 
    A source that pins a recovery key records it for the replicas from `data/recovery.pub`;
    a pin without that file is refused before anything is copied.
-5. Point `KY_DB_DSN` in `.env` at `ky_server_migrated`, remove `migration.env`, and start:
+5. Point `KY_DB_DSN` in `.env` at `ky_server_migrated`. Rotate only `KY_SESSION_SECRET`
+   once at cutover on every replica to invalidate old SQLite CAPTCHA solutions; keep the
+   SCIM token and encryption key unchanged. Remove `migration.env`, then start:
    `docker compose up -d --wait`. Verify as in
    [step 5 of the migration](#move-a-deployed-sqlite-server-to-postgresql), then keep
    `./data` until a PostgreSQL capsule has been restored in a drill.
+
+
+### Service identity and older capsules
+
+The Compose app name is now configurable and defaults to the binary's wire-valid
+`Busnes.app`, replacing the old hardcoded `Busnes.app Base`. Preserve a working named
+pairing's exact label. For a deliberate rename, pause scheduled backups and follow the
+shared-setting rotation procedure below. Start one replica, unpair and pair with a new code
+for that label while retaining the same pinned public key. Revoke the previous remote token
+on KyRecovery, verify a deposit, then restore the schedule and remaining replicas.
+Old local capsules retain their original manifest service: restore one made under the old
+Compose default with `-service 'Busnes.app Base'`; never rewrite a capsule or its key.
+A timeout during pinning or pairing does not prove failure: inspect Backup status and the
+audit log before retrying or requesting another single-use code.
 
 ## Separate hosts
 
@@ -315,7 +344,10 @@ follows the runbooks does not need this.
 
 ## Product rollout contract
 
-A product built on this base becomes replica-ready by keeping these:
+Products are separate Go modules: port these mechanisms and executable tests into their
+own packages; the base's `internal/` packages cannot be imported by another module. Reuse
+`ky-primitives/recoveryclient`; do not copy library code. A product becomes replica-ready
+by keeping these:
 
 - **(a) Health.** Keep `/livez` and `/readyz` and the drain order above; add a product
   dependency to readiness only if the product cannot serve without it.
@@ -323,7 +355,10 @@ A product built on this base becomes replica-ready by keeping these:
   `internal/config/replica.go` (`sharedFields`); leave per-host settings out.
 - **(c) Tables.** `migrationTables` in `internal/store/migrate_postgres.go` is the single
   ordered table list for both `migrate-postgres` and the backup snapshot. Append product
-  tables in foreign-key order; both directions refuse the schema until you do.
+  tables in foreign-key order; both directions refuse the schema until you do. Advance
+  every product sequence/identity after migration and restore, not just the base's
+  `audit_records` sequence. The product restore drill must insert into every such table
+  afterwards and assert success without duplicate IDs or dropped audit writes.
 - **(d) Restore.** `restore` turns the schedule off and drops sessions and the fingerprint
   (`prepareRestoredDatabase` in `cmd/server/main.go`); add the product's own session-like
   tables there.

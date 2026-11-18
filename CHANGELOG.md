@@ -62,6 +62,11 @@ These are human summaries, not a raw version-control log.
 - Ordinary requests, including backup status and management, end after 14 s, leaving time
   to reply before the 15 s listener deadline. Only capsule deposit, drill and export get
   the long budget. The proxy limits other requests to 8 s without timeout retries.
+- A shared recovery-key read failure is 503 even on a replica without its local file;
+  status, export and deposit distinguish unreadable state from a missing pin.
+- Compose now respects `KY_APP_NAME` with the wire-valid default `Busnes.app`; existing
+  valid service names and old capsules retain their identities. Cutover preserves SCIM
+  credentials, and the product rollout contract requires every sequence to be advanced.
 - Backup status reports a settings-read failure as 503 rather than a successful unpaired
   state. An attempt to change a pinned custodian topology returns 409.
 - Recovery key ID and topology use database conditional inserts: a stale lock owner cannot
@@ -84,6 +89,10 @@ These are human summaries, not a raw version-control log.
 
 ### Upgrade impact
 
+- Keep existing SCIM credentials when moving to replicas; edit existing `.env` lines rather
+  than appending duplicate secrets. Compose now defaults to the wire-valid `Busnes.app`.
+  Preserve a working service label explicitly; restore older local capsules with their
+  original `-service`, including `Busnes.app Base` from the old Compose default.
 - PostgreSQL now needs `KY_DB_MAX_OPEN_CONNS` of at least 4 (was 3); lower refuses startup.
 - On the first PostgreSQL start the configuration fingerprint is recorded. A replica started
   later with a different shared setting refuses to start; make the settings equal, or after a

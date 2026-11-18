@@ -53,6 +53,8 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   is logged and backfilled by sync. `SyncRecoveryKey(ctx, cfg, st)` (PostgreSQL only) plans
   without the lock and writes only under it, re-planning there: a missing file from a
   record that matches the pin, a missing or stale record from a file that matches the pin.
+  Unexpected synchronization errors are `ErrRecoveryKeySync`, preserving the original
+  cause. A missing local file never turns that failure into `ErrNotPaired` in `Run`.
   A file naming another key is `ErrKeyMismatch` (startup refuses); a pin with no record and
   no file, a record without a pin, or a record that disagrees with the pin is
   `ErrRecoveryKeyUnavailable` (startup logs it and starts; status, export, deposit and

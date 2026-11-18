@@ -39,10 +39,12 @@ var (
 	// ErrRecoveryKeyUnavailable is a pin this replica cannot load and must not guess at. It is
 	// repaired by pinning the pinned key by hand on any replica, not by restarting.
 	ErrRecoveryKeyUnavailable = errors.New("backup: the recovery key pinned in the database is not available on this replica")
+	// ErrRecoveryKeySync is an unreadable key state, rather than an absent pin.
+	ErrRecoveryKeySync = errors.New("backup: could not synchronize recovery key state")
 	// ErrPinBusy is another replica holding the pin lock for longer than a pin takes.
 	ErrPinBusy = errors.New("backup: another replica is changing the recovery key; try again")
-	// ErrPinOwnershipLost is the pin lock's database session lost mid-write: nothing is
-	// reported as pinned, because another replica may have taken the lock meanwhile.
+	// ErrPinOwnershipLost means the pin operation was not confirmed. Some write-once
+	// rows may have committed; retry with the same key and topology to complete them.
 	ErrPinOwnershipLost = errors.New("backup: lost the recovery-key lock while pinning; try again")
 )
 
@@ -209,7 +211,12 @@ const (
 // record is rewritten from a file that matches the pin. Writes take the recovery-pin lock and
 // re-check under it. A file naming another key is recoveryclient.ErrKeyMismatch (refuse to
 // start); a pin no replica has published is ErrRecoveryKeyUnavailable. SQLite: a no-op.
-func SyncRecoveryKey(ctx context.Context, cfg *config.Config, st store.Store) error {
+func SyncRecoveryKey(ctx context.Context, cfg *config.Config, st store.Store) (syncErr error) {
+	defer func() {
+		if syncErr != nil && !errors.Is(syncErr, ErrRecoveryKeyUnavailable) && !errors.Is(syncErr, recoveryclient.ErrKeyMismatch) {
+			syncErr = fmt.Errorf("%w: %w", ErrRecoveryKeySync, syncErr)
+		}
+	}()
 	if cfg.Database.Driver != "postgres" {
 		return nil
 	}

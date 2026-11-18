@@ -24,6 +24,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/recoverykey"
 	"github.com/Busnes-app/ky_server_base/internal/api"
 	"github.com/Busnes-app/ky_server_base/internal/auth"
+	"github.com/Busnes-app/ky_server_base/internal/backup"
 	"github.com/Busnes-app/ky_server_base/internal/store"
 )
 
@@ -113,8 +114,9 @@ func TestPinKeyIsWriteOnce(t *testing.T) {
 
 type failingStatusStore struct {
 	store.Store
-	armed atomic.Bool
-	stall bool
+	armed   atomic.Bool
+	stall   bool
+	onlyKey string
 }
 
 func (s *failingStatusStore) Settings() store.SettingsStore {
@@ -127,7 +129,7 @@ type failingStatusSettings struct {
 }
 
 func (s failingStatusSettings) GetSetting(ctx context.Context, key string) (string, error) {
-	if !s.owner.armed.Load() {
+	if !s.owner.armed.Load() || (s.owner.onlyKey != "" && key != s.owner.onlyKey) {
 		return s.SettingsStore.GetSetting(ctx, key)
 	}
 	if s.owner.stall {
@@ -172,6 +174,48 @@ func TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired(t *testing.T) {
 				t.Fatalf("read failure changed pairing state: %v", after)
 			}
 		})
+	}
+}
+
+func TestBackupEndpointsDoNotHideARecoveryRecordReadFailure(t *testing.T) {
+	srv, st, cfg := setupTestServer(t)
+	if st.Driver() != "postgres" {
+		t.Skip("replica key materialization requires PostgreSQL")
+	}
+	session := loginAs(t, srv, st, "record-admin", "admin")
+	key, err := recoverykey.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := adminDo(t, srv, session, "POST", "/api/backup/pin-key", pinBody(key.Public(), 2, 3)); w.Code != http.StatusOK {
+		t.Fatalf("pin fixture: %d %s", w.Code, w.Body.String())
+	}
+	if err := storePairing(t, cfg, st, "https://recovery.example.test", "record-test-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(recoveryclient.RecoveryKeyPath(cfg.Database.DataDir)); err != nil {
+		t.Fatal(err)
+	}
+	wrapped := &failingStatusStore{Store: st, onlyKey: backup.RecoveryKeyRecordSetting}
+	srv = api.NewServer(cfg, wrapped)
+	api.SetRecoveryClientForTest(srv, fakePairer{}) // no outbound requests in a failure test
+	wrapped.armed.Store(true)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/backup/status"},
+		{"POST", "/api/backup/export-capsule"},
+		{"POST", "/api/backup/deposit"},
+	} {
+		w := adminDo(t, srv, session, tc.method, tc.path, nil)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s with an unreadable shared record: %d %s", tc.path, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "key_pinned") || strings.Contains(w.Body.String(), "private connection details") {
+			t.Errorf("%s exposed guessed state or backend details: %s", tc.path, w.Body.String())
+		}
+	}
+	wrapped.armed.Store(false)
+	if after := statusOf(t, srv, session); after["key_pinned"] != true || after["paired"] != true {
+		t.Fatalf("retry did not materialize the existing pin: %v", after)
 	}
 }
 

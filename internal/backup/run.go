@@ -34,9 +34,9 @@ func Run(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConfig, s
 	res, err := recoveryclient.Run(ctx, rc, settings, func() (recoveryclient.Payload, error) {
 		return Collect(ctx, cfg, st, rc.AppVersion)
 	}, client)
-	// The lib reads a pin this replica cannot load as "not paired", which the scheduler skips
-	// silently; the attempt is stamped, so the reason is reported once per interval.
-	if errors.Is(err, recoveryclient.ErrNotPaired) && errors.Is(syncErr, ErrRecoveryKeyUnavailable) {
+	// A missing local file must not hide a failed shared-key read as "not paired".
+	// Keep the attempt stamp so the actual failure is reported once per interval.
+	if (errors.Is(err, recoveryclient.ErrNotPaired) || errors.Is(err, recoveryclient.ErrKeyPinMissing)) && syncErr != nil {
 		err = syncErr
 	}
 	// ErrInProgress stamped nothing: the stamp belongs to the run that holds the lock.

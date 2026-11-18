@@ -119,6 +119,7 @@ func startProject(t *testing.T) *project {
 		"COMPOSE_FILE":         "docker-compose.yml:docker-compose.replicas.yml",
 		"KY_IMAGE":             image,
 		"KY_REPLICAS":          "2",
+		"KY_APP_NAME":          "replica-e2e",
 		"KY_APP_URL":           p.url,
 		"KY_PROXY_PORT":        fmt.Sprint(port),
 		"KY_PROXY_IP":          fmt.Sprintf("172.31.%d.2", octet),
@@ -354,6 +355,13 @@ func (p *project) deposit(s session) []byte {
 			raw, err := os.ReadFile(dest)
 			if err != nil {
 				p.t.Fatal(err)
+			}
+			manifest, err := capsule.ReadUnverifiedManifest(raw)
+			if err != nil {
+				p.t.Fatal(err)
+			}
+			if manifest.ServiceName != p.vars["KY_APP_NAME"] {
+				p.t.Fatalf("capsule service %q differs from configured %q", manifest.ServiceName, p.vars["KY_APP_NAME"])
 			}
 			return raw
 		}
@@ -753,7 +761,7 @@ func TestReplicaFailover(t *testing.T) {
 		create := []string{"create", "--name", restored, "--network", p.name + "_replicas", "-p", "127.0.0.1::8080",
 			"-e", "KY_DB_DRIVER=postgres", "-e", "KY_DB_DSN=" + target, "-e", "KY_ENCRYPTION_KEY=" + strings.TrimSpace(string(key)),
 			"-e", "KY_SESSION_SECRET=" + p.vars["KY_SESSION_SECRET"], "-e", "KY_SCIM_TOKEN=" + p.vars["KY_SCIM_TOKEN"],
-			"-e", "KY_CAPTCHA_PROVIDER=none", "-e", "KY_APP_NAME=Busnes.app Base"}
+			"-e", "KY_CAPTCHA_PROVIDER=none", "-e", "KY_APP_NAME=" + p.vars["KY_APP_NAME"]}
 		p.must(nil, "docker", append(append(create, relayOff...), p.image)...)
 		p.must(nil, "docker", "network", "connect", p.name+"_database", restored)
 		p.must(nil, "docker", "start", restored)

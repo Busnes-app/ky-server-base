@@ -27,7 +27,10 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   cover the route classification and real listener response.
 - Backup status returns 503 on a deadline or failed settings read, never a successful
   guessed unpaired state. `TestBackupStatusDoesNotTurnReadFailuresIntoUnpaired` freezes
-  settings after authentication and also covers immediate store errors.
+  settings after authentication and also covers immediate store errors. A failure confined
+  to shared-key synchronization is also 503 for status, export and deposit, not an absent
+  pin; `TestBackupEndpointsDoNotHideARecoveryRecordReadFailure` covers a replica without
+  its local public-key file and successful materialization on retry.
 - All JSON API endpoints return structured errors `{"error": "message"}` upon failure.
 - Non-API routes fall back to serving `web.Handler()` for client-side SPA routing.
 - New routes are unauthenticated only by deliberate choice; privileged ones are registered wrapped in `s.requireAdmin` in `routes()`, so the trust level of every route is readable in one place.
