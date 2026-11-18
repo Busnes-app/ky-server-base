@@ -471,12 +471,32 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	return nil
 }
 
+// Querier is what history validation reads through: a *sql.DB or a *sql.Tx.
+type Querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // ValidateHistory identifies a scaffold database before a maintenance command can
 // initialize or upgrade it. Future or discontinuous histories need their owning adapter.
-func ValidateHistory(ctx context.Context, db *sql.DB) error {
+func ValidateHistory(ctx context.Context, db Querier) error {
+	_, err := validateHistory(ctx, db)
+	return err
+}
+
+// ValidateCurrentHistory is ValidateHistory that also requires every scaffold migration, so
+// the schema is exactly the one this build creates.
+func ValidateCurrentHistory(ctx context.Context, db Querier) error {
+	n, err := validateHistory(ctx, db)
+	if err == nil && n != len(registry) {
+		err = fmt.Errorf("scaffold migration history is not current")
+	}
+	return err
+}
+
+func validateHistory(ctx context.Context, db Querier) (int, error) {
 	rows, err := db.QueryContext(ctx, "SELECT version, name FROM schema_migrations ORDER BY version")
 	if err != nil {
-		return fmt.Errorf("source is not a recognized scaffold database")
+		return 0, fmt.Errorf("source is not a recognized scaffold database")
 	}
 	defer rows.Close()
 	n := 0
@@ -484,18 +504,18 @@ func ValidateHistory(ctx context.Context, db *sql.DB) error {
 		var version int
 		var name string
 		if err := rows.Scan(&version, &name); err != nil {
-			return err
+			return 0, err
 		}
 		if n >= len(registry) || version != registry[n].Version || name != registry[n].Name {
-			return fmt.Errorf("unsupported scaffold migration history")
+			return 0, fmt.Errorf("unsupported scaffold migration history")
 		}
 		n++
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	if n == 0 {
-		return fmt.Errorf("source has no scaffold migration history")
+		return 0, fmt.Errorf("source has no scaffold migration history")
 	}
-	return nil
+	return n, nil
 }

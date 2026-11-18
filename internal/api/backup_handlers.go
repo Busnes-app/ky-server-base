@@ -88,6 +88,22 @@ func (s *Server) auditBackup(ctx context.Context, userID string, r *http.Request
 	}
 }
 
+// recordRecoveryKey shares a key just pinned with the other replicas. A failure is logged, not
+// fatal: the pin stands, and the next sync on this replica records it from recovery.pub.
+func (s *Server) recordRecoveryKey(settings recoveryclient.Settings, k recoveryclient.RecoveryKey) {
+	if err := backup.RecordRecoveryKey(settings, k); err != nil {
+		log.Printf("[BACKUP] recovery key %s pinned, but not yet shared with other replicas: %v", k.Public.ID(), err)
+	}
+}
+
+// syncRecoveryKey writes this replica's missing recovery.pub from the shared pin. A mismatch
+// is left for LoadRecoveryKey, which reports it to the caller.
+func (s *Server) syncRecoveryKey(settings recoveryclient.Settings) {
+	if err := backup.SyncRecoveryKey(s.config, settings); err != nil {
+		log.Printf("[BACKUP] recovery.pub not synchronized with the pin: %s", recoveryclient.AuditSafe(err.Error()))
+	}
+}
+
 // actorID is the session user behind an admin request, resolved while the request is live.
 func (s *Server) actorID(r *http.Request) string {
 	user, _, err := s.sessions.AuthenticateRequest(r)
@@ -106,7 +122,7 @@ func (s *Server) handleBackupDrill(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(depositWriteBudget))
 	ctx := r.Context()
-	payload, err := backup.Collect(ctx, s.config, appVersion)
+	payload, err := backup.Collect(ctx, s.config, s.store, appVersion)
 	if errors.Is(err, backup.ErrNoDatabaseSnapshot) {
 		// An honest failed drill, not a 500: the operator needs to read why no backup exists.
 		s.writeJSON(w, http.StatusOK, &recoveryclient.DrillResult{Passed: false, ErrorMessage: err.Error(),
@@ -145,6 +161,7 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	actor := s.actorID(r)
 	settings := backup.Settings(ctx, s.store.Settings())
+	s.syncRecoveryKey(settings)
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	if errors.Is(err, recoveryclient.ErrNotPaired) {
 		s.writeError(w, http.StatusPreconditionFailed, "No recovery key; pair or pin one")
@@ -158,7 +175,7 @@ func (s *Server) handleExportCapsule(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "Failed to load recovery key")
 		return
 	}
-	payload, err := backup.Collect(ctx, s.config, appVersion)
+	payload, err := backup.Collect(ctx, s.config, s.store, appVersion)
 	if errors.Is(err, backup.ErrNoDatabaseSnapshot) {
 		s.writeError(w, http.StatusPreconditionFailed, err.Error())
 		return
@@ -252,6 +269,7 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 		s.writeError(w, http.StatusInternalServerError, "Failed to save recovery key")
 		return
 	}
+	s.recordRecoveryKey(settings, result.Key)
 	sealer, err := backup.NewSealer(s.config)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to prepare the pairing seal")
@@ -428,6 +446,7 @@ func (s *Server) handlePinKey(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "Failed to save recovery key")
 		return
 	}
+	s.recordRecoveryKey(settings, key)
 	s.auditBackup(ctx, actor, r, "admin.backup_key_pin", key.Public.ID(),
 		fmt.Sprintf("threshold=%d total_shares=%d", key.Threshold, key.TotalShares))
 	s.writeJSON(w, http.StatusOK, map[string]any{
@@ -499,6 +518,7 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 	if u, err := s.store.Settings().GetSetting(ctx, "kyrecovery_url"); err == nil {
 		out["recovery_url"] = u
 	}
+	s.syncRecoveryKey(settings)
 	key, err := recoveryclient.LoadRecoveryKey(s.config.Database.DataDir, settings)
 	switch {
 	case err == nil:

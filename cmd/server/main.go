@@ -180,6 +180,9 @@ func runConfiguredServer(cfg *config.Config) {
 	if err := bootstrap(ctx, cfg, st); err != nil {
 		log.Fatalf("Bootstrap failed: %v", err)
 	}
+	if err := backup.SyncRecoveryKey(cfg, backup.Settings(ctx, st.Settings())); err != nil {
+		log.Fatalf("Recovery key: %v (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten)", err)
+	}
 
 	srv := api.NewServer(cfg, st)
 	backupCtx, stopBackups := context.WithCancel(ctx)
@@ -308,7 +311,7 @@ func backupLoop(ctx context.Context, cfg *config.Config, st store.Store, client 
 			if err != nil || !on || time.Now().Before(next) {
 				return err
 			}
-			res, err := backup.Run(ctx, cfg, rc, st.Settings(), client)
+			res, err := backup.Run(ctx, cfg, rc, st, client)
 			if !errors.Is(err, recoveryclient.ErrNotPaired) && !errors.Is(err, recoveryclient.ErrNoDestination) {
 				recordRun(context.WithoutCancel(ctx), st, "system", res, err)
 			}
@@ -427,8 +430,8 @@ func initAdmin(ctx context.Context, st store.Store, username, pass string, promo
 }
 
 // collectFiles is what every CLI seal uses; the sealed-only members are safe here and nowhere else.
-func collectFiles(ctx context.Context, cfg *config.Config) recoveryclient.Payload {
-	payload, err := backup.Collect(ctx, cfg, appVersion)
+func collectFiles(ctx context.Context, cfg *config.Config, st store.Store) recoveryclient.Payload {
+	payload, err := backup.Collect(ctx, cfg, st, appVersion)
 	if err != nil {
 		log.Fatalf("Failed to collect backup files: %v", err)
 	}
@@ -447,7 +450,7 @@ func runBackupDrill(args []string) {
 	}
 	defer st.Close()
 
-	payload := collectFiles(ctx, cfg)
+	payload := collectFiles(ctx, cfg, st)
 	result, err := backup.RunDrill(ctx, cfg, payload)
 	if err != nil {
 		log.Fatalf("Drill execution error: %v", err)
@@ -485,11 +488,15 @@ func runExportCapsule(args []string) {
 	}
 	defer st.Close()
 
-	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backup.Settings(ctx, st.Settings()))
+	settings := backup.Settings(ctx, st.Settings())
+	if err := backup.SyncRecoveryKey(cfg, settings); err != nil {
+		log.Fatalf("Recovery key: %v", err)
+	}
+	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, settings)
 	if err != nil {
 		log.Fatalf("Recovery key: %v", err)
 	}
-	raw, m, err := recoveryclient.Seal(collectFiles(ctx, cfg), key)
+	raw, m, err := recoveryclient.Seal(collectFiles(ctx, cfg, st), key)
 	if err != nil {
 		log.Fatalf("Seal: %v", err)
 	}
@@ -508,7 +515,9 @@ func runExportCapsule(args []string) {
 // touched; the authenticated manifest printed for comparison with KyRecovery's record.
 // The restored copy has scheduled deposits off: it may be a drill or a migration beside a
 // server still in service, and two servers depositing under one pairing alternate
-// KyRecovery's newest capsule between diverging databases.
+// KyRecovery's newest capsule between diverging databases. Its sessions are deleted (every
+// bearer credential minted before the capsule) and the replica fingerprint is dropped, so a
+// restore with rotated settings records its own.
 func restore(capsulePath, targetDir, expectService string, shares []string, stdout io.Writer) error {
 	if err := recoveryclient.Restore(capsulePath, targetDir, expectService, shares, stdout); err != nil {
 		return err
@@ -517,23 +526,47 @@ func restore(capsulePath, targetDir, expectService string, shares []string, stdo
 	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err := disableScheduledDeposits(dbPath); err != nil {
-		return fmt.Errorf("files restored, but scheduled deposits could not be turned off in %s (do not start it until they are): %w", dbPath, err)
+	sessions, err := prepareRestoredDatabase(dbPath)
+	if err != nil {
+		return fmt.Errorf("files restored, but %s could not be made safe to start (do not start it until it is): %w", dbPath, err)
 	}
 	fmt.Fprintln(stdout, "Scheduled deposits are OFF in the restored copy. Turn them back on in Backup & recovery once this server is the one in service.")
+	fmt.Fprintf(stdout, "Sessions deleted from the restored copy: %d. Everyone signs in again.\n", sessions)
+	fmt.Fprintln(stdout, "Replica configuration record removed from the restored copy; its first PostgreSQL start records a new one.")
 	return nil
 }
 
-// disableScheduledDeposits writes the "off" schedule (recoveryclient's backup_interval_sec
-// = 0) the admin screen writes, so the database setting wins over KY_BACKUP_DEPOSIT_INTERVAL.
-func disableScheduledDeposits(dbPath string) error {
+// prepareRestoredDatabase, in one transaction, writes the "off" schedule (recoveryclient's
+// backup_interval_sec = 0) the admin screen writes, so the database setting wins over
+// KY_BACKUP_DEPOSIT_INTERVAL; deletes every session; and deletes the replica fingerprint.
+// A product adds its own session-like tables here.
+func prepareRestoredDatabase(dbPath string) (int64, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = db.Exec(`INSERT INTO server_settings (key, value, updated_at) VALUES ('backup_interval_sec', '0', ?)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, time.Now().UTC())
-	return errors.Join(err, db.Close())
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO server_settings (key, value, updated_at) VALUES ('backup_interval_sec', '0', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM sessions`)
+	if err != nil {
+		return 0, err
+	}
+	sessions, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM server_settings WHERE key = ?`, config.ReplicaConfigSetting); err != nil {
+		return 0, err
+	}
+	return sessions, tx.Commit()
 }
 
 // stdinIsTerminal reports whether a human is typing, so a pipeline gets no stray prompt.

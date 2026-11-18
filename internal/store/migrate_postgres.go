@@ -257,7 +257,7 @@ func copyPostgres(ctx context.Context, src, dst *SQLStore, report *MigrationRepo
 		if err := matchSourceColumns(ctx, src.db, table, columns); err != nil {
 			return err
 		}
-		n, digest, err := copyTable(ctx, src.db, tx, table, columns)
+		n, digest, err := copyTable(ctx, src.db, tx, "postgres", table, columns)
 		if err != nil {
 			return err
 		}
@@ -276,7 +276,12 @@ func copyPostgres(ctx context.Context, src, dst *SQLStore, report *MigrationRepo
 	return tx.Commit()
 }
 
-func postgresColumns(ctx context.Context, tx *sql.Tx, table string) ([]migrationColumn, error) {
+// querier is a *sql.DB or a *sql.Tx.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func postgresColumns(ctx context.Context, tx querier, table string) ([]migrationColumn, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position`, table)
 	if err != nil {
 		return nil, err
@@ -293,7 +298,7 @@ func postgresColumns(ctx context.Context, tx *sql.Tx, table string) ([]migration
 	return columns, rows.Err()
 }
 
-func matchSourceColumns(ctx context.Context, db *sql.DB, table string, columns []migrationColumn) error {
+func matchSourceColumns(ctx context.Context, db querier, table string, columns []migrationColumn) error {
 	rows, err := db.QueryContext(ctx, "SELECT * FROM "+quoteIdentifier(table)+" LIMIT 0")
 	if err != nil {
 		return fmt.Errorf("source table %q is missing", table)
@@ -322,7 +327,9 @@ func columnSQL(columns []migrationColumn) string {
 	return strings.Join(names, ",")
 }
 
-func copyTable(ctx context.Context, src *sql.DB, tx *sql.Tx, table string, columns []migrationColumn) (int64, *big.Int, error) {
+// copyTable copies table from src into tx, whose driver is dstDriver, and returns the row
+// count and summed digest of the values written.
+func copyTable(ctx context.Context, src querier, tx *sql.Tx, dstDriver, table string, columns []migrationColumn) (int64, *big.Int, error) {
 	rows, err := src.QueryContext(ctx, "SELECT "+columnSQL(columns)+" FROM "+quoteIdentifier(table))
 	if err != nil {
 		return 0, nil, err
@@ -330,7 +337,10 @@ func copyTable(ctx context.Context, src *sql.DB, tx *sql.Tx, table string, colum
 	defer rows.Close()
 	params := make([]string, len(columns))
 	for i := range params {
-		params[i] = fmt.Sprintf("$%d", i+1)
+		params[i] = "?"
+		if dstDriver == "postgres" {
+			params[i] = fmt.Sprintf("$%d", i+1)
+		}
 	}
 	q := "INSERT INTO " + quoteIdentifier(table) + " (" + columnSQL(columns) + ") VALUES (" + strings.Join(params, ",") + ")"
 	stmt, err := tx.PrepareContext(ctx, q)
@@ -355,7 +365,7 @@ func copyTable(ctx context.Context, src *sql.DB, tx *sql.Tx, table string, colum
 	return count, digest, rows.Err()
 }
 
-func tableDigest(ctx context.Context, tx *sql.Tx, table string, columns []migrationColumn) (int64, *big.Int, error) {
+func tableDigest(ctx context.Context, tx querier, table string, columns []migrationColumn) (int64, *big.Int, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT "+columnSQL(columns)+" FROM "+quoteIdentifier(table))
 	if err != nil {
 		return 0, nil, err

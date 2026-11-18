@@ -25,6 +25,10 @@ type Store interface {
 	Settings() SettingsStore
 	Coordination() CoordinationStore
 
+	// SnapshotToSQLite copies a PostgreSQL database, as of one transaction, into a new SQLite
+	// file; ErrSnapshotSchema for a schema this build does not know.
+	SnapshotToSQLite(ctx context.Context, dest string) error
+
 	Driver() string
 	Ping(ctx context.Context) error
 	Close() error

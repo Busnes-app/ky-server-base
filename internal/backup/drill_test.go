@@ -15,7 +15,7 @@ import (
 
 func TestChecksFailsOnAScratchDirMissingTheDatabase(t *testing.T) {
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestChecksPassesOnACompleteScratchDir(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestDrillChecksDecodedManifest(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestDrillRejectsMalformedRecipes(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
 	cfg, _ := payloadConfig(t)
-	original, err := backup.Collect(context.Background(), cfg, "test")
+	original, err := backup.Collect(context.Background(), cfg, nil, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestDrillRejectsDamagedPayload(t *testing.T) {
 	for _, kind := range []string{"missing database", "empty database", "corrupt database", "missing environment"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg, _ := payloadConfig(t)
-			payload, err := backup.Collect(context.Background(), cfg, "test")
+			payload, err := backup.Collect(context.Background(), cfg, nil, "test")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -281,7 +281,7 @@ func TestChecksSQLiteFilenameIsNotADSN(t *testing.T) {
 	t.Setenv("KY_PORT", "8080")
 	t.Setenv("KY_DB_DRIVER", "sqlite")
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "test")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestDrillAcceptsDefaultedEnvironment(t *testing.T) {
 		os.Unsetenv(name)
 	}
 	cfg, _ := payloadConfig(t)
-	payload, err := backup.Collect(context.Background(), cfg, "1.0.0")
+	payload, err := backup.Collect(context.Background(), cfg, nil, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}

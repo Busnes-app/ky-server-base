@@ -345,7 +345,7 @@ func TestPairRemoteStoresTheRecoveryKey(t *testing.T) {
 // A recovery.pub swapped under a live instance must stop the export, not produce a capsule
 // sealed to a key the suite's custodians cannot open.
 func TestExportCapsuleRefusesAMismatchedRecoveryKey(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 
 	pinned, err := recoverykey.Generate()
@@ -736,7 +736,7 @@ func setupSQLiteServer(t *testing.T) (*api.Server, store.Store, *config.Config) 
 }
 
 func TestDepositRequiresAPairing(t *testing.T) {
-	srv, st, _ := setupSQLiteServer(t)
+	srv, st, _ := setupTestServer(t)
 	fake := &fakeDepositor{}
 	api.SetRecoveryClientForTest(srv, fake)
 	session := loginAs(t, srv, st, "alice", "admin")
@@ -749,7 +749,7 @@ func TestDepositRequiresAPairing(t *testing.T) {
 }
 
 func TestDepositSealsToThePinnedKeyAndAudits(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, err := recoverykey.Generate()
 	if err != nil {
@@ -873,7 +873,7 @@ func (c *cancellingDepositor) Deposit(ctx context.Context, url, token string, co
 // admin's connection is gone; otherwise KyRecovery holds a capsule this instance has no
 // record of, which is the value a restore is checked against.
 func TestDepositOutlivesTheRequest(t *testing.T) {
-	srv, st, cfg := setupSQLiteServer(t)
+	srv, st, cfg := setupTestServer(t)
 	ctx := context.Background()
 	priv, _ := recoverykey.Generate()
 	if err := recoveryclient.StoreRecoveryKey(cfg.Database.DataDir, backup.Settings(ctx, st.Settings()), recoveryclient.RecoveryKey{Public: priv.Public(), Threshold: 2, TotalShares: 3}); err != nil {

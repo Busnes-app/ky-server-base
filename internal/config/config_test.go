@@ -291,3 +291,24 @@ func TestSQLiteAliasIsCanonicalBeforeInstanceLock(t *testing.T) {
 		t.Fatalf("alias bypasses instance lock: %v %v", cfg, err)
 	}
 }
+
+// A scheduled PostgreSQL backup holds three connections at once; the pool must leave one more.
+func TestPostgresPoolFloor(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	t.Setenv("KY_DB_DRIVER", "postgres")
+	t.Setenv("KY_SESSION_SECRET", strings.Repeat("s", 32))
+	t.Setenv("KY_SCIM_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("KY_DB_MAX_OPEN_CONNS", "3")
+	if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "KY_DB_MAX_OPEN_CONNS") {
+		t.Fatalf("3 connections on PostgreSQL: %v", err)
+	}
+	t.Setenv("KY_DB_MAX_OPEN_CONNS", "4")
+	if cfg, err := config.LoadFromEnv(); err != nil || cfg.Database.MaxOpenConns != config.MinPostgresOpenConns {
+		t.Fatalf("the floor itself: %v", err)
+	}
+	t.Setenv("KY_DB_DRIVER", "sqlite")
+	t.Setenv("KY_DB_MAX_OPEN_CONNS", "1")
+	if _, err := config.LoadFromEnv(); err != nil {
+		t.Fatalf("SQLite has no pool floor: %v", err)
+	}
+}

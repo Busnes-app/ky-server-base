@@ -6,3 +6,10 @@ func SetMaxSnapshotBytes(n int64) func() {
 	maxSnapshotBytes = n
 	return func() { maxSnapshotBytes = old }
 }
+
+// OnSnapshotForTest calls f with the scratch directory while it holds a PostgreSQL snapshot,
+// and returns the restore func.
+func OnSnapshotForTest(f func(dir string)) func() {
+	snapshotTaken = f
+	return func() { snapshotTaken = nil }
+}

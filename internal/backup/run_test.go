@@ -81,7 +81,7 @@ func runInterrupted(t *testing.T, cfg *config.Config, st store.Store, rc recover
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := backup.Run(ctx, cfg, rc, st.Settings(), client)
+		_, err := backup.Run(ctx, cfg, rc, st, client)
 		result <- err
 	}()
 	select {
@@ -153,7 +153,7 @@ func TestInterruptedUploadIsDueAgainAndLeavesOnlyWholeCapsules(t *testing.T) {
 
 	// The next start: the same schedule now delivers.
 	next := &storingDepositor{}
-	if _, err := backup.Run(context.Background(), cfg, rc, st.Settings(), next); err != nil {
+	if _, err := backup.Run(context.Background(), cfg, rc, st, next); err != nil {
 		t.Fatalf("the run after the interruption failed: %v", err)
 	}
 	if _, ok, _ := recoveryclient.LastDeposit(settings); !ok || next.deposits != 1 {
@@ -234,7 +234,7 @@ func TestInterruptedSnapshotLeavesNothingBehind(t *testing.T) {
 func TestFailedRunKeepsItsAttemptStamp(t *testing.T) {
 	cfg, st, rc, _ := pairedInstance(t)
 	failing := depositorFunc(func() error { return fmt.Errorf("%w: refused", recoveryclient.ErrRemote) })
-	if _, err := backup.Run(context.Background(), cfg, rc, st.Settings(), failing); err == nil || errors.Is(err, backup.ErrInterrupted) {
+	if _, err := backup.Run(context.Background(), cfg, rc, st, failing); err == nil || errors.Is(err, backup.ErrInterrupted) {
 		t.Fatalf("failing run returned %v", err)
 	}
 	if dueNow(t, cfg, st) {

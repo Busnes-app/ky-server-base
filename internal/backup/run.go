@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/config"
@@ -21,11 +22,16 @@ var ErrInterrupted = errors.New("backup: interrupted by shutdown")
 // aborts the snapshot and the upload. The settings writes ignore the cancellation, so a
 // receipt KyRecovery has already returned is still recorded. An interrupted run gives its
 // attempt stamp back, so the scheduler runs it again on the next start, not an interval later.
-func Run(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConfig, st store.SettingsStore, client recoveryclient.Depositor) (recoveryclient.Result, error) {
-	settings := Settings(context.WithoutCancel(ctx), st)
+func Run(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConfig, st store.Store, client recoveryclient.Depositor) (recoveryclient.Result, error) {
+	settings := Settings(context.WithoutCancel(ctx), st.Settings())
+	// A replica that did not handle the pairing writes recovery.pub first. Its failure leaves
+	// the file as it was, which the lib's own pin check below reports and audits.
+	if err := SyncRecoveryKey(cfg, settings); err != nil {
+		log.Printf("[BACKUP] recovery.pub not synchronized with the pin: %s", recoveryclient.AuditSafe(err.Error()))
+	}
 	prev, prevErr := settings.Get(lastAttemptKey)
 	res, err := recoveryclient.Run(ctx, rc, settings, func() (recoveryclient.Payload, error) {
-		return Collect(ctx, cfg, rc.AppVersion)
+		return Collect(ctx, cfg, st, rc.AppVersion)
 	}, client)
 	// ErrInProgress stamped nothing: the stamp belongs to the run that holds the lock.
 	if err == nil || ctx.Err() == nil || res.Receipt != nil || errors.Is(err, recoveryclient.ErrInProgress) {
@@ -45,7 +51,7 @@ func RunOwned(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConf
 	var result recoveryclient.Result
 	won, err := st.Coordination().WithLock(ctx, "backup-run", func(owned context.Context) error {
 		var err error
-		result, err = Run(owned, cfg, rc, st.Settings(), client)
+		result, err = Run(owned, cfg, rc, st, client)
 		return err
 	})
 	if err == nil && !won {
