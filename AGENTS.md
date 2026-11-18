@@ -105,7 +105,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 - Chromium regressions against the built server: production CSP/worker, themes, responsive layout and keyboard dialogs; the browser job gates publishing.
 - On a push to `master` that passes every job (`reuse` included in `publish.needs`), `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
-- `replicas`: `scripts/check-replicas-compose.py` renders the replica overlay merges, then `e2e/compose_test.go` (`KY_E2E_COMPOSE=1`) drives `docker-compose.replicas.yml` with this commit's image: replica SIGKILL and graceful stop under load, elected-worker death, PostgreSQL pause/stop, shared lockout/logout and a real-binary PostgreSQL restore drill. It is in `publish.needs`.
+- `replicas` (`needs: docker`): `scripts/check-replicas-compose.py` renders the replica overlay merges, then `e2e/compose_test.go` (`KY_E2E_COMPOSE=1`) drives `docker-compose.replicas.yml` with the exact image the `docker` job tested (its `tested-image` artifact, no rebuild): replica SIGKILL and graceful stop under load, elected-worker death, the shared capsule archive across retention, `down`/`up` and scaling, PostgreSQL pause (every in-flight request answered within 10 s) and stop, shared lockout/logout and a PostgreSQL restore drill with the runbook's own commands. It is in `publish.needs`.
 
 Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available and `make test-replicas` (Docker) for the replica failure tests.
 Release changes require a new Current source summary and upgrade impact in
@@ -133,8 +133,10 @@ overlay merges with synthetic inputs and starts no containers.
 
 `docs/REPLICAS.md` owns topology, shared secrets, health/drain, the Compose replica overlay
 (`docker-compose.replicas.yml`, `deploy/replicas/haproxy.cfg`), the shared-configuration check,
-worker failover, SQLite-to-PostgreSQL migration and the product rollout contract. Application
-replicas never make PostgreSQL highly available; docs must not say otherwise.
+the recovery key on replicas, worker failover, SQLite-to-PostgreSQL migration and the product
+rollout contract. Application replicas never make PostgreSQL highly available; docs must not
+say otherwise. Replicas share no data directory; the capsule archive (`./backups`) is the one
+shared directory, because every write and prune in it runs under `backup-run`.
 
 `cmd/server` supplies scheduled jobs to `internal/worker`, which elects one owner using
 `store.Coordination().WithLock("scheduled-worker")`. SQLite keeps local in-memory security;

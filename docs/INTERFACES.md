@@ -337,7 +337,10 @@ must be HTTPS; redirects and reserved destinations are refused, with an explicit
 opt-in for private/CGNAT LAN destinations. Compare the recovery-key fingerprint out
 of band. Manual pinning uses standard Base64 of the 1216-byte suite public key and
 the ceremony's topology (`2 <= threshold <= total_shares <= 255`). A different
-existing pin is 409. Pairing/pinning are write-once; unpair deletes only the URL and
+existing pin is 409. Pins and pairings take a database-wide lock and are read back, so on
+PostgreSQL replicas two different keys pinned at once give one 200 and one 409; another
+replica holding the lock past 10 seconds, or a lost lock connection, is 503 (nothing
+pinned; retry). Pairing/pinning are write-once; unpair deletes only the URL and
 sealed token, leaving the pin, receipts and local copies. A KyRecovery administrator
 must separately revoke the remote token. See the [operational guide](DISASTER-RECOVERY.md#disaster-recovery).
 
@@ -390,8 +393,8 @@ normally go to stderr. Setup/operational failures return a nonzero exit status.
 | Invocation after `ky_server_base` | Inputs and effect | Output |
 |---|---|---|
 | No subcommand | Load environment, open store, bootstrap if empty, serve HTTP and run configured backup schedule | Startup/operation logs; listener defaults to `:8080` |
-| `migrate-postgres [--source PATH] [--check]` | Stopped SQLite source and empty PostgreSQL target from `KY_MIGRATE_POSTGRES_DSN`; verify a private snapshot and copy transactionally; check-only rolls back target rows | JSON row counts and a cutover reminder on stdout; nonzero on failure |
-| `accept-replica-config` | PostgreSQL only (refused on SQLite); under the bootstrap lock, rewrite the shared-configuration fingerprint from this process's environment after a deliberate change; audited as `admin.replica_config_accepted` with the changed field names | The changed field names on stdout; never values or fingerprints |
+| `migrate-postgres [--source PATH] [--check]` | Stopped SQLite source and empty PostgreSQL target from `KY_MIGRATE_POSTGRES_DSN`; the source directory must be writable (lock and private snapshot); verify a private snapshot and copy transactionally; check-only rolls back target rows. A source pin with no `recovery_public_key` record is recorded from the `recovery.pub` beside the source; a pin without that file is refused before anything is copied | JSON row counts and a cutover reminder on stdout; nonzero on failure |
+| `accept-replica-config` | PostgreSQL only (refused on SQLite); under the bootstrap lock, rewrite the shared-configuration fingerprint from this process's environment after a deliberate change; audited as `admin.replica_config_accepted` with the changed field names. A differing `KY_ENCRYPTION_KEY` is refused, never recorded | The changed field names on stdout; never values or fingerprints |
 | `version` | No inputs or data-directory access | Version text on stdout; use the source commit/image digest for exact build identity |
 | `init-admin -username NAME -password VALUE [-promote]` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions, require password replacement. An existing non-local account is refused; an existing local account that is not an active administrator is refused unless `-promote` is given (exit 1 either way) | Confirmation, and the previous role and status of an existing account, on stderr |
 | `backup-drill` | Collect the payload (SQLite file, or a PostgreSQL snapshot); seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
@@ -457,8 +460,9 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 
 Loading configuration can create the encryption-key file. The fixed read/write
 timeouts are 15 seconds, session lifetime seven days and database connection lifetime
-15 minutes; these are not environment options. Backup deposit extends its response
-write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
+15 minutes; these are not environment options. Every request outside `/api/backup/` has its
+context end at the 15-second write deadline, so one stalled on the database answers. Backup
+deposit, export and drill extend their response write deadline to 16 minutes. On SIGTERM the server drains HTTP for 5 seconds and waits
 at most 10 more for interrupted backup work to record its outcome, so a 30-second stop
 grace period is enough. The [disaster recovery guide](DISASTER-RECOVERY.md#disaster-recovery) describes
 stored schedule precedence, container DNS overrides and backup retention. Compose's
@@ -492,7 +496,11 @@ identical across replicas; `KY_DB_MAX_OPEN_CONNS` must be at least 4. On Postgre
 start compares the shared settings with the recorded fingerprint and refuses, naming the
 fields, when they differ; `accept-replica-config` records a deliberate change. A replica
 writes its missing `recovery.pub` from the pin in the database (`recovery_public_key`
-setting, public data) and refuses to start when its file names another key.
+setting, public data) under the `recovery-pin` lock and refuses to start when its file
+names another key; a pin no replica has published is reported on the status route
+(`recovery_key_error`), at startup and in scheduled-run audit rows, and export/deposit
+answer 412 with the repair. Startup removes leftover `snapshot-*` scratch directories.
 `docker-compose.replicas.yml` adds `KY_REPLICAS`, `KY_DB_DSN`, `KY_POSTGRES_PASSWORD`,
-`KY_ENCRYPTION_KEY`, `KY_PROXY_IP`, `KY_REPLICA_SUBNET`, `KY_EDGE_TRUSTED_PROXIES`,
-`KY_PROXY_BIND` and `KY_PROXY_PORT` ([Replicas](REPLICAS.md#compose-replicas-on-one-host)).
+`KY_ENCRYPTION_KEY`, `KY_PROXY_IP`, `KY_REPLICA_SUBNET`, `KY_EDGE_TRUSTED_PROXIES` (refused
+together with `KY_PROXY_BIND`), `KY_PROXY_BIND` and `KY_PROXY_PORT`
+([Replicas](REPLICAS.md#compose-replicas-on-one-host)).

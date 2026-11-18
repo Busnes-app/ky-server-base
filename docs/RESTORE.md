@@ -297,21 +297,41 @@ available.
    with the shares on stdin. It prints that scheduled deposits are off, how many sessions it
    deleted and that the replica configuration record is gone.
 3. Provision an **empty** database or schema and keep its DSN in a mode-0600 file as
-   `KY_MIGRATE_POSTGRES_DSN`, never on a command line. Then check, and copy:
+   `KY_MIGRATE_POSTGRES_DSN`, never on a command line. With the bundled PostgreSQL of the
+   replica overlay (no host port), create it in the container and write the file without
+   echoing the password:
 
    ```bash
-   docker compose run --rm --no-deps --env-from-file migration.env \
-     -v "$PWD/restored:/restored:ro" app migrate-postgres --source /restored/data/ky_server.db --check
-   docker compose run --rm --no-deps --env-from-file migration.env \
-     -v "$PWD/restored:/restored:ro" app migrate-postgres --source /restored/data/ky_server.db
+   docker compose exec postgres createdb -U ky_server ky_server_restored
+   (umask 077; printf 'KY_MIGRATE_POSTGRES_DSN=postgres://ky_server:%s@postgres:5432/ky_server_restored?sslmode=disable\n' \
+     "$(sed -n 's/^KY_POSTGRES_PASSWORD=//p' .env)" > migration.env)
    ```
 
-   A target with any row in it is refused and left as it was.
-4. Install the restored `data/encryption.key` on every replica: as `KY_ENCRYPTION_KEY` (its
-   hex, written straight into each `.env` with `umask 077`, never echoed) or as each
-   replica's `data/encryption.key`. `recovery.pub` needs no copying: each replica writes it
-   from the pin in the database before its first backup, and refuses to start if a stale
-   file there names another key. Point `KY_DB_DSN` at the new database.
+   Then check, and copy. Mount `restored` **writable**: the command takes a lock and makes a
+   private snapshot beside the database. Running as your own user keeps those files yours:
+
+   ```bash
+   docker compose run --rm --no-deps --user "$(id -u):$(id -g)" --env-from-file migration.env \
+     -v "$PWD/restored:/restored" app migrate-postgres --source /restored/data/ky_server.db --check
+   docker compose run --rm --no-deps --user "$(id -u):$(id -g)" --env-from-file migration.env \
+     -v "$PWD/restored:/restored" app migrate-postgres --source /restored/data/ky_server.db
+   ```
+
+   A target with any row in it is refused and left as it was. A capsule from a deployment
+   pinned before replica records existed gets its record from `restored/data/recovery.pub`;
+   if the capsule pins a key but has no `recovery.pub`, the command refuses before copying
+   and says how to repair it.
+4. Install the restored encryption key on every replica as `KY_ENCRYPTION_KEY`, written
+   straight into each `.env` without echoing it:
+
+   ```bash
+   (umask 077; printf 'KY_ENCRYPTION_KEY=%s\n' "$(cat restored/data/encryption.key)" >> .env)
+   ```
+
+   Remove any older `KY_ENCRYPTION_KEY` line first. A bare-binary replica can use the file
+   as its `data/encryption.key` instead. `recovery.pub` needs no copying: each replica writes
+   it from the database before its first backup, and refuses to start if a stale file there
+   names another key. Point `KY_DB_DSN` at the new database and remove `migration.env`.
 5. Start **one** replica and verify as in Step 4: sign in, the recovery key ID, the drill,
    the audit log. Then start the rest; each checks the shared configuration against the
    record the first one wrote and refuses to start, naming the fields, if it differs.

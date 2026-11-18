@@ -44,11 +44,28 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   The Unix lock matches the Linux container deployment.
 - `DrillRoot` is under the data directory and forced to 0700; opened payloads stay in the
   library's private, disposable subdirectories. Drills use throwaway keys, not custodian shares.
-- `RecordRecoveryKey` stores a just-pinned key as the public `recovery_public_key` setting;
-  `SyncRecoveryKey` (PostgreSQL only) writes a missing `recovery.pub` from it through the
-  lib's write-once `StoreRecoveryKey`, checks an existing file against the pin
-  (`ErrKeyMismatch`), and records a pin made before records existed. `Run`, the HTTP and CLI
-  exports, the status route and startup call it; startup refuses on error.
+- `PinRecoveryKey` is the only pin path (HTTP pin and pairing): the lib's write-once
+  `StoreRecoveryKey` under the `recovery-pin` lock (waiting up to 10 s, then `ErrPinBusy`),
+  every write on the lock's context, the pin rows read back (`ErrPinOwnershipLost` when the
+  lock connection died), a `recovery.pub` it created removed on failure, then the public
+  `recovery_public_key` record. `SyncRecoveryKey(ctx, cfg, st)` (PostgreSQL only) plans
+  without the lock and writes only under it, re-planning there: a missing file from a
+  record that matches the pin, a missing or stale record from a file that matches the pin.
+  A file naming another key is `ErrKeyMismatch` (startup refuses); a pin with no record and
+  no file, a record without a pin, or a record that disagrees with the pin is
+  `ErrRecoveryKeyUnavailable` (startup logs it and starts; status, export, deposit and
+  `Run` report it with the repair, under 200 characters for the audit row). `Run`, the
+  HTTP and CLI exports, the status route and startup call it. The lib's pin row names are
+  unexported; `TestPinRowNames` fails if they drift. `RecordRecoveryKeyFromFile` is
+  `migrate-postgres`'s: it records a source's `recovery.pub` when it is the pin and refuses
+  a pin with no matching file.
+- Snapshot scratch (`scratch.go`): `snapshotScratch` makes a 0700 `snapshot-*` directory and
+  holds a `flock` on it until release; `RemoveStaleSnapshots` (startup, `cmd/server`
+  `prepareStart`) removes only real directories of this user whose lock is free, never
+  follows a symlink and checks the path still names the locked inode.
+- The local backup directory may be shared by replicas: its only writer and pruner is the
+  lib's `WriteLocalCopy`, reached only through `Run`, which runs under `backup-run` (the
+  scheduler's lock, or `RunOwned`). Export and drill never write there. Keep it that way.
 - `Members` names what `Collect` would seal now, for the status route and the screen; keep
   the two in step.
 - `GET /api/settings`'s `extra_settings` never carries `kyrecovery_token_enc` or a legacy
@@ -71,7 +88,9 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
 
 ## Verification
 - `go test -v ./internal/backup/...` (and with `KY_TEST_POSTGRES_DSN`: `postgres_test.go`,
-  sealed-only deposit, 0700 scratch removal, unknown-schema refusal) covers decoded seal/open checks, malformed recipes,
+  sealed-only deposit, 0700 scratch removal, unknown-schema refusal; `pin_test.go`, concurrent
+  pins with an overlap detector, lock loss, backfill racing a pin, materialization, and
+  unavailable pins; `scratch_test.go` the startup sweep) covers decoded seal/open checks, malformed recipes,
   subprocess lock contention/exit, scratch cleanup and the synthetic v0.5.0 pairing fixture
   in `testdata/pairing-v050.json`. The fixture uses a 32-byte 0x01 deployment key and retains
   no recovery private key.

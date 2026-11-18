@@ -50,12 +50,14 @@ The base Compose service has a `/readyz` healthcheck (busybox `wget`, already in
    retained `KY_ENCRYPTION_KEY` (64 hex characters) to every replica; a new local key cannot
    decrypt existing sealed settings. A replica whose shared configuration differs refuses to
    start ([below](#shared-configuration-check)).
-3. Give each server its own writable data and backup directories. Per-host settings stay
-   per host: `KY_TRUSTED_PROXIES`, `KY_BACKUP_DIR`, `KY_BACKUP_KEEP`, host, port and pool
-   sizes. A pairing or a hand pin lands on whichever replica gets the request; the others
-   write their own `data/recovery.pub` from the pin in the database before their next backup
-   and at startup. A replica whose `recovery.pub` names another key refuses to start; remove
-   the stale file and it is rewritten.
+3. Give each server its own writable data directory; never share it. The backup directory
+   may be shared (one archive for every replica): every local write and prune runs under the
+   database-wide `backup-run` lock. Per-host settings stay per host: `KY_TRUSTED_PROXIES`,
+   `KY_BACKUP_DIR`, `KY_BACKUP_KEEP`, host, port and pool sizes. A pairing or a hand pin
+   lands on whichever replica gets the request; the others write their own
+   `data/recovery.pub` from the pin in the database before their next backup and at startup
+   ([recovery key](#the-recovery-key-on-replicas)). A replica whose `recovery.pub` names
+   another key refuses to start; remove the stale file and it is rewritten.
 4. Point a **health-checking** reverse proxy at the application servers, probing `/readyz`.
    Sticky sessions are unnecessary: sessions, revocations, login windows, office budgets and
    spent CAPTCHA challenges are shared in PostgreSQL. Configure `KY_TRUSTED_PROXIES` for the
@@ -68,6 +70,15 @@ The base Compose service has a `/readyz` healthcheck (busybox `wget`, already in
    migrations and initial admin creation are serialized during concurrent startup.
 
 Stop every old-version replica before starting new ones; mixed versions are not supported.
+`docker compose up -d` alone recreates replicas one at a time, so old and new overlap. With
+the Compose overlay:
+
+```bash
+docker compose pull && docker compose stop app && docker compose up -d --wait
+```
+
+A source install runs `docker compose build` instead of `pull`. Separate hosts: stop the
+service on every host, then start the new version on each.
 
 ## Compose replicas on one host
 
@@ -81,12 +92,12 @@ behind HAProxy. Append it **last** to the `COMPOSE_FILE` chain in `.env` (after
 | `KY_DB_DSN` | yes | `postgres://ky_server:<KY_POSTGRES_PASSWORD>@postgres:5432/ky_server?sslmode=disable` (the private database network); keep it in `.env`, never argv |
 | `KY_POSTGRES_PASSWORD` | yes | The bundled PostgreSQL's password; there is no default |
 | `KY_SESSION_SECRET`, `KY_SCIM_TOKEN` | yes | Shared secrets, `openssl rand -hex 32` written straight into `.env` |
-| `KY_ENCRYPTION_KEY` | yes | The retained 32-byte key in hex; never regenerate it on an existing deployment |
+| `KY_ENCRYPTION_KEY` | yes | The retained 32-byte key in hex; never regenerate it on an existing deployment ([import it](#from-a-sqlite-base-install)) |
 | `KY_REPLICA_SUBNET` | yes | The proxy network, e.g. `172.31.250.0/24` |
 | `KY_PROXY_IP` | yes | HAProxy's fixed address in that subnet; the replicas trust only `KY_PROXY_IP/32` |
-| `KY_EDGE_TRUSTED_PROXIES` | no | The TLS proxy in front of HAProxy as HAProxy sees it (see below) |
+| `KY_EDGE_TRUSTED_PROXIES` | no | The TLS proxy in front of HAProxy as HAProxy sees it (see below); refused together with `KY_PROXY_BIND` |
 | `KY_PROXY_BIND`, `KY_PROXY_PORT` | no | Published address, default `127.0.0.1:8080` |
-| `KY_REPLICAS` | no | Replica count, default 2, at most 8 (`server-template` in `deploy/replicas/haproxy.cfg`) |
+| `KY_REPLICAS` | no | Replica count, default 2. HAProxy gets one server slot per replica, so change the count here, never with `--scale`: a replica beyond the slots gets no traffic |
 
 ```bash
 docker compose config --quiet    # names any missing required variable
@@ -95,40 +106,95 @@ docker compose up -d --wait
 
 What it sets up:
 
-- **App replicas** clear the base `container_name` and port, run `KY_DB_DRIVER=postgres`,
-  and share no files: each container has its own anonymous `/app/data` and `/app/backups`
-  volumes. A local capsule stays in the volume of the replica that sealed it
-  (`docker compose cp --index N app:/app/backups/<file> .`); KyRecovery deposits do not
-  depend on which replica ran. `docker compose down -v` deletes those volumes with the
-  database; copy capsules out first.
-- **PostgreSQL** (digest-pinned) runs on an `internal` network with no route out and no host
-  port; replicas wait for its `pg_isready` healthcheck.
+- **App replicas** clear the base `container_name` and port and run `KY_DB_DRIVER=postgres`.
+  Each container has its own anonymous `/app/data` volume (locks, scratch, `recovery.pub`,
+  which is rewritten from the database), so `down` and `up` or scaling lose nothing there.
+  All replicas share `./backups` as `/app/backups`: one archive of local capsules, written
+  and pruned to `KY_BACKUP_KEEP` under the database-wide `backup-run` lock, listed the same
+  by every replica, and kept across `down`/`up`, scaling and `docker volume prune`.
+- **PostgreSQL** (digest-pinned) keeps its data in its own `pgdata-replicas` volume, never
+  the base file's `pgdata`, which `--profile postgres` initializes with a public password. It
+  runs on an `internal` network with no route out and no host port; replicas wait for its
+  `pg_isready` healthcheck. `docker compose down -v` deletes that volume: the database.
 - **HAProxy** (digest-pinned, `deploy/replicas/haproxy.cfg`) finds replicas through Docker's
   DNS (`server-template` with a resolver) and probes each one's `/readyz` every second; two
   failures take a replica out, two passes bring it back. A request whose connection failed
-  is sent to another replica; a GET or HEAD that died mid-request or timed out is retried
-  there too; any other method is never sent twice. `/api/backup/*` gets the server's 16-minute
-  budget. With every replica unready HAProxy answers 503 at once; a request already inside a
-  replica when the database froze waits for it, up to HAProxy's 30-second server timeout
-  (measured: new requests got 503 4.3 s after a pause, 1.8 s after a stop).
+  is sent to another replica; a GET or HEAD that got an empty answer (its replica died) is
+  retried there too; a timed-out request is never retried, and any other method is never
+  sent twice. Replies get 8 seconds (`timeout server`); `/api/backup/*` gets the server's
+  16-minute budget. When the database freezes, a request already inside a replica gets a 504
+  after 8 seconds and new requests a 503 once the checks take the replicas out (the e2e
+  test fires authenticated requests from the moment of a pause and requires every answer
+  within 10 seconds).
 
 HAProxy publishes on loopback. Put your TLS proxy in front of it. HAProxy appends the peer
 it saw to `X-Forwarded-For`; with the default loopback publish that peer is the replicas
 network gateway (the host side of the bridge, e.g. `172.31.250.1`), so every client counts as
 one address for sign-in limits until you set `KY_EDGE_TRUSTED_PROXIES=<that gateway>/32`.
 Only processes on the host can reach a loopback publish, which is what makes trusting it
-safe; never list a range.
+safe. **Set `KY_EDGE_TRUSTED_PROXIES` only with the default loopback publish**: with any
+other `KY_PROXY_BIND`, clients from other hosts can arrive as the gateway and their forged
+`X-Forwarded-For` would be trusted, so the overlay refuses the two together. Never list a
+range.
 
 `docker compose stop` is graceful; for one replica, `docker stop <container>` sends the same
 SIGTERM. A killed or stopped replica is restarted by `restart: unless-stopped` or the next
 `docker compose up -d`.
+
+### From a SQLite base install
+
+Run from the repository directory, with the SQLite server stopped (`docker compose stop app`)
+and backed up. Nothing below prints a secret.
+
+1. Keep the encryption key: write it into `.env` without echoing it.
+
+   ```bash
+   (umask 077; printf 'KY_ENCRYPTION_KEY=%s\n' "$(sudo cat data/encryption.key)" >> .env)
+   ```
+
+2. Add the shared secrets and the overlay variables to `.env` in the same way
+   (`KY_SESSION_SECRET`, `KY_SCIM_TOKEN`, `KY_POSTGRES_PASSWORD` from
+   `openssl rand -hex 32`; `KY_REPLICA_SUBNET`, `KY_PROXY_IP`; `KY_DB_DSN` naming the
+   bundled database, `postgres://ky_server:<KY_POSTGRES_PASSWORD>@postgres:5432/ky_server?sslmode=disable`),
+   then append `docker-compose.replicas.yml` last to `COMPOSE_FILE`. `docker compose config
+   --quiet` names anything missing.
+3. Start only the database and make the empty migration target. The bundled database has
+   no host port, so the migration runs in a one-off app container on its network:
+
+   ```bash
+   docker compose up -d --wait postgres
+   docker compose exec postgres createdb -U ky_server ky_server_migrated
+   (umask 077; printf 'KY_MIGRATE_POSTGRES_DSN=postgres://ky_server:%s@postgres:5432/ky_server_migrated?sslmode=disable\n' \
+     "$(sed -n 's/^KY_POSTGRES_PASSWORD=//p' .env)" > migration.env)
+   ```
+
+4. Check, then copy. The overlay gives the app container no `./data`, so mount it; it must
+   be writable (the command takes a lock and makes a private snapshot beside the database):
+
+   ```bash
+   docker compose run --rm --no-deps --env-from-file migration.env \
+     -v "$PWD/data:/src" app migrate-postgres --source /src/ky_server.db --check
+   docker compose run --rm --no-deps --env-from-file migration.env \
+     -v "$PWD/data:/src" app migrate-postgres --source /src/ky_server.db
+   ```
+
+   A source that pins a recovery key records it for the replicas from `data/recovery.pub`;
+   a pin without that file is refused before anything is copied.
+5. Point `KY_DB_DSN` in `.env` at `ky_server_migrated`, remove `migration.env`, and start:
+   `docker compose up -d --wait`. Verify as in
+   [step 5 of the migration](#move-a-deployed-sqlite-server-to-postgresql), then keep
+   `./data` until a PostgreSQL capsule has been restored in a drill.
 
 ## Separate hosts
 
 Each host runs the base file plus an overlay that switches it to PostgreSQL (the snippet in
 step 4 of the migration below, with `KY_ENCRYPTION_KEY` supplied too), behind your own
 health-checking proxy. Give the proxy `/readyz` as the probe, a one-second interval, and
-retries for idempotent requests only.
+retries for idempotent requests only, never for a request that timed out. When the database
+freezes, a request already inside a server waits until your proxy's upstream timeout (set it
+to about 8 seconds, with a longer one for `/api/backup/`, which may take 16 minutes) or the
+server's own deadline: every request outside `/api/backup/` ends at the 15-second write
+deadline.
 
 nginx and Nginx Proxy Manager have no active health checks in their open-source builds:
 `max_fails`/`fail_timeout` mark an upstream down only after real requests fail, and
@@ -173,6 +239,8 @@ never shown by the settings API or logged; `restore` removes it from a restored 
 4. Start the replicas. One still holding the old value refuses to start.
 
 Never rotate the encryption key this way: the sealed KyRecovery token is encrypted under it.
+A replica with a different key is told to supply the retained one, and
+`accept-replica-config` refuses to record it.
 
 ## How shared security behaves
 
@@ -216,10 +284,30 @@ outside the election code.
 ## Backups on replicas
 
 The elected worker runs the schedule; manual runs from any replica and CLI deposits take the
-same `backup-run` lock. Each run snapshots PostgreSQL from one transaction into the usual
-`data/ky_server.db` capsule member, so drills, restores and KyRecovery deposits behave as on
-SQLite. Restore goes through `migrate-postgres` into an empty database:
+same `backup-run` lock, and only those runs write or prune the local backup directory, so a
+directory shared by every replica stays one consistent archive. Each run snapshots
+PostgreSQL from one transaction into the usual `data/ky_server.db` capsule member, so
+drills, restores and KyRecovery deposits behave as on SQLite. The snapshot sits in a private
+`data/snapshot-*` directory while it is sealed; one left by a killed process is removed at
+the next start. Restore goes through `migrate-postgres` into an empty database:
 [RESTORE.md](RESTORE.md#restoring-a-postgresql-deployment).
+
+## The recovery key on replicas
+
+A pin or pairing writes the key to the replica that handled it and records the public key
+in the database; every other replica writes its own `recovery.pub` from that record. Pins,
+pairings and those writes take one database-wide `recovery-pin` lock and read the pin back
+before they report success, so two admins pinning different keys at once get one 200 and
+one 409, never two keys. A pin whose lock connection is lost mid-write is reported as
+failed (503, try again).
+
+A pin no replica can load is shown on the Backup page, logged at startup and recorded in
+each scheduled run's audit row; the server still starts so the page can repair it. It
+happens when a deployment pinned before this release moves to fresh replica volumes. Pin the
+same key by hand on any replica (the ceremony page shows it), or copy its `recovery.pub`
+into one replica's data directory and restart that replica. `migrate-postgres` records the
+key from the `recovery.pub` beside the source database, so a migration or restore that
+follows the runbooks does not need this.
 
 ## Product rollout contract
 

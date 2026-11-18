@@ -145,8 +145,10 @@ refuses unknown schemas/populated targets, and verifies normalized contents insi
 transaction. Source data/keys/configuration remain available for rollback before new writes.
 PostgreSQL capsules copy every scaffold table from one `REPEATABLE READ READ ONLY`
 transaction into a SQLite file in a 0700 scratch directory under the data directory, removed
-after sealing; plaintext leaves the process only inside a sealed `kycap/3`, and KyRecovery
-stays a blind store. Unknown schemas are refused, never sealed in part. `restore` deletes
+after sealing; a directory a killed process left is removed at the next start (only real
+directories of this user whose lock no running process holds; symlinks are not followed).
+Plaintext leaves the process only inside a sealed `kycap/3`, and KyRecovery stays a blind
+store. Unknown schemas are refused, never sealed in part. `restore` deletes
 every session (all bearer credentials minted before the capsule), turns deposits off and
 drops the replica fingerprint; restores go into an empty database and never write the old one.
 
@@ -158,22 +160,35 @@ so probe floods cannot load the database. The proxy may keep both internal.
 setting is fingerprinted as HMAC-SHA256 keyed by the encryption key, so someone who reads the
 database cannot brute-force low-entropy values such as URLs or network lists. A replica that
 differs refuses to start, naming fields, never values; a differing encryption key is
-reported alone. `accept-replica-config` is the one audited (`admin.replica_config_accepted`,
-field names only) way to rewrite the record, never an environment switch left on. The record
+reported alone and is never accepted. `accept-replica-config` is the one audited
+(`admin.replica_config_accepted`, field names only) way to rewrite the record, never an
+environment switch left on. `internal/config/replica_test.go` fails when a `Config` field is
+neither fingerprinted nor classified as per host. The record
 never appears in the settings API or logs.
 
 **Recovery key across replicas.** The pinned public key is also stored in settings (public
-data). A replica writes its missing `recovery.pub` from it only through the library's
-write-once `StoreRecoveryKey`, which refuses a key other than the pin; a local file that
-differs from the pin refuses startup.
+data). Pins, pairings and every write of the pin, that record or a `recovery.pub` take one
+database-wide `recovery-pin` lock, write on the lock's context (a lost lock connection fails
+the write within two seconds) and read the pin back before reporting success, so the
+library's write-once rule holds across replicas that no longer share `recovery.pub`. A
+replica writes its missing file only through the library's `StoreRecoveryKey`, which refuses
+a key other than the pin; a local file that differs from the pin refuses startup; a pin no
+replica can load, or a record without a pin, is reported and never guessed.
 
 **Replica proxy.** The Compose replica overlay binds HAProxy to loopback, publishes no app or
 database port, keeps PostgreSQL on an internal network with a required password, pins images
-by digest and trusts only HAProxy's `/32` (plus an explicit edge address) for
-`X-Forwarded-For`. HAProxy retries only GET/HEAD after a request reached a replica.
+by digest and trusts only HAProxy's `/32` (plus an explicit edge address, refused unless the
+proxy publishes on the default loopback) for `X-Forwarded-For`. HAProxy retries only GET/HEAD
+that got an empty answer, never a timed-out request; its 8-second upstream timeout and the
+server's 15-second request deadline bound a request stalled on a frozen database. The bundled
+PostgreSQL has its own volume, so the base profile's public-password volume is never reused.
+Replicas share only the capsule archive, whose writes are serialized by `backup-run`.
 
 Tests: `internal/store/coordination_test.go`, `internal/store/migrate_postgres_test.go`,
 `internal/store/snapshot_test.go`, `internal/api/replicas_test.go`,
 `internal/api/health_test.go`, `internal/api/replica_key_test.go`,
-`internal/backup/postgres_test.go`, `cmd/server/replica_test.go`,
-`cmd/server/pgbackup_test.go`, `internal/worker/worker_test.go` and `e2e/compose_test.go`.
+`internal/backup/postgres_test.go`, `internal/backup/pin_test.go`,
+`internal/backup/scratch_test.go`, `internal/config/replica_test.go`,
+`cmd/server/replica_test.go`, `cmd/server/startup_test.go`,
+`cmd/server/migrate_postgres_test.go`, `cmd/server/pgbackup_test.go`,
+`internal/worker/worker_test.go` and `e2e/compose_test.go`.

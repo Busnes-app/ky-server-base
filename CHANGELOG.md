@@ -48,15 +48,33 @@ These are human summaries, not a raw version-control log.
   and audits `admin.replica_config_accepted` with field names only.
 - A pairing or hand pin on one replica is shared through the database: the others write
   their own `recovery.pub` before a backup and at startup, and refuse to start when theirs
-  names another key.
+  names another key. Pins, pairings and that sync run under one database-wide
+  `recovery-pin` lock and are read back before they count, so two replicas pinning
+  different keys at once give one success and one 409. A pin no replica has published (for
+  example a deployment pinned before this release, moved to fresh replica volumes) is
+  reported on the Backup page, in the log and in the audit row of every scheduled run,
+  with the repair: pin the same key by hand on any replica.
+- `migrate-postgres` records the source's pinned recovery public key from the
+  `recovery.pub` beside the database, and refuses, before copying anything, a source whose
+  pin has no matching file.
+- Startup removes `snapshot-*` scratch directories (plaintext database copies) that a killed
+  process left in the data directory; a directory another process still holds is kept.
+- Every request outside `/api/backup/` ends at the listener's 15 s write deadline, so one
+  stalled on a frozen database answers instead of hanging behind any proxy.
+- `accept-replica-config` refuses a differing `KY_ENCRYPTION_KEY`; it cannot be rotated.
 - `restore` now also deletes every restored session and the replica fingerprint, in the same
   transaction that turns the schedule off, and says so. The runbook's manual
   `DELETE FROM sessions` step is gone. PostgreSQL restores go through `migrate-postgres` into
   an empty database ([runbook](docs/RESTORE.md#restoring-a-postgresql-deployment)).
-- `docker-compose.replicas.yml` runs replicas on one host behind HAProxy with per-replica
-  readiness checks and retries for GET/HEAD only; a new CI job kills replicas, stops one,
-  kills the elected worker and pauses and stops PostgreSQL through the proxy, then restores a
-  PostgreSQL capsule with the real binary.
+- `docker-compose.replicas.yml` runs `KY_REPLICAS` replicas on one host behind HAProxy with
+  per-replica readiness checks, one server slot per replica, an 8 s upstream timeout and
+  retries only for GET/HEAD requests that never got an answer. Replicas keep their own
+  `/app/data` and share `./backups`, whose writes and pruning run under the database-wide
+  `backup-run` lock, so local capsules survive `down`/`up` and scaling and every replica
+  lists the same ones. The bundled PostgreSQL uses its own `pgdata-replicas` volume. A new
+  CI job, on the image the Docker job tested, kills replicas, stops one, kills the elected
+  worker and pauses and stops PostgreSQL through the proxy, then restores a PostgreSQL
+  capsule with the runbook's own commands.
 
 ### Upgrade impact
 
@@ -64,12 +82,16 @@ These are human summaries, not a raw version-control log.
 - On the first PostgreSQL start the configuration fingerprint is recorded. A replica started
   later with a different shared setting refuses to start; make the settings equal, or after a
   deliberate change on all replicas run `accept-replica-config` once.
-- Stop every replica before upgrading; mixed versions are not supported. SQLite deployments
-  change only by the health routes, the 5 s drain at shutdown and `restore` deleting sessions.
+- Stop every replica before upgrading; mixed versions are not supported. With the replica
+  overlay: `docker compose pull && docker compose stop app && docker compose up -d --wait`
+  (source install: `build` instead of `pull`). SQLite deployments change only by the health
+  routes, the 5 s drain at shutdown, `restore` deleting sessions, the startup removal of
+  leftover snapshots and the 15 s request deadline.
 - The base Compose service gains a `/readyz` healthcheck; nothing restarts on it.
 - Application replicas still do not make PostgreSQL highly available. When the database
-  freezes, new requests get a 503 from HAProxy within seconds, but a request already inside
-  a replica waits for the database until the proxy's 30 s server timeout.
+  freezes, new requests get a 503 from HAProxy within seconds and a request already inside
+  a replica gets a 504 after 8 s. Behind another proxy, its upstream timeout (or the
+  server's own 15 s deadline) is the bound.
 
 ## Archived source 51ba2c030379620ec41c99c2102de067f7ef6189
 

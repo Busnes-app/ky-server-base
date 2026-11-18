@@ -24,7 +24,7 @@ drill say so. On PostgreSQL every scaffold table is read in one `REPEATABLE READ
 transaction, one point in time, and written into a SQLite file in a private (0700) scratch
 directory under `KY_DATA_DIR`, verified per table (row count and row digest), by
 `PRAGMA integrity_check` and `foreign_key_check`, sealed as the same `data/ky_server.db`
-member, and removed. A schema with tables, columns or a migration history the scaffold does
+member, and removed (or, after a crash, at the next start). A schema with tables, columns or a migration history the scaffold does
 not know refuses with HTTP 412 naming the product adapter it needs; nothing partial is sealed.
 The scheduled run holds three PostgreSQL connections at once (worker, backup run, snapshot),
 so `KY_DB_MAX_OPEN_CONNS` must be at least 4 there. Restoring a PostgreSQL capsule goes
