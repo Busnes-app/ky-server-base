@@ -123,6 +123,8 @@ type AuditStore interface {
 type SettingsStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	SetSetting(ctx context.Context, key, val string) error
+	// UpdateSettings commits related writes and removals together.
+	UpdateSettings(ctx context.Context, values map[string]string, deleteKeys ...string) error
 	// SetSettingIfAbsent preserves an existing value and returns the value actually stored.
 	SetSettingIfAbsent(ctx context.Context, key, val string) (string, error)
 	DeleteSetting(ctx context.Context, key string) error

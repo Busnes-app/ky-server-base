@@ -29,6 +29,9 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Pairing refresh and unpair commit the recovery URL and sealed bearer credential together.
+  Backup operations read one coherent pair across replicas; failed refreshes preserve
+  deployed credentials without changing their format or encryption label.
 - `GET|HEAD /livez` (process alive, no database access) and `/readyz` (ready only when not
   draining and a database ping answers within 1 s, at most one ping a second) answer only a
   status word with `Cache-Control: no-store`. The base Compose service health-checks

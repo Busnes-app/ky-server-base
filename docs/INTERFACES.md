@@ -345,6 +345,11 @@ the same key and topology to complete them. Pairing/pinning are write-once; unpa
 sealed token, leaving the pin, receipts and local copies. A KyRecovery administrator
 must separately revoke the remote token. See the [operational guide](DISASTER-RECOVERY.md#disaster-recovery).
 
+Pairing refresh commits the URL and sealed token together; a failed write keeps the
+previous pairing. Unpair removes both together. Each backup operation reads a coherent
+pair, including when another replica changes it. An operation already in flight may
+finish with its earlier pairing; unpair does not revoke the remote token.
+
 Schedule seconds must be zero (off) or at least 900; invalid values return 400.
 The stored setting overrides the environment default. A drill's HTTP 200 describes
 completion of the request, not success of restoration: inspect `passed` and each

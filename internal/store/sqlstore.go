@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -913,6 +914,33 @@ VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING`)
 	return s.GetSetting(ctx, key)
 }
 
+func (s *settingsStore) UpdateSettings(ctx context.Context, values map[string]string, deleteKeys ...string) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Stable order avoids deadlocks between concurrent updates of the same rows.
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	q := s.store.rebind(`INSERT INTO server_settings (key, value, updated_at)
+VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+	for _, key := range keys {
+		if _, err := tx.ExecContext(ctx, q, key, values[key], time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	for _, key := range deleteKeys {
+		if _, err := tx.ExecContext(ctx, s.store.rebind(`DELETE FROM server_settings WHERE key = ?`), key); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *settingsStore) DeleteSetting(ctx context.Context, key string) error {
 	_, err := s.store.db.ExecContext(ctx, s.store.rebind(`DELETE FROM server_settings WHERE key = ?`), key)
 	return err
@@ -928,9 +956,10 @@ func (s *settingsStore) GetAllSettings(ctx context.Context) (map[string]string, 
 	settings := make(map[string]string)
 	for rows.Next() {
 		var k, v string
-		if err := rows.Scan(&k, &v); err == nil {
-			settings[k] = v
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
 		}
+		settings[k] = v
 	}
 	return settings, rows.Err()
 }

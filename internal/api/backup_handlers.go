@@ -272,7 +272,6 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	settings := backup.Settings(ctx, s.store.Settings())
 	if err := backup.PinRecoveryKey(ctx, s.config, s.store, result.Key); err != nil {
 		code, msg := pinErrorStatus(err)
 		if code == http.StatusConflict {
@@ -289,7 +288,7 @@ func (s *Server) handlePairRemoteRecovery(w http.ResponseWriter, r *http.Request
 	}
 	// The key is now pinned on disk whatever happens next, so it is recorded whatever happens
 	// next: a write-once pin that exists nowhere in the audit trail is the gap this closes.
-	if err := recoveryclient.StorePairing(settings, sealer, req.RecoveryURL, result.APIToken); err != nil {
+	if err := backup.StorePairing(ctx, s.store.Settings(), sealer, req.RecoveryURL, result.APIToken); err != nil {
 		s.auditBackup(ctx, actor, r, "backup.pair_failed", target,
 			"error=key pinned but the pairing was not stored: "+err.Error())
 		s.writeError(w, http.StatusInternalServerError, "Failed to save recovery pairing")
@@ -407,10 +406,9 @@ func (s *Server) handleUnpair(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	actor := s.actorID(r)
-	settings := backup.Settings(ctx, s.store.Settings())
 	target, _ := s.store.Settings().GetSetting(ctx, "kyrecovery_url")
 	target = recoveryclient.AuditSafe(target)
-	if err := recoveryclient.ClearPairing(settings); err != nil {
+	if err := backup.ClearPairing(ctx, s.store.Settings()); err != nil {
 		if errors.Is(err, recoveryclient.ErrNotPaired) {
 			s.writeError(w, http.StatusPreconditionFailed, "Not paired with KyRecovery")
 			return

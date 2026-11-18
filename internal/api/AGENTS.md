@@ -20,6 +20,8 @@ Owns HTTP routing, request parsing, session cookie validation, CORS headers, and
   lock, read back; `fs.ErrExist`/`ErrKeyMismatch` → 409, `ErrPinBusy`/`ErrPinOwnershipLost` → 503); export
   and status call `backup.SyncRecoveryKey` first, and its `ErrRecoveryKeyUnavailable` is the
   status route's `recovery_key_error` and a 412 on export and deposit.
+- Pairing refresh and unpair use `backup.StorePairing`/`ClearPairing` to commit the URL and
+  sealed credential together; readers use the operation's coherent settings snapshot.
 - `ServeHTTP` ends ordinary request contexts before `WriteTimeout` (14s with the 15s
   default), leaving time for an error reply. Only deposit, drill and export-capsule have
   the longer budget; backup status and management stay bounded.

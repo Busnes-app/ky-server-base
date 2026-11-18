@@ -177,6 +177,13 @@ replica writes its missing file only through the library's `StoreRecoveryKey`, w
 a key other than the pin; a local file that differs from the pin refuses startup; a pin no
 replica can load, or a record without a pin, is reported and never guessed.
 
+Pairing URL and sealed-token replacements and removals commit in one database transaction
+through the product adapter over `recoveryclient`. Readers resolve both rows from one SQL
+snapshot per operation, so a failed or concurrent refresh cannot send a previous bearer
+credential to a replacement URL. Existing credentials keep their storage format and seal
+label. An already-running deposit may finish using the coherent pairing it read before
+unpair; the KyRecovery administrator separately revokes that token.
+
 **Replica proxy.** The Compose replica overlay binds HAProxy to loopback, publishes no app or
 database port, keeps PostgreSQL on an internal network with a required password, pins images
 by digest and trusts only HAProxy's `/32` (plus an explicit edge address, refused unless the

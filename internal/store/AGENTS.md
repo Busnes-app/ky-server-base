@@ -7,6 +7,9 @@ Provides the unified Database Abstraction Layer (DAL) supporting pluggable backe
 Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `AuditStore`, `SettingsStore`), dialect translations, and schema migrations.
 
 ## Local Contracts
+- `SettingsStore.UpdateSettings` commits related upserts and deletes in one transaction;
+  any failure rolls everything back. Recovery pairing uses it for the URL and sealed token.
+  `GetAllSettings` returns one statement's snapshot and propagates scan and row errors.
 - `Coordination` persists PostgreSQL security windows and spent CAPTCHA salts using database
   time. Refunds match the admitting window's expiry; failures deny admission.
 - `WithLock` uses PostgreSQL session advisory key space 3, scoped to current schema and job;

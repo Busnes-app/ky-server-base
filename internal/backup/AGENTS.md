@@ -14,7 +14,11 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
 
 ## Local Contracts
 - `Settings` maps `store.ErrNotFound` to `recoveryclient.ErrNotFound`; every other error passes
-  through unchanged.
+  through unchanged. Each adapter reads URL and sealed token from one settings snapshot.
+  Use a fresh adapter for each operation. `StorePairing` and `ClearPairing` run the library's
+  validation/sealing or removal against captured changes, then commit both existing rows
+  through `SettingsStore.UpdateSettings`. Runtime writers must use these wrappers, not
+  the library's separate row writes. Persisted credentials and their seal label stay unchanged.
 - `NewSealer` seals the KyRecovery token under the deployment key with label
   `ky_server_base:setting:kyrecovery_token`, domain-separated so a row copied from another
   setting will not open.
