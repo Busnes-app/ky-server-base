@@ -37,3 +37,26 @@ func TestSQLiteDSNIsAFilePath(t *testing.T) {
 		t.Fatalf("a file: DSN created a stray directory: %v", err)
 	}
 }
+
+func TestSQLiteURIAndPlainPathUseTheSameInstance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.db")
+	dsn := "file:" + strings.ReplaceAll(path, "server.db", "server%2Edb")
+	actual, err := store.SQLitePath(dsn)
+	if err != nil || actual != path {
+		t.Fatalf("URI maps to %q, %v", actual, err)
+	}
+	st, err := store.Open(context.Background(), config.DatabaseConfig{Driver: "sqlite3", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	_, err = store.WithSQLiteInstance(context.Background(), actual, func(ctx context.Context) error {
+		if _, err := store.MigrateToPostgres(ctx, path, config.DatabaseConfig{Driver: "postgres"}, true); err == nil {
+			t.Fatal("migration entered a running encoded-URI instance")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

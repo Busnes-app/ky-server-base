@@ -4,6 +4,10 @@
 
 Commands and unlinked file paths below are relative to the repository root.
 
+[Replica topology and database migration](REPLICAS.md) describes worker ownership and the
+SQLite-to-PostgreSQL cutover. PostgreSQL deployments need independent protected database
+backups and the retained encryption/recovery key files before cutover.
+
 ## Disaster recovery
 
 Every backup is one `.kycap` capsule: the database snapshot, the deployment's encryption key,

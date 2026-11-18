@@ -423,7 +423,10 @@ func TestExportCapsuleRejectsAnOversizedPayload(t *testing.T) {
 // Login is unauthenticated and the username is caller-supplied up to the 1 MiB body cap.
 // Keying the per-account window on it raw would let a caller pin arbitrary memory.
 func TestLoginLimiterKeyIsBounded(t *testing.T) {
-	srv, _, _ := setupTestServer(t)
+	srv, st, _ := setupTestServer(t)
+	if st.Driver() == "postgres" {
+		t.Skip("SQLite in-memory eviction test; shared PostgreSQL admission is covered by replicas_test.go and store/coordination_test.go")
+	}
 
 	for i := 0; i < 500; i++ {
 		loginStatusFor(t, srv, strings.Repeat("a", 700_000)+strconv.Itoa(i), "WrongPass123!", "192.0.2.9:41000")
@@ -471,7 +474,10 @@ func TestLoginLimiterKeyIsBounded(t *testing.T) {
 // Eviction must not favour long windows. The per-client login window is a minute and the
 // per-account one fifteen, and a caller minting account keys would starve the shorter one.
 func TestFullLimiterStillThrottlesLogin(t *testing.T) {
-	srv, _, _ := setupTestServer(t)
+	srv, st, _ := setupTestServer(t)
+	if st.Driver() == "postgres" {
+		t.Skip("SQLite in-memory eviction test; shared PostgreSQL admission is covered by replicas_test.go and store/coordination_test.go")
+	}
 
 	// Fill the map with the long windows an attacker minting account keys would leave behind.
 	// Login's window is a minute, so "evict the entry nearest expiry" would always pick it.
@@ -610,7 +616,7 @@ func TestLimiterSplitsPerForwardedClientBehindTrustedProxy(t *testing.T) {
 // requests fall back to the peer and share the proxy's own window.
 func TestLimiterFallsBackWhenTheChainIsAllTrusted(t *testing.T) {
 	t.Setenv("KY_TRUSTED_PROXIES", "192.0.2.0/24")
-	srv, _, _ := setupTestServer(t)
+	srv, st, _ := setupTestServer(t)
 
 	for i := 1; i <= 20; i++ {
 		if code := loginStatus(t, srv, "192.0.2.7:41000", "192.0.2.8, 192.0.2.9"); code == http.StatusTooManyRequests {
@@ -620,6 +626,9 @@ func TestLimiterFallsBackWhenTheChainIsAllTrusted(t *testing.T) {
 	if code := loginStatus(t, srv, "192.0.2.7:41000", "192.0.2.8, 192.0.2.9"); code != http.StatusTooManyRequests {
 		t.Fatalf("attempt 21 answered %d, want 429", code)
 	}
+	if st.Driver() == "postgres" {
+		return
+	} // HTTP behavior above covers the shared limiter.
 	for _, k := range api.AttemptKeysForTest(srv) {
 		if k == "login:192.0.2.7" {
 			return

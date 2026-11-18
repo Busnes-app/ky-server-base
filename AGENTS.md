@@ -76,6 +76,8 @@ Default section order:
 6. Report any docs intentionally left unchanged and why
 
 ## User Preferences
+- SQLite remains a first-class single-server default. PostgreSQL migration is an explicit,
+  verified maintenance command; multi-host replicas and worker election require no Kubernetes.
 - KyIdentity directory synchronization uses its SCIM connector; the incompatible webhook is retired. The legacy HMAC-secret config remains accepted with a startup warning. Per-app `admin` roles must be assigned before upgrade; empty `roles` means ordinary user. SCIM username adoption refuses a different nonempty `externalId` with 409.
 - Bootstrap passwords and passwords installed by `init-admin` must be replaced before privileged use. Operator resets atomically revoke sessions. Untouched existing accounts are not retroactively flagged.
 
@@ -114,6 +116,7 @@ overlay merges with synthetic inputs and starts no containers.
 
 ## Child DOX Index
 
+- [internal/worker/AGENTS.md](internal/worker/AGENTS.md): Built-in scheduled-worker election and failover.
 - [internal/config/AGENTS.md](internal/config/AGENTS.md): Configuration management and environment loader.
 - [internal/store/AGENTS.md](internal/store/AGENTS.md): Pluggable database abstraction layer (SQLite & PostgreSQL).
 - [internal/crypto/AGENTS.md](internal/crypto/AGENTS.md): Cryptographic primitives (AES-256-GCM, HMAC, SHA-256, randomness, PKCE).
@@ -124,6 +127,14 @@ overlay merges with synthetic inputs and starts no containers.
 - [internal/testdb/AGENTS.md](internal/testdb/AGENTS.md): Test-only isolated database provisioning (SQLite or PostgreSQL).
 - [internal/api/AGENTS.md](internal/api/AGENTS.md): HTTP REST API endpoints, routing, and middleware.
 - [web/AGENTS.md](web/AGENTS.md): React 19 + TypeScript + Vite PWA frontend and KySecurity design system.
+
+`docs/REPLICAS.md` owns topology, shared secrets, deployment, worker failover and SQLite-to-PostgreSQL migration.
+
+`cmd/server` supplies scheduled jobs to `internal/worker`, which elects one owner using
+`store.Coordination().WithLock("scheduled-worker")`. SQLite keeps local in-memory security;
+PostgreSQL persists admission and replay state. Schema migration and bootstrap are serialized.
+Manual and scheduled backup runs share `backup-run` ownership. SQLite server/migration
+processes exclude each other with `store.WithSQLiteInstance`.
 
 `cmd/server` owns the scheduler: `backupLoop` builds the `RunConfig` once and returns with
 `scheduler disabled: ...` if that fails, because a run that never stamps its attempt would log

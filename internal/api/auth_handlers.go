@@ -66,7 +66,21 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Verify PoW CAPTCHA if enabled. A solved puzzle buys one attempt.
 	if s.config.Captcha.Provider == "pow" {
-		if req.CaptchaToken == "" || !auth.VerifyPoWSolution(req.CaptchaToken, s.config.Security.SessionSecret, s.powSpent) {
+		valid := false
+		if s.store.Driver() == "postgres" {
+			salt, expires, ok := auth.CheckPoWSolution(req.CaptchaToken, s.config.Security.SessionSecret)
+			if ok {
+				var err error
+				valid, err = s.store.Coordination().SpendChallenge(r.Context(), salt, expires*1000+999)
+				if err != nil {
+					s.writeError(w, http.StatusServiceUnavailable, "Authentication temporarily unavailable")
+					return
+				}
+			}
+		} else {
+			valid = auth.VerifyPoWSolution(req.CaptchaToken, s.config.Security.SessionSecret, s.powSpent)
+		}
+		if !valid {
 			s.writeError(w, http.StatusForbidden, "Security check failed. Please complete the CAPTCHA puzzle.")
 			return
 		}
@@ -76,14 +90,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// window none of them has filled yet. An exhausted window answers exactly like a wrong
 	// password, for known and unknown names alike. The name is hashed so a key stays small.
 	accountKey := "login-account:" + crypto.SHA256Hex([]byte(strings.ToLower(req.Username)))[:32] + "|" + client
-	if !s.allowAttempt(accountKey, loginAccountLimit, loginAccountWindow) {
+	refund, allowed, err := s.reserveAttempt(r.Context(), accountKey, loginAccountLimit, loginAccountWindow)
+	if err != nil {
+		s.writeError(w, http.StatusServiceUnavailable, "Authentication temporarily unavailable")
+		return
+	}
+	if !allowed {
 		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	user, err := s.store.Users().GetUserByUsername(r.Context(), req.Username)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.releaseAttempt(accountKey)
+		refund()
 		s.writeError(w, http.StatusInternalServerError, "Authentication error")
 		return
 	}
@@ -98,7 +117,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
-	s.releaseAttempt(accountKey) // only failures stay counted
+	refund() // only failures stay counted
 
 	// Issue active session
 	_, _, err = s.sessions.IssueSession(r.Context(), w, r, user)

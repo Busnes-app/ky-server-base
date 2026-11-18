@@ -21,6 +21,7 @@ type SQLStore struct {
 	groups   *groupStore
 	audit    *auditStore
 	settings *settingsStore
+	lockPath string
 }
 
 // newSQLStore creates and initializes a SQLStore, running migrations automatically.
@@ -30,20 +31,26 @@ func newSQLStore(ctx context.Context, db *sql.DB, driver string) (*SQLStore, err
 		driver = "postgres"
 	}
 
-	if err := migrations.Run(ctx, db, driver); err != nil {
-		return nil, fmt.Errorf("migration failure on driver %s: %w", driver, err)
-	}
-	clashes, err := migrations.EnsureUsernameIndex(ctx, db)
-	if err != nil {
-		return nil, fmt.Errorf("case-insensitive username index: %w", err)
-	}
-	for _, names := range clashes {
-		log.Printf("[STORE] usernames differ only in letter case: %s. Sign-in picks one of them arbitrarily; rename or remove all but one. New case-variant names are refused.", strings.Join(names, ", "))
-	}
-
-	s := &SQLStore{
-		db:     db,
-		driver: driver,
+	s := &SQLStore{db: db, driver: driver}
+	apply := func(ctx context.Context) error { return applySchema(ctx, db, driver) }
+	if driver == "postgres" {
+		// Multiple replicas may start together. Keep schema changes under one owner.
+		for {
+			won, err := s.WithLock(ctx, "schema-migrations", apply)
+			if err != nil {
+				return nil, err
+			}
+			if won {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	} else if err := apply(ctx); err != nil {
+		return nil, err
 	}
 
 	s.users = &userStore{store: s}
@@ -55,11 +62,26 @@ func newSQLStore(ctx context.Context, db *sql.DB, driver string) (*SQLStore, err
 	return s, nil
 }
 
-func (s *SQLStore) Users() UserStore        { return s.users }
-func (s *SQLStore) Sessions() SessionStore  { return s.sessions }
-func (s *SQLStore) Groups() GroupStore      { return s.groups }
-func (s *SQLStore) Audit() AuditStore       { return s.audit }
-func (s *SQLStore) Settings() SettingsStore { return s.settings }
+func applySchema(ctx context.Context, db *sql.DB, driver string) error {
+	if err := migrations.Run(ctx, db, driver); err != nil {
+		return fmt.Errorf("migration failure on driver %s: %w", driver, err)
+	}
+	clashes, err := migrations.EnsureUsernameIndex(ctx, db)
+	if err != nil {
+		return fmt.Errorf("case-insensitive username index: %w", err)
+	}
+	for _, names := range clashes {
+		log.Printf("[STORE] usernames differ only in letter case: %s. Sign-in picks one of them arbitrarily; rename or remove all but one. New case-variant names are refused.", strings.Join(names, ", "))
+	}
+	return nil
+}
+
+func (s *SQLStore) Users() UserStore                { return s.users }
+func (s *SQLStore) Sessions() SessionStore          { return s.sessions }
+func (s *SQLStore) Groups() GroupStore              { return s.groups }
+func (s *SQLStore) Audit() AuditStore               { return s.audit }
+func (s *SQLStore) Settings() SettingsStore         { return s.settings }
+func (s *SQLStore) Coordination() CoordinationStore { return s }
 
 func (s *SQLStore) Driver() string                 { return s.driver }
 func (s *SQLStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }

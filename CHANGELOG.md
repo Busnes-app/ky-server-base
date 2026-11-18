@@ -29,6 +29,36 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- PostgreSQL replicas share login/password-change limits, office budgets and spent CAPTCHA
+  challenges. Successful logins refund only their original window; database failures refuse
+  admission. Office-network exemption removals take effect on other replicas without restart.
+- Every server embeds a scheduled worker. One wins database ownership; standbys take over
+  after failure without Kubernetes. Manual and scheduled backups share job ownership.
+- Concurrent PostgreSQL startup serializes schema migrations and administrator bootstrap.
+- SQLite stays the default and retains its existing in-memory security controls. A local
+  instance lock prevents a second server or database migration using the same file.
+- `migrate-postgres --check` rehearses an integrity/content-verified SQLite-to-PostgreSQL copy;
+  `migrate-postgres` commits it to an empty target. Source data, keys and configuration stay
+  unchanged; unknown product schemas and populated targets are refused.
+
+### Upgrade impact
+
+- Rebuild and restart all replicas together; migration 11 adds indexed security tables.
+  Mixed old/new replicas do not share the new controls. No SQLite-to-PostgreSQL move is required.
+- PostgreSQL requires explicit common `KY_SESSION_SECRET` and (when enabled) `KY_SCIM_TOKEN`,
+  a session-affine database connection and at least three connections per application pool.
+  Keep every replica's encryption/recovery keys and security configuration consistent.
+- Rotate `KY_SESSION_SECRET` on all replicas together to invalidate pre-upgrade CAPTCHA
+  solutions held by the former process-local replay store. Keep the encryption key unchanged.
+- A PostgreSQL cutover requires stopped servers and protected PostgreSQL backups; the built-in
+  capsules still snapshot SQLite only. Follow [the migration runbook](docs/REPLICAS.md).
+- Worker jobs must honour cancellation and tolerate retries after an ambiguous remote result.
+  Standbys retry election once a minute; application replicas do not replace database HA.
+
+## Archived source 467c147ae96fc676a7aef2a39b89b8ee9c9d590f
+
+### Changes
+
 - Office networks can skip the per-address sign-in limit. Staff behind one NAT address
   share the 20-a-minute sign-in window (and the 10-a-minute password-change window) and
   can trip it together. An administrator lists the office's networks under

@@ -135,23 +135,29 @@ func LoadFromEnv() (*Config, error) {
 	env := getEnv("KY_ENV", "development")
 
 	driver := strings.ToLower(getEnv("KY_DB_DRIVER", "sqlite"))
+	if driver == "sqlite3" {
+		driver = "sqlite"
+	}
 	dataDir := getEnv("KY_DATA_DIR", "./data")
 	defaultDSN := fmt.Sprintf("%s/ky_server.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)", dataDir)
-	if driver == "postgres" || driver == "postgresql" {
+	if driver == "postgres" || driver == "postgresql" || driver == "pgx" {
 		driver = "postgres"
 		defaultDSN = "postgres://postgres:postgres@localhost:5432/ky_server?sslmode=disable"
 	}
 	dsn := getEnv("KY_DB_DSN", defaultDSN)
 
 	sessionSecret := getEnv("KY_SESSION_SECRET", "")
-	if env == "production" && sessionSecret == "" {
-		return nil, fmt.Errorf("KY_SESSION_SECRET is required in production")
+	if (env == "production" || driver == "postgres") && sessionSecret == "" {
+		return nil, fmt.Errorf("KY_SESSION_SECRET is required in production and with PostgreSQL; use the same value on every replica")
 	}
 	if sessionSecret == "" {
 		sessionSecret = generateRandomHex(32)
 	}
 	if len(sessionSecret) < crypto.MinHMACKeyBytes {
 		return nil, fmt.Errorf("KY_SESSION_SECRET must contain at least %d bytes", crypto.MinHMACKeyBytes)
+	}
+	if driver == "postgres" && getEnvBool("KY_SCIM_ENABLED", true) && getEnv("KY_SCIM_TOKEN", "") == "" {
+		return nil, errors.New("KY_SCIM_TOKEN is required with PostgreSQL when SCIM is enabled; use the same value on every replica")
 	}
 	kysignonHMAC := getEnv("KY_KYSIGNON_HMAC_SECRET", "")
 	if kysignonHMAC != "" {

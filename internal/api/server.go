@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -173,16 +174,44 @@ func NewServer(cfg *config.Config, st store.Store) *Server {
 	return s
 }
 
-func (s *Server) allowAttempt(key string, limit int, window time.Duration) bool {
+// reserveAttempt returns a single refund tied to the window that admitted this request.
+func (s *Server) reserveAttempt(ctx context.Context, key string, limit int, window time.Duration) (func(), bool, error) {
+	if s.store.Driver() == "postgres" {
+		expires, ok, err := s.store.Coordination().TakeAttempt(ctx, key, limit, window)
+		return func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			if err := s.store.Coordination().ReleaseAttempt(cleanup, key, expires); err != nil {
+				log.Printf("[SECURITY] could not refund login window: %v", err)
+			}
+		}, ok, err
+	}
 	now := time.Now()
 	s.attemptsMu.Lock()
-	defer s.attemptsMu.Unlock()
 	if _, known := s.attempts[key]; !known && len(s.attempts) >= attemptsCap {
 		s.makeRoom(now)
 	}
 	entry := bumpWindow(s.attempts[key], now, window)
 	s.attempts[key] = entry
-	return entry.count <= limit
+	s.attemptsMu.Unlock()
+	return func() {
+		s.attemptsMu.Lock()
+		defer s.attemptsMu.Unlock()
+		if current := s.attempts[key]; current.reset == entry.reset && current.count > 0 {
+			current.count--
+			s.attempts[key] = current
+		}
+	}, entry.count <= limit, nil
+}
+
+func (s *Server) allowAttempt(key string, limit int, window time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, ok, err := s.reserveAttempt(ctx, key, limit, window)
+	if err != nil {
+		log.Printf("[SECURITY] rate-limit store unavailable: %v", err)
+	}
+	return err == nil && ok // fail closed; never fall back to a replica-local allowance
 }
 
 // makeRoom frees a slot for a new key: it drops every expired window, and if the map is still
@@ -237,23 +266,29 @@ const officeBudget = 300
 // a forged X-Forwarded-For from an untrusted peer cannot claim an allowlisted address.
 func (s *Server) allowPerIP(r *http.Request, bucket string, limit int, window time.Duration) bool {
 	ip := s.requestIP(r)
-	if addr, err := netip.ParseAddr(ip); err == nil && s.exempt.Load().Contains(addr) &&
+	list := s.exempt.Load()
+	if s.store.Driver() == "postgres" {
+		stored, err := s.storedExemptNetworks(r.Context())
+		if err != nil {
+			return false
+		}
+		current, err := s.combineExemptNetworks(stored)
+		if err != nil {
+			return false
+		}
+		// The request uses the freshly read list, so removal on another replica takes
+		// effect without restart. Preserve this process's diagnostic counter.
+		if current.String() != list.String() {
+			s.exempt.Store(current)
+			list = current
+		}
+	}
+	if addr, err := netip.ParseAddr(ip); err == nil && list.Contains(addr) &&
 		s.allowAttempt(bucket+":office", officeBudget, time.Minute) {
-		s.exempt.Load().Exempt(addr) // counted only when the per-IP window was skipped
+		list.Exempt(addr) // counted only when the per-IP window was skipped
 		return true
 	}
 	return s.allowAttempt(bucket+":"+auth.RateLimitKey(ip), limit, window)
-}
-
-// releaseAttempt hands back one attempt allowAttempt counted, for a reservation that turned
-// out not to be a failure.
-func (s *Server) releaseAttempt(key string) {
-	s.attemptsMu.Lock()
-	defer s.attemptsMu.Unlock()
-	if entry, ok := s.attempts[key]; ok && entry.count > 0 {
-		entry.count--
-		s.attempts[key] = entry
-	}
 }
 
 func (s *Server) routes() {
