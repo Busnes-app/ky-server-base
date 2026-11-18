@@ -53,6 +53,9 @@ type Server struct {
 	// upload, and the pairing claim. StopDetached cancels it; a dropped connection does not.
 	stopping     context.Context
 	stopDetached context.CancelFunc
+	// draining turns /readyz to 503 on shutdown; ready caches its store Ping.
+	draining atomic.Bool
+	ready    readiness
 }
 
 // StopDetached aborts the slow legs of every detached handler in flight: a backup's snapshot
@@ -292,6 +295,11 @@ func (s *Server) allowPerIP(r *http.Request, bucket string, limit int, window ti
 }
 
 func (s *Server) routes() {
+	// Probes are unauthenticated and say only ok/ready/unready; a proxy may keep them internal.
+	// A GET pattern also answers HEAD.
+	s.mux.HandleFunc("GET /livez", s.handleLivez)
+	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+
 	// Auth
 	s.mux.HandleFunc("/api/auth/pow-challenge", s.handlePoWChallenge)
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
