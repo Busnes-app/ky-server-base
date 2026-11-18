@@ -418,6 +418,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	}
+	// A reply past the listener's write deadline cannot reach the client, so the request's
+	// work ends there too: one stalled on a frozen database answers instead of hanging. Backup
+	// routes set their own, longer write deadline and budget.
+	if d := s.config.Server.WriteTimeout; d > 0 && !strings.HasPrefix(r.URL.Path, "/api/backup/") {
+		ctx, cancel := context.WithTimeout(r.Context(), d)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 
 	// SCIM middleware
 	if strings.HasPrefix(r.URL.Path, "/scim/v2") {

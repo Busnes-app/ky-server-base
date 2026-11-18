@@ -245,7 +245,7 @@ func TestPostgresBackupRestoreDrill(t *testing.T) {
 	restoredSt := openStore(t, &restoredCfg)
 	must(bootstrap(ctx, &restoredCfg, restoredSt))
 	settings := backup.Settings(ctx, restoredSt.Settings())
-	must(backup.SyncRecoveryKey(&restoredCfg, settings))
+	must(backup.SyncRecoveryKey(ctx, &restoredCfg, restoredSt))
 	restoredSealer, err := backup.NewSealer(&restoredCfg)
 	must(err)
 	pairing, err := recoveryclient.LoadPairing(restoredCfg.Database.DataDir, settings, restoredSealer)

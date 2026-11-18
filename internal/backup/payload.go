@@ -137,11 +137,11 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 		return nil, err
 	}
 	defer db.Close()
-	dir, err := os.MkdirTemp(dataDir, "snapshot-*")
+	dir, release, err := snapshotScratch(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer release()
 	path := filepath.Join(dir, "ky_server.db")
 	if err := recoveryclient.SQLiteSnapshot(ctx, db, path); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoDatabaseSnapshot, err)
@@ -150,17 +150,15 @@ func snapshotSQLite(ctx context.Context, dsn, dataDir string) ([]byte, error) {
 }
 
 // snapshotPostgres copies the live PostgreSQL schema, as of one transaction, into a SQLite
-// file in a private (0700) scratch directory under the data directory, removed on return.
+// file in a private (0700) scratch directory under the data directory, removed on return
+// (RemoveStaleSnapshots after a crash).
 // A schema this build does not know is refused, never copied in part.
 func snapshotPostgres(ctx context.Context, st store.Store, dataDir string) ([]byte, error) {
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		return nil, err
-	}
-	dir, err := os.MkdirTemp(dataDir, "snapshot-*")
+	dir, release, err := snapshotScratch(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer release()
 	path := filepath.Join(dir, "ky_server.db")
 	if err := st.SnapshotToSQLite(ctx, path); err != nil {
 		if errors.Is(err, store.ErrSnapshotSchema) {

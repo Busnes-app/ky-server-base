@@ -226,3 +226,38 @@ func TestSQLiteRecordsNoReplicaConfig(t *testing.T) {
 		t.Fatalf("accept-replica-config on SQLite: %v", err)
 	}
 }
+
+// A replica started with the wrong encryption key is told to fix it, and accepting it is
+// refused: the record keeps the key every other replica opens the sealed settings with.
+func TestAcceptReplicaConfigRefusesADifferentEncryptionKey(t *testing.T) {
+	newCfg := replicaConfig(t)
+	first := newCfg()
+	st := openStore(t, first)
+	if err := bootstrap(context.Background(), first, st); err != nil {
+		t.Fatal(err)
+	}
+	before, err := st.Settings().GetSetting(context.Background(), config.ReplicaConfigSetting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typo := newCfg()
+	typo.Security.EncryptionKey = bytes.Repeat([]byte{9}, 32)
+	err = bootstrap(context.Background(), typo, openStore(t, typo))
+	if !errors.Is(err, errReplicaConfig) || strings.Contains(err.Error(), "run accept-replica-config once") {
+		t.Fatalf("wrong key at startup: %v, want a refusal that does not offer accept-replica-config", err)
+	}
+	var out bytes.Buffer
+	if err := acceptReplicaConfig(context.Background(), typo, openStore(t, typo), &out); err == nil || !strings.Contains(err.Error(), config.EncryptionKeyField) {
+		t.Fatalf("accept-replica-config with a different key: %v", err)
+	}
+	after, _ := st.Settings().GetSetting(context.Background(), config.ReplicaConfigSetting)
+	if after != before {
+		t.Fatal("the record changed")
+	}
+	records, _, _ := st.Audit().ListAuditRecords(context.Background(), 0, 50)
+	for _, r := range records {
+		if r.Action == "admin.replica_config_accepted" {
+			t.Fatalf("a refused acceptance was audited as accepted: %+v", r)
+		}
+	}
+}

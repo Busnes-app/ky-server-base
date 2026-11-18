@@ -135,3 +135,75 @@ func TestDrainingTurnsOnlyReadinessOff(t *testing.T) {
 		t.Fatalf("ordinary route while draining: %d", w.Code)
 	}
 }
+
+// frozenSessions is a database that stopped answering: every session lookup waits for its
+// context, as a query on a paused PostgreSQL does.
+type frozenSessions struct{ store.SessionStore }
+
+func (frozenSessions) GetSession(ctx context.Context, _ string) (*store.Session, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+type frozenStore struct{ store.Store }
+
+func (f frozenStore) Sessions() store.SessionStore { return frozenSessions{f.Store.Sessions()} }
+
+// A request stalled on the database ends at the listener's write deadline, whatever proxy is
+// in front; backup routes keep their own longer budget.
+func TestStalledRequestEndsAtTheWriteDeadline(t *testing.T) {
+	_, st, cfg := setupTestServer(t)
+	cfg.Server.WriteTimeout = 200 * time.Millisecond
+	srv := api.NewServer(cfg, frozenStore{st})
+	req := httptest.NewRequest("GET", "/api/admin/users", nil)
+	req.AddCookie(&http.Cookie{Name: "ky_session", Value: "stalled"})
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		done <- w.Code
+	}()
+	select {
+	case code := <-done:
+		if code == http.StatusOK {
+			t.Fatalf("a request whose database froze answered 200")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request stalled on the database outlived its write deadline")
+	}
+
+	var seen lookup
+	srv = api.NewServer(cfg, deadlineStore{Store: st, seen: &seen})
+	breq := httptest.NewRequest("GET", "/api/backup/status", nil)
+	breq.AddCookie(&http.Cookie{Name: "ky_session", Value: "any"})
+	srv.ServeHTTP(httptest.NewRecorder(), breq)
+	if !seen.called || !seen.deadline.IsZero() {
+		t.Fatalf("backup route session lookup: called=%v deadline=%v, want no JSON request deadline", seen.called, seen.deadline)
+	}
+}
+
+type lookup struct {
+	called   bool
+	deadline time.Time
+}
+
+// deadlineStore records the deadline of a session lookup's context.
+type deadlineStore struct {
+	store.Store
+	seen *lookup
+}
+
+type deadlineSessions struct {
+	store.SessionStore
+	seen *lookup
+}
+
+func (d deadlineSessions) GetSession(ctx context.Context, h string) (*store.Session, error) {
+	d.seen.called = true
+	d.seen.deadline, _ = ctx.Deadline()
+	return d.SessionStore.GetSession(ctx, h)
+}
+
+func (d deadlineStore) Sessions() store.SessionStore {
+	return deadlineSessions{d.Store.Sessions(), d.seen}
+}

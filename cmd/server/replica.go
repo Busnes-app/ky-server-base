@@ -20,6 +20,10 @@ import (
 // errReplicaConfig is a replica whose shared settings differ from the recorded ones.
 var errReplicaConfig = errors.New("replica configuration differs from the other replicas")
 
+// errKeyDiffers is never accepted: the sealed settings every replica shares open only under
+// the recorded key, so a different one is a typo or the wrong file, not a rotation.
+const errKeyDiffers = "KY_ENCRYPTION_KEY differs from the key the other replicas use. Supply the retained key; it cannot be rotated with accept-replica-config"
+
 // checkReplicaConfig records the shared-setting fingerprint on first start and refuses a
 // replica that differs, naming only the fields. The caller holds the bootstrap lock.
 func checkReplicaConfig(ctx context.Context, cfg *config.Config, settings store.SettingsStore) error {
@@ -35,7 +39,9 @@ func checkReplicaConfig(ctx context.Context, cfg *config.Config, settings store.
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 		return fmt.Errorf("%w: the stored record is unreadable; run accept-replica-config", errReplicaConfig)
 	}
-	if diff := config.DiffFingerprint(stored, current); len(diff) > 0 {
+	if diff := config.DiffFingerprint(stored, current); slices.Equal(diff, []string{config.EncryptionKeyField}) {
+		return fmt.Errorf("%w: %s", errReplicaConfig, errKeyDiffers)
+	} else if len(diff) > 0 {
 		return fmt.Errorf("%w: %s. Use the same values on every replica; after a deliberate change on all of them, run accept-replica-config once", errReplicaConfig, strings.Join(diff, ", "))
 	}
 	if config.MergeFingerprint(stored, current) {
@@ -67,6 +73,9 @@ func acceptReplicaConfig(ctx context.Context, cfg *config.Config, st store.Store
 				var stored map[string]string
 				if json.Unmarshal([]byte(raw), &stored) == nil {
 					changed = config.DiffFingerprint(stored, current)
+					if slices.Equal(changed, []string{config.EncryptionKeyField}) {
+						return errors.New("refusing: " + errKeyDiffers)
+					}
 				}
 			} else if !errors.Is(err, store.ErrNotFound) {
 				return err

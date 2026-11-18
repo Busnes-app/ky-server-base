@@ -727,8 +727,8 @@ func storePairing(t *testing.T, cfg *config.Config, st store.Store, url, token s
 	return recoveryclient.StorePairing(backup.Settings(context.Background(), st.Settings()), sealer, url, token)
 }
 
-// setupSQLiteServer is setupTestServer pinned to SQLite: deposits snapshot the database, and
-// only the SQLite path can. The Postgres CI job would otherwise (correctly) refuse them.
+// setupSQLiteServer is pinned to SQLite for tests that construct SQLite files directly.
+// Other API tests use setupTestServer to exercise both backends in CI.
 func setupSQLiteServer(t *testing.T) (*api.Server, store.Store, *config.Config) {
 	t.Helper()
 	t.Setenv("KY_TEST_POSTGRES_DSN", "")

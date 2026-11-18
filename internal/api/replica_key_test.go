@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Busnes-app/ky-primitives/capsule"
@@ -107,7 +108,7 @@ func TestReplicaWithADifferentRecoveryPubIsRefused(t *testing.T) {
 	if err := os.WriteFile(recoveryclient.RecoveryKeyPath(cfgB.Database.DataDir), other.Public().Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
-	err := backup.SyncRecoveryKey(cfgB, backup.Settings(context.Background(), st.Settings()))
+	err := backup.SyncRecoveryKey(context.Background(), cfgB, st)
 	if err == nil {
 		t.Fatal("a replica holding a different recovery.pub synchronized")
 	}
@@ -143,5 +144,52 @@ func TestPostgresDepositRefusesAnUnknownSchema(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(cfg.Backup.Dir); len(entries) != 0 {
 		t.Fatalf("a capsule was written: %v", entries)
+	}
+}
+
+// Through a round-robin proxy, two admins pin different keys on two replicas at once: one
+// gets 200, the other 409, and both replicas then report the winner's key and topology.
+func TestConcurrentPinsOnTwoReplicasPinOneKey(t *testing.T) {
+	a, st, cfg := setupTestServer(t)
+	if st.Driver() != "postgres" {
+		t.Skip("replicas share PostgreSQL; SQLite is one server")
+	}
+	b, _ := replicaB(t, cfg)
+	session := loginAs(t, a, st, "alice", "admin")
+	privA, _ := recoverykey.Generate()
+	privB, _ := recoverykey.Generate()
+	codes := make([]int, 2)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, pin := range []struct {
+		srv  *api.Server
+		body map[string]any
+	}{{a, pinBody(privA.Public(), 2, 3)}, {b, pinBody(privB.Public(), 3, 5)}} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			codes[i] = adminDo(t, pin.srv, session, "POST", "/api/backup/pin-key", pin.body).Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+	winner, k, n := privA.Public().ID(), 2.0, 3.0
+	switch {
+	case codes[0] == http.StatusOK && codes[1] == http.StatusConflict:
+	case codes[1] == http.StatusOK && codes[0] == http.StatusConflict:
+		winner, k, n = privB.Public().ID(), 3, 5
+	default:
+		t.Fatalf("concurrent pins answered %v, want one 200 and one 409", codes)
+	}
+	for name, srv := range map[string]*api.Server{"A": a, "B": b} {
+		w := adminDo(t, srv, session, "GET", "/api/backup/status", nil)
+		var status map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["recovery_key_id"] != winner || status["threshold"] != k || status["total_shares"] != n {
+			t.Errorf("replica %s reports %v %v-of-%v, want %s %v-of-%v", name, status["recovery_key_id"], status["threshold"], status["total_shares"], winner, k, n)
+		}
 	}
 }

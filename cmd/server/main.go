@@ -128,6 +128,30 @@ func bootstrap(ctx context.Context, cfg *config.Config, st store.Store) error {
 	}
 }
 
+// prepareStart is everything that must pass before the server listens: bootstrap and the
+// replica configuration check, removal of plaintext snapshots a killed process left, and the
+// recovery key. A recovery.pub naming another key refuses the start; a pin no replica can
+// load is repaired from the screen, so it is logged and the server starts.
+func prepareStart(ctx context.Context, cfg *config.Config, st store.Store) error {
+	if err := bootstrap(ctx, cfg, st); err != nil {
+		return fmt.Errorf("bootstrap failed: %w", err)
+	}
+	if n, err := backup.RemoveStaleSnapshots(cfg.Database.DataDir); err != nil {
+		log.Printf("[BACKUP] leftover snapshot scratch under %s not removed: %v", cfg.Database.DataDir, err)
+	} else if n > 0 {
+		log.Printf("[BACKUP] removed %d snapshot scratch directories a stopped process left", n)
+	}
+	err := backup.SyncRecoveryKey(ctx, cfg, st)
+	if errors.Is(err, backup.ErrRecoveryKeyUnavailable) {
+		log.Printf("[BACKUP] %s", recoveryclient.AuditSafe(err.Error()))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("recovery key: %w (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten)", err)
+	}
+	return nil
+}
+
 // ensureBootstrapAdmin creates the default admin if the database has no users.
 func ensureBootstrapAdmin(ctx context.Context, st store.Store) error {
 	count, err := st.Users().CountUsers(ctx)
@@ -177,11 +201,8 @@ func runConfiguredServer(cfg *config.Config) {
 	}
 	defer st.Close()
 
-	if err := bootstrap(ctx, cfg, st); err != nil {
-		log.Fatalf("Bootstrap failed: %v", err)
-	}
-	if err := backup.SyncRecoveryKey(cfg, backup.Settings(ctx, st.Settings())); err != nil {
-		log.Fatalf("Recovery key: %v (recovery.pub must be the key pinned in the database; remove a stale file to have it rewritten)", err)
+	if err := prepareStart(ctx, cfg, st); err != nil {
+		log.Fatal(err)
 	}
 
 	srv := api.NewServer(cfg, st)
@@ -489,7 +510,7 @@ func runExportCapsule(args []string) {
 	defer st.Close()
 
 	settings := backup.Settings(ctx, st.Settings())
-	if err := backup.SyncRecoveryKey(cfg, settings); err != nil {
+	if err := backup.SyncRecoveryKey(ctx, cfg, st); err != nil {
 		log.Fatalf("Recovery key: %v", err)
 	}
 	key, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, settings)
