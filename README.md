@@ -57,6 +57,13 @@ document their own additions.
 production profile, Compose overlay and migration for existing signing secrets
 and IdP keys. Encryption/recovery keys and stored records stay in place.
 
+## SQLite, PostgreSQL and replicas
+
+SQLite remains the single-server default. [Replication and migration](docs/REPLICAS.md)
+explains database-backed security, automatic scheduled-worker election and the verified
+`migrate-postgres` maintenance command. Kubernetes is optional. PostgreSQL needs its own
+protected backups; built-in capsules still snapshot SQLite only.
+
 ## First sign-in
 
 Every bootstrap or `init-admin` password must be replaced, including when

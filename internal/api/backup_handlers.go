@@ -301,7 +301,7 @@ func (s *Server) handleRunBackup(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "Failed to prepare backup configuration")
 		return
 	}
-	res, err := backup.Run(s.stopping, s.config, rc, s.store.Settings(), s.recovery)
+	res, err := backup.RunOwned(s.stopping, s.config, rc, s.store, s.recovery)
 
 	action, outcome, details := recoveryclient.Outcome(res, err)
 	details["outcome"] = outcome

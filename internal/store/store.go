@@ -23,10 +23,22 @@ type Store interface {
 	Groups() GroupStore
 	Audit() AuditStore
 	Settings() SettingsStore
+	Coordination() CoordinationStore
 
 	Driver() string
 	Ping(ctx context.Context) error
 	Close() error
+}
+
+// CoordinationStore owns the state that must agree across application replicas.
+type CoordinationStore interface {
+	TakeAttempt(ctx context.Context, key string, limit int, window time.Duration) (expires int64, allowed bool, err error)
+	ReleaseAttempt(ctx context.Context, key string, expires int64) error
+	SpendChallenge(ctx context.Context, salt string, expires int64) (bool, error)
+	CleanExpired(ctx context.Context) error
+	// WithLock runs work only on the winner. Loss of the PostgreSQL connection cancels
+	// work; callbacks must honour cancellation. A losing contender returns false, nil.
+	WithLock(ctx context.Context, name string, work func(context.Context) error) (bool, error)
 }
 
 // UserStore defines repository operations for accounts.

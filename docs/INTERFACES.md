@@ -378,6 +378,7 @@ normally go to stderr. Setup/operational failures return a nonzero exit status.
 | Invocation after `ky_server_base` | Inputs and effect | Output |
 |---|---|---|
 | No subcommand | Load environment, open store, bootstrap if empty, serve HTTP and run configured backup schedule | Startup/operation logs; listener defaults to `:8080` |
+| `migrate-postgres [--source PATH] [--check]` | Stopped SQLite source and empty PostgreSQL target from `KY_MIGRATE_POSTGRES_DSN`; verify a private snapshot and copy transactionally; check-only rolls back target rows | JSON row counts and a cutover reminder on stdout; nonzero on failure |
 | `version` | No inputs or data-directory access | Version text on stdout; use the source commit/image digest for exact build identity |
 | `init-admin -username NAME -password VALUE [-promote]` | Username defaults to `admin`; password required, at least 12 bytes; create/reset local administrator, revoke sessions, require password replacement. An existing non-local account is refused; an existing local account that is not an active administrator is refused unless `-promote` is given (exit 1 either way) | Confirmation, and the previous role and status of an existing account, on stderr |
 | `backup-drill` | Collect SQLite payload; seal/open with throwaway keys and check restore recipe | Human summary on stdout with PASSED/FAILED and per-check results; exit status 1 when the drill FAILED |
@@ -409,12 +410,13 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_APP_URL` | `http://localhost:<port>` | External application origin, redirects and SCIM base URL. Set it to the public URL: behind a proxy that rewrites `Host`, a browser sign-in whose `Origin` matches neither is refused as cross-site |
 | `KY_APP_NAME` | `Busnes.app` | Application and capsule service identity; preserve it for restore |
 | `KY_ENV` | `development` | `production` requires a session secret and defaults to Secure cookies |
-| `KY_DB_DRIVER` | `sqlite` | SQLite or `postgres` (`postgresql` alias); other drivers are not implemented |
+| `KY_DB_DRIVER` | `sqlite` | Persistent-file SQLite (`sqlite3` alias) or `postgres` (`postgresql`/`pgx` aliases); other drivers are not implemented |
 | `KY_DATA_DIR` | `./data` | Local database/key directory |
 | `KY_DB_DSN` | SQLite file under data dir; development PostgreSQL URL when selected | Store connection string; configure production PostgreSQL credentials and TLS explicitly. A SQLite DSN other than `<KY_DATA_DIR>/ky_server.db` disables backups |
-| `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections |
+| `KY_MIGRATE_POSTGRES_DSN` | Empty | Target DSN read only by `migrate-postgres`; keep in a protected environment file |
+| `KY_DB_MAX_OPEN_CONNS` | `25` | Database pool maximum open connections; PostgreSQL requires at least 3 |
 | `KY_DB_MAX_IDLE_CONNS` | `5` | Database pool idle connections |
-| `KY_SESSION_SECRET` | Fresh 32-byte random hex in development | Required in production; PoW signing secret; supplied values below 16 bytes fail startup |
+| `KY_SESSION_SECRET` | Fresh 32-byte random hex on development SQLite | Required in production and with PostgreSQL; same value on every replica. PoW signing secret; supplied values below 16 bytes fail startup |
 | `KY_ENCRYPTION_KEY` | Persistent `<data-dir>/encryption.key` | Exactly 32 bytes as hex or standard Base64; encrypts secrets/pairing token; preserve for restore |
 | `KY_COOKIE_SECURE` | true in production or when `KY_APP_URL` starts with `https://` | Secure flag and HSTS response header. `false` with an https `KY_APP_URL` stops startup: its cookies are `__Host-` cookies, which must be Secure |
 | `KY_COOKIE_DOMAIN` | Empty (host-only) | Session/CSRF cookie domain, plain HTTP only: set with an https `KY_APP_URL` it stops the server, and every command that loads the configuration, at startup, because the cookies there are `__Host-` cookies, which take no domain. Never give two suite apps the same domain: they all use the cookie names `ky_session` and `ky_csrf`, so each would overwrite the other's sign-in and receive its session token |
@@ -429,7 +431,7 @@ reader in the binary. The shipped `docker-compose.yml` passes its `.env` to the 
 | `KY_OIDC_ISSUER`, `KY_OIDC_CLIENT_ID`, `KY_OIDC_SECRET` | Empty | Generic OIDC helper configuration; no public login/callback routes are wired |
 | `KY_SAML_ENTITY_ID`, `KY_SAML_METADATA_URL` | Empty | SAML helper configuration; only local metadata output is wired |
 | `KY_SCIM_ENABLED` | `true` | Enable authenticated provisioning |
-| `KY_SCIM_TOKEN` | Fresh random 24-byte hex on each load | Provisioning bearer credential; set explicitly for a stable integration |
+| `KY_SCIM_TOKEN` | Fresh random 24-byte hex on each SQLite load | Provisioning bearer credential; required explicitly with PostgreSQL when SCIM is enabled, identical across replicas |
 | `KY_SCIM_ALLOW_ADMIN` | `false` | Let SCIM grant the `admin` role |
 | `KY_CAPTCHA_PROVIDER` | `pow` | Login PoW check; `none` disables it; other provider verification is not wired |
 | `KY_CAPTCHA_SITE_KEY`, `KY_CAPTCHA_SECRET_KEY` | Empty | Reserved provider configuration; not used by the current PoW verifier |
@@ -455,3 +457,21 @@ setting `GODEBUG=fips140=on`. It is read by Go, not this environment loader.
 Selected mode requires HTTPS OIDC endpoints without redirects; the standard
 verifier still checks signatures, issuer, audience, expiry and nonce. In every
 mode, JWKS fetching refuses redirects and RSA members below 2048 bits.
+
+## Replicas and database migration
+
+[Replication and migration](REPLICAS.md) owns deployment requirements and the cutover runbook.
+PostgreSQL login limits/office budgets and CAPTCHA replay records are shared; storage failure
+refuses admission. PostgreSQL office-exemption decisions read the current database setting.
+SQLite retains local security state and a single-server instance lock. Every server embeds
+an elected scheduled worker; no Kubernetes API is required.
+
+`migrate-postgres [--source <SQLite file>] [--check]` requires `KY_MIGRATE_POSTGRES_DSN`
+from the environment and stopped servers. The default source is
+`<KY_DATA_DIR>/ky_server.db`. It verifies a private snapshot's contents against the empty
+target before committing, prints JSON row counts followed by a cutover reminder, and exits
+nonzero on failure. `--check` rolls back copied rows but may initialize empty target tables.
+Unknown product tables/columns require an adapter. Original SQLite, keys and configuration
+stay in place. PostgreSQL capsules remain unsupported; configure protected PostgreSQL backups.
+With PostgreSQL, `KY_SESSION_SECRET` and (if SCIM is enabled) `KY_SCIM_TOKEN` must be explicit,
+identical across replicas; `KY_DB_MAX_OPEN_CONNS` must be at least 3.

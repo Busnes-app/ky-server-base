@@ -15,6 +15,7 @@ import (
 	"github.com/Busnes-app/ky-primitives/capsule"
 	"github.com/Busnes-app/ky-primitives/recoveryclient"
 	"github.com/Busnes-app/ky_server_base/internal/config"
+	"github.com/Busnes-app/ky_server_base/internal/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -37,7 +38,10 @@ func CheckDatabasePath(cfg *config.Config) error {
 	if strings.ToLower(cfg.Database.Driver) != "sqlite" {
 		return nil
 	}
-	path, _, _ := strings.Cut(strings.TrimPrefix(cfg.Database.DSN, "file:"), "?")
+	path, err := store.SQLitePath(cfg.Database.DSN)
+	if err != nil {
+		return databasePathError("backup: invalid SQLite database path")
+	}
 	want := filepath.Join(cfg.Database.DataDir, "ky_server.db")
 	got, err1 := filepath.Abs(path)
 	wantAbs, err2 := filepath.Abs(want)

@@ -7,6 +7,17 @@ Provides the unified Database Abstraction Layer (DAL) supporting pluggable backe
 Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `AuditStore`, `SettingsStore`), dialect translations, and schema migrations.
 
 ## Local Contracts
+- `Coordination` persists PostgreSQL security windows and spent CAPTCHA salts using database
+  time. Refunds match the admitting window's expiry; failures deny admission.
+- `WithLock` uses PostgreSQL session advisory key space 3, scoped to current schema and job;
+  probe failures cancel work and the physical connection is discarded on exit. SQLite uses
+  persistent OS file locks next to its database. Session pooling is required for PostgreSQL.
+- PostgreSQL schema migration and username-index creation run under one lock. Pools need
+  at least three connections for worker, job ownership and queries.
+- `MigrateToPostgres` validates original migration history before upgrading a private snapshot,
+  preflights destination rows before any DDL, refuses unknown source/target schemas and
+  populated targets, copies all scaffold tables in one transaction, verifies counts/content,
+  and advances the audit sequence. Check-only rolls back rows. Original SQLite stays untouched.
 - `CompletePasswordChange` atomically compares the old password, updates a local account, clears any replacement flag, deletes sessions and records `auth.password_changed`. Session issuance locks the same user row against the verified hash.
 - `UpdateUserProfile` writes only username, email, display name, role and status; SCIM profile updates use it so a stale read cannot restore a replaced password hash or undo an SSO link. `LinkSSOIdentity` is the only provider change (a compare-and-swap on the expected provider and subject, `ErrConflict` otherwise); KyIdentity adoption uses it. `TakeOverForSCIM` is the only way `scim_managed` changes after creation: `UpdateUserProfile` that also sets it in the same statement, only on an unmanaged `kysignon` row with the expected subject (SCIM taking over a KyIdentity account, all or nothing). `UpdateUserRole` writes the role alone (the KyIdentity sign-in), with the same compare-and-swap and same-transaction session revocation, so it never writes back a profile it read. `UpdateSCIMProfile` is the only subject change: `UpdateUserProfile` that also compares the subject read and, while the row is still `scim`, writes the new subject (SCIM `externalId` before adoption) in the same statement. It is a compare-and-swap on the role and status the caller read (`ErrConflict` otherwise) and deletes the user's sessions in the same transaction when either changes. `UpdateUser` writes every column it knows.
 - Usernames are unique regardless of letter case: `CreateUser`, `UpdateUser` and `UpdateUserProfile` refuse a case variant of another account's name (`ErrAlreadyExists`), checked inside the write's transaction (SQLite has one connection; PostgreSQL takes `pg_advisory_xact_lock(2, hashtext(LOWER(name)))`). An account keeping its own name (by the database's `LOWER`, never Go's folding) passes, so a pre-existing pair stays updatable. `migrations.EnsureUsernameIndex` runs at every open and builds the unique `LOWER(username)` index only when no such duplicates exist; otherwise it returns each clash, `newSQLStore` logs it, and nothing is renamed.
@@ -18,6 +29,8 @@ Owns data models, store interfaces (`UserStore`, `SessionStore`, `GroupStore`, `
 - Migration 8 drops `device_pairings`: QR device pairing was removed because no client used it.
 - Migration 6 adds `sessions.sso_sid`, `sso_logouts` (by `sid`) and `sso_subject_logouts` (by provider and subject, with a `cutoff`; it never moves back). `EndSSOSession` and `EndSSOSubject` commit their fence before deleting sessions, and `CreateSession` checks both fences only after its insert commits, so under read committed a logout racing a login always ends it; a fenced create deletes its row and returns `ErrSSOSessionEnded`. The subject fence matches sessions by `created_at`, so it relies on SSO sessions being dated by the ID token's `iat`. Expired fences are pruned on the next call that writes one.
 - `store.Open(ctx, cfg)` initializes and auto-migrates the configured database backend.
+- `SQLitePath` owns path/file-URI decoding for opening, locks and backup checks; encoded
+  and plain names of one file must have the same lock identity.
 - SQLite runs in WAL mode with foreign keys enabled. `openSQLite` takes a path or a `file:` URI (the same parse as `internal/backup`) and refuses a server URL (`scheme://`) without echoing it, so a PostgreSQL DSN under the sqlite driver never becomes a stray file.
 - PostgreSQL queries are rebound dynamically from standard positional parameters.
 

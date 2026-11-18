@@ -1,4 +1,4 @@
-.PHONY: all build build-web test test-race test-postgres test-web tidy-check lint smoke ci run clean docker-build notes-check
+.PHONY: all build build-web test test-race test-postgres test-web tidy-check lint smoke ci run clean docker-build notes-check audit-web
 
 all: build-web build
 
@@ -28,6 +28,9 @@ test-web:
 	@echo "==> Running frontend test suite..."
 	@cd web && npm ci && npm test
 
+audit-web:
+	@cd web && npm run audit
+
 # The same gate CI runs: a stale go.sum fails the build there, so fail here first.
 tidy-check:
 	@echo "==> Checking go.mod is tidy..."
@@ -46,7 +49,7 @@ notes-check:
 	@python3 -B -m unittest discover -s scripts -p test_release_notes.py
 	@python3 scripts/check-release-notes.py
 
-ci: notes-check tidy-check lint test-race test-web smoke
+ci: notes-check tidy-check lint test-race test-web audit-web smoke
 	@echo "==> Local CI checks passed"
 
 run: build

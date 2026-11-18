@@ -76,6 +76,8 @@ Default section order:
 6. Report any docs intentionally left unchanged and why
 
 ## User Preferences
+- SQLite remains a first-class single-server default. PostgreSQL migration is an explicit,
+  verified maintenance command; multi-host replicas and worker election require no Kubernetes.
 - KyIdentity directory synchronization uses its SCIM connector; the incompatible webhook is retired. The legacy HMAC-secret config remains accepted with a startup warning. Per-app `admin` roles must be assigned before upgrade; empty `roles` means ordinary user. SCIM username adoption refuses a different nonempty `externalId` with 409.
 - Bootstrap passwords and passwords installed by `init-admin` must be replaced before privileged use. Operator resets atomically revoke sessions. Untouched existing accounts are not retroactively flagged.
 
@@ -96,13 +98,14 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
 - `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 17
 - Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
-- `govulncheck` and `npm audit --audit-level=high`
+- `govulncheck` and `npm run audit`: strict production audit plus full high/critical audit,
+  with the single dated development-tool exception in `docs/NPM-AUDIT.md`
 - `scripts/smoke-test.sh`: runs the built binary and asserts CLI, auth, session, and SPA behavior
 - Docker image build and container HTTP check
 - Chromium regressions against the built server: production CSP/worker, themes, responsive layout and keyboard dialogs; the browser job gates publishing.
 - On a push to `master` that passes every job (`reuse` included in `publish.needs`), `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
-Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web smoke`); add `make test-postgres` when a Postgres instance is available.
+Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available.
 Release changes require a new Current source summary and upgrade impact in
 `CHANGELOG.md`, including dependency, CI and documentation-only publications.
 Archive the previous shipped summary under its known commit. `make notes-check`
@@ -114,6 +117,7 @@ overlay merges with synthetic inputs and starts no containers.
 
 ## Child DOX Index
 
+- [internal/worker/AGENTS.md](internal/worker/AGENTS.md): Built-in scheduled-worker election and failover.
 - [internal/config/AGENTS.md](internal/config/AGENTS.md): Configuration management and environment loader.
 - [internal/store/AGENTS.md](internal/store/AGENTS.md): Pluggable database abstraction layer (SQLite & PostgreSQL).
 - [internal/crypto/AGENTS.md](internal/crypto/AGENTS.md): Cryptographic primitives (AES-256-GCM, HMAC, SHA-256, randomness, PKCE).
@@ -124,6 +128,14 @@ overlay merges with synthetic inputs and starts no containers.
 - [internal/testdb/AGENTS.md](internal/testdb/AGENTS.md): Test-only isolated database provisioning (SQLite or PostgreSQL).
 - [internal/api/AGENTS.md](internal/api/AGENTS.md): HTTP REST API endpoints, routing, and middleware.
 - [web/AGENTS.md](web/AGENTS.md): React 19 + TypeScript + Vite PWA frontend and KySecurity design system.
+
+`docs/REPLICAS.md` owns topology, shared secrets, deployment, worker failover and SQLite-to-PostgreSQL migration.
+
+`cmd/server` supplies scheduled jobs to `internal/worker`, which elects one owner using
+`store.Coordination().WithLock("scheduled-worker")`. SQLite keeps local in-memory security;
+PostgreSQL persists admission and replay state. Schema migration and bootstrap are serialized.
+Manual and scheduled backup runs share `backup-run` ownership. SQLite server/migration
+processes exclude each other with `store.WithSQLiteInstance`.
 
 `cmd/server` owns the scheduler: `backupLoop` builds the `RunConfig` once and returns with
 `scheduler disabled: ...` if that fails, because a run that never stamps its attempt would log
@@ -152,3 +164,6 @@ describe implemented scaffold behavior and explicitly identify unwired helpers.
 opt-in Compose overlay preserves existing image/build, DNS, network and storage
 settings while replacing the public HTTP port with loopback. Never regenerate
 retained encryption/recovery keys to satisfy the profile.
+
+`docs/NPM-AUDIT.md` owns frontend audit scope, temporary advisory acceptance and removal.
+Keep new advisories/production exposure failing; exception expiry requires reviewed changes.

@@ -330,6 +330,32 @@ UPDATE users SET scim_managed = TRUE WHERE sso_provider = 'scim';`,
     PRIMARY KEY (provider, subject)
 );`,
 	},
+	{
+		Version: 11,
+		Name:    "replica_security",
+		SQLite: `CREATE TABLE security_windows (
+    key TEXT PRIMARY KEY,
+    hits INTEGER NOT NULL,
+    expires_at BIGINT NOT NULL
+);
+CREATE INDEX idx_security_windows_expiry ON security_windows(expires_at);
+CREATE TABLE spent_challenges (
+    salt TEXT PRIMARY KEY,
+    expires_at BIGINT NOT NULL
+);
+CREATE INDEX idx_spent_challenges_expiry ON spent_challenges(expires_at);`,
+		Postgres: `CREATE TABLE security_windows (
+    key TEXT PRIMARY KEY,
+    hits INTEGER NOT NULL,
+    expires_at BIGINT NOT NULL
+);
+CREATE INDEX idx_security_windows_expiry ON security_windows(expires_at);
+CREATE TABLE spent_challenges (
+    salt TEXT PRIMARY KEY,
+    expires_at BIGINT NOT NULL
+);
+CREATE INDEX idx_spent_challenges_expiry ON spent_challenges(expires_at);`,
+	},
 }
 
 // EnsureUsernameIndex builds the case-insensitive unique index on usernames when existing
@@ -442,5 +468,34 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		}
 	}
 
+	return nil
+}
+
+// ValidateHistory identifies a scaffold database before a maintenance command can
+// initialize or upgrade it. Future or discontinuous histories need their owning adapter.
+func ValidateHistory(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "SELECT version, name FROM schema_migrations ORDER BY version")
+	if err != nil {
+		return fmt.Errorf("source is not a recognized scaffold database")
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var version int
+		var name string
+		if err := rows.Scan(&version, &name); err != nil {
+			return err
+		}
+		if n >= len(registry) || version != registry[n].Version || name != registry[n].Name {
+			return fmt.Errorf("unsupported scaffold migration history")
+		}
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("source has no scaffold migration history")
+	}
 	return nil
 }

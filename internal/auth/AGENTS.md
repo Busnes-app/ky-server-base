@@ -15,6 +15,8 @@ Owns session issuance and verification, the client-address helpers, and PoW chal
 - `CookieName` names every cookie the server sets or reads: with `HostCookies` (an https `KY_APP_URL`, whose cookies are always Secure) it adds the `__Host-` prefix (Secure, `Path=/`, no Domain), so a sibling subdomain cannot plant a session, CSRF or SSO state cookie; bare names are then never read. `ValidateCSRF` takes the same flag.
 - Session authentication rejects inactive accounts and deletes their presented session.
 - PoW solutions must carry unexpired server-signed challenge metadata. `VerifyPoWSolution` with a `PoWSpent` set accepts each solved salt once until it expires; salts are recorded only after the signature and work check out, and expired ones are pruned whenever the set has doubled; there is no cap that would let a solution through unrecorded.
+- `CheckPoWSolution` validates signed work without spending it; PostgreSQL API handlers
+  spend the returned salt atomically in shared storage. SQLite retains `PoWSpent`.
 - The default puzzle size is `config.DefaultPoWDifficulty`, measured so the browser's median solve is about one second; re-measure before changing it.
 - Local TOTP and recovery codes are retired: their columns keep their data but nothing reads them. Do not add local MFA back.
 - `ClientIP` is the one client-address helper: the rate limiter and session binding both use it. `X-Forwarded-For` is honoured only when the peer is in `KY_TRUSTED_PROXIES`, walking the chain from the right past trusted hops; `X-Real-IP` is ignored. Each entry may be a bare IP or `ip:port` (Azure App Service/Application Gateway append the port); anything else ends the walk and falls back to the peer.

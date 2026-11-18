@@ -56,6 +56,8 @@ func TestConfigLoadFromEnvOverrides(t *testing.T) {
 	t.Setenv("KY_APP_NAME", "CustomBusnesApp")
 	t.Setenv("KY_CAPTCHA_PROVIDER", "turnstile")
 
+	t.Setenv("KY_SESSION_SECRET", "test-stable-session-secret-at-least-32-bytes")
+	t.Setenv("KY_SCIM_TOKEN", "test-stable-scim-token")
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
@@ -251,5 +253,41 @@ func TestRateLimitExemptNetworksAreValidatedAtStartup(t *testing.T) {
 		if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "KY_RATE_LIMIT_EXEMPT_NETWORKS") {
 			t.Errorf("%q: err = %v, want a startup failure naming the variable", bad, err)
 		}
+	}
+}
+
+func TestPostgresRequiresStableReplicaSecrets(t *testing.T) {
+	for _, driver := range []string{"postgres", "postgresql", "pgx"} {
+		t.Run(driver, func(t *testing.T) {
+			t.Setenv("KY_DATA_DIR", t.TempDir())
+			t.Setenv("KY_DB_DRIVER", driver)
+			t.Setenv("KY_DB_DSN", "")
+			t.Setenv("KY_SESSION_SECRET", "")
+			t.Setenv("KY_SCIM_TOKEN", "")
+			if _, err := config.LoadFromEnv(); err == nil {
+				t.Fatal("PostgreSQL generated a per-replica session secret")
+			}
+			t.Setenv("KY_SESSION_SECRET", "test-stable-session-secret-at-least-32-bytes")
+			if _, err := config.LoadFromEnv(); err == nil {
+				t.Fatal("PostgreSQL generated a per-replica SCIM token")
+			}
+			t.Setenv("KY_SCIM_ENABLED", "false")
+			cfg, err := config.LoadFromEnv()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Database.Driver != "postgres" || !strings.HasPrefix(cfg.Database.DSN, "postgres://") {
+				t.Fatalf("alias was not canonicalized: %+v", cfg.Database)
+			}
+		})
+	}
+}
+
+func TestSQLiteAliasIsCanonicalBeforeInstanceLock(t *testing.T) {
+	t.Setenv("KY_DATA_DIR", t.TempDir())
+	t.Setenv("KY_DB_DRIVER", "sqlite3")
+	cfg, err := config.LoadFromEnv()
+	if err != nil || cfg.Database.Driver != "sqlite" {
+		t.Fatalf("alias bypasses instance lock: %v %v", cfg, err)
 	}
 }

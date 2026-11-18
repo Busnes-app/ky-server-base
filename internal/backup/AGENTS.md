@@ -46,6 +46,8 @@ live in `recoveryclient` and in the settings rows it reads and writes through th
   plaintext `kyrecovery_token`; the filter drops every key with the `kyrecovery_token`
   prefix, so a rename in the lib cannot leak. An admin sees the paired `kyrecovery_url`,
   never the credential.
+- `RunOwned` coordinates HTTP/CLI deposits with the scheduler through `backup-run`.
+  It returns the library's `ErrInProgress` when another process owns a run.
 - `Run` (`run.go`) is the only caller of `recoveryclient.Run` in the server, scheduler and
   CLI. Cancelling its context aborts the snapshot and the upload; settings writes use
   `context.WithoutCancel`, so a receipt already returned is recorded. An interrupted run

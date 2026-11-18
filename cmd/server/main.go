@@ -23,6 +23,7 @@ import (
 	"github.com/Busnes-app/ky_server_base/internal/config"
 	"github.com/Busnes-app/ky_server_base/internal/crypto"
 	"github.com/Busnes-app/ky_server_base/internal/store"
+	"github.com/Busnes-app/ky_server_base/internal/worker"
 )
 
 // appVersion is what the capsule manifest records for this build.
@@ -31,6 +32,11 @@ const appVersion = "1.0.0"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "migrate-postgres":
+			if err := migratePostgres(context.Background(), os.Args[2:], os.Stdout); err != nil && !errors.Is(err, flag.ErrHelp) {
+				log.Fatal(err)
+			}
+			return
 		case "init-admin":
 			runInitAdmin(os.Args[2:])
 			return
@@ -71,6 +77,27 @@ func runServer() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	if cfg.Database.Driver == "sqlite" {
+		path, err := store.SQLitePath(cfg.Database.DSN)
+		if err != nil {
+			log.Fatal(err)
+		}
+		won, err := store.WithSQLiteInstance(context.Background(), path, func(context.Context) error {
+			runConfiguredServer(cfg)
+			return nil
+		})
+		if err != nil {
+			log.Fatalf("SQLite instance lock: %v", err)
+		}
+		if !won {
+			log.Fatal("SQLite already has a server or migration running; stop it first. Use PostgreSQL for replicas.")
+		}
+		return
+	}
+	runConfiguredServer(cfg)
+}
+
+func runConfiguredServer(cfg *config.Config) {
 	if cfg.Backup.AllowPrivateRecovery {
 		log.Printf("[BACKUP] KY_BACKUP_ALLOW_PRIVATE_RECOVERY is on: RFC1918 and CGNAT destinations admitted; loopback, link-local and other reserved addresses remain refused (HTTPS still required)")
 	}
@@ -89,30 +116,45 @@ func runServer() {
 	}
 	defer st.Close()
 
-	// Ensure default admin user exists if database is empty
-	count, _ := st.Users().CountUsers(ctx)
-	if count == 0 {
-		adminPass := os.Getenv("KY_ADMIN_PASSWORD")
-		if adminPass == "" {
-			adminPass = crypto.RandomHex(12)
-			log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
-		}
-		hash, err := password.Hash(adminPass)
+	for {
+		won, err := st.Coordination().WithLock(ctx, "bootstrap", func(ctx context.Context) error {
+			// Ensure default admin user exists if database is empty
+			count, err := st.Users().CountUsers(ctx)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				adminPass := os.Getenv("KY_ADMIN_PASSWORD")
+				if adminPass == "" {
+					adminPass = crypto.RandomHex(12)
+					log.Printf("[SECURITY] Initial bootstrap: Created admin account. Username: admin | Password: %s", adminPass)
+				}
+				hash, err := password.Hash(adminPass)
+				if err != nil {
+					return fmt.Errorf("hash bootstrap password: %w", err)
+				}
+				if err := st.Users().CreateUser(ctx, &store.User{
+					ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
+					Username:           "admin",
+					DisplayName:        "Administrator",
+					PasswordHash:       hash,
+					Role:               "admin",
+					Status:             "active",
+					SSOProvider:        "local",
+					MustChangePassword: true,
+				}); err != nil {
+					return fmt.Errorf("create bootstrap admin: %w", err)
+				}
+			}
+			return nil
+		})
 		if err != nil {
-			log.Fatalf("Failed to hash bootstrap admin password: %v", err)
+			log.Fatalf("Bootstrap failed: %v", err)
 		}
-		if err := st.Users().CreateUser(ctx, &store.User{
-			ID:                 fmt.Sprintf("usr_%s", crypto.RandomHex(12)),
-			Username:           "admin",
-			DisplayName:        "Administrator",
-			PasswordHash:       hash,
-			Role:               "admin",
-			Status:             "active",
-			SSOProvider:        "local",
-			MustChangePassword: true,
-		}); err != nil {
-			log.Fatalf("Failed to create bootstrap admin: %v", err)
+		if won {
+			break
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	srv := api.NewServer(cfg, st)
@@ -200,7 +242,7 @@ func runBackup(ctx context.Context, cfg *config.Config, st store.Store) (recover
 		return recoveryclient.Result{}, err
 	}
 	client := recoveryclient.NewClient(recoveryclient.Options{AllowPrivate: cfg.Backup.AllowPrivateRecovery})
-	return backup.Run(ctx, cfg, rc, st.Settings(), client)
+	return backup.RunOwned(ctx, cfg, rc, st, client)
 }
 
 // backupLoop polls the admin's schedule every tick; a change in the UI needs no restart and a
@@ -217,28 +259,32 @@ func backupLoop(ctx context.Context, cfg *config.Config, st store.Store, client 
 		log.Printf("[BACKUP] scheduler disabled: %v", err)
 		return
 	}
-	ticker := time.NewTicker(tick)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		next, on, err := recoveryclient.NextRun(cfg.Backup.DepositInterval, backup.Settings(ctx, st.Settings()))
-		if err != nil {
-			log.Printf("[BACKUP] schedule unreadable: %s", recoveryclient.AuditSafe(err.Error()))
-			continue
-		}
-		if !on || time.Now().Before(next) {
-			continue
-		}
-		res, err := backup.Run(ctx, cfg, rc, st.Settings(), client)
-		if errors.Is(err, recoveryclient.ErrNotPaired) || errors.Is(err, recoveryclient.ErrNoDestination) {
-			continue // never configured; nothing to report
-		}
-		recordRun(context.WithoutCancel(ctx), st, "system", res, err)
+	if ctx.Err() != nil {
+		return
 	}
+	worker.Run(ctx, st.Coordination(), tick, func(ctx context.Context) {
+		if err := st.Coordination().CleanExpired(ctx); err != nil {
+			log.Printf("[WORKER] security cleanup: %v", err)
+		}
+		if err := st.Sessions().CleanExpiredSessions(ctx); err != nil {
+			log.Printf("[WORKER] session cleanup: %v", err)
+		}
+		_, err := st.Coordination().WithLock(ctx, "backup-run", func(ctx context.Context) error {
+			// Read the schedule after winning, so a waiter cannot run a stale due job.
+			next, on, err := recoveryclient.NextRun(cfg.Backup.DepositInterval, backup.Settings(ctx, st.Settings()))
+			if err != nil || !on || time.Now().Before(next) {
+				return err
+			}
+			res, err := backup.Run(ctx, cfg, rc, st.Settings(), client)
+			if !errors.Is(err, recoveryclient.ErrNotPaired) && !errors.Is(err, recoveryclient.ErrNoDestination) {
+				recordRun(context.WithoutCancel(ctx), st, "system", res, err)
+			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("[WORKER] scheduled backup: %v", err)
+		}
+	})
 }
 
 // recordRun audits one run the same way the admin route does, under the actor that started it.

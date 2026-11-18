@@ -8,11 +8,14 @@ Owns environment variable parsing, configuration validation, default fallbacks, 
 
 ## Local Contracts
 - `LoadFromEnv() (*Config, error)` must supply safe, valid defaults for all subsystems.
+  Canonicalize `sqlite3` to `sqlite`, and `postgresql`/`pgx` to `postgres`, before
+  selecting instance ownership or validating shared secrets.
 - Never log plaintext secrets or sensitive tokens.
 - `KY_TRUSTED_PROXIES` is a comma-separated list of reverse-proxy IPs or CIDRs, empty by default, parsed once at startup into `[]netip.Prefix`; an unparsable entry fails startup. Only a request whose peer address is in the list may speak for another client through `X-Forwarded-For`. `0.0.0.0/0` and `::/0` are refused at startup; list only the proxy's own address or subnet.
 - `KY_RATE_LIMIT_EXEMPT_NETWORKS` is validated at startup by `ky-primitives/netallow` and kept as its canonical string in `Security.RateLimitExemptNetworks`; an invalid, too-broad or loopback entry fails startup. `internal/api` combines it with the admin setting.
 - An https `KY_APP_URL` sets `Security.HostCookies` (`__Host-` cookie names, which must be Secure and take no Domain), so `KY_COOKIE_DOMAIN` or `KY_COOKIE_SECURE=false` with it fails startup. A plain-HTTP URL keeps bare names even with Secure cookies (`KY_ENV=production`).
-- Production startup requires an explicit, durable `KY_SESSION_SECRET`. The encryption key comes from `KY_ENCRYPTION_KEY` when set, otherwise from the keyfile at `<DataDir>/encryption.key`, which `keyfile.LoadOrCreate` mints on first start; either is a valid production configuration.
+- Production and PostgreSQL startup require an explicit, durable `KY_SESSION_SECRET`.
+  PostgreSQL also requires `KY_SCIM_TOKEN` when SCIM is enabled; replicas share these values. The encryption key comes from `KY_ENCRYPTION_KEY` when set, otherwise from the keyfile at `<DataDir>/encryption.key`, which `keyfile.LoadOrCreate` mints on first start; either is a valid production configuration.
 - A supplied session signing secret requires at least `crypto.MinHMACKeyBytes` (16)
   bytes before keyfile side effects. Reject short values without logging or replacing
   them; generated signing secrets remain 32 random bytes encoded as hex.

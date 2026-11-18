@@ -107,26 +107,32 @@ func (p *PoWSpent) spend(salt string, expiresAt int64) bool {
 // VerifyPoWSolution decodes and validates the client's base64-encoded JSON solution. With a
 // non-nil spent set, a valid solution is spent and a second use of it fails.
 func VerifyPoWSolution(solutionBase64, signingSecret string, spent *PoWSpent) bool {
+	salt, expires, ok := CheckPoWSolution(solutionBase64, signingSecret)
+	return ok && (spent == nil || spent.spend(salt, expires))
+}
+
+// CheckPoWSolution validates the signed work before a caller spends it in shared storage.
+func CheckPoWSolution(solutionBase64, signingSecret string) (salt string, expires int64, valid bool) {
 	data, err := base64.StdEncoding.DecodeString(solutionBase64)
 	if err != nil {
 		data, err = base64.RawStdEncoding.DecodeString(solutionBase64)
 		if err != nil {
-			return false
+			return "", 0, false
 		}
 	}
 
 	var sol PoWSolution
 	if err := json.Unmarshal(data, &sol); err != nil {
-		return false
+		return "", 0, false
 	}
 
-	if sol.Algorithm != "SHA-256" || sol.Salt == "" || sol.Challenge == "" || sol.Signature == "" ||
-		sol.Number < 1 || sol.MaxNumber < 1 || sol.Number > sol.MaxNumber || sol.ExpiresAt < time.Now().Unix() {
-		return false
+	if sol.Algorithm != "SHA-256" || len(sol.Salt) != 32 || sol.Challenge == "" || sol.Signature == "" ||
+		sol.Number < 1 || sol.MaxNumber < 1 || sol.Number > sol.MaxNumber || sol.ExpiresAt < time.Now().Unix() || sol.ExpiresAt > 9223372036854774 {
+		return "", 0, false
 	}
 	signaturePayload := sol.Salt + ":" + sol.Challenge + ":" + strconv.Itoa(sol.MaxNumber) + ":" + strconv.FormatInt(sol.ExpiresAt, 10)
 	if !crypto.VerifyHMACSHA256([]byte(signaturePayload), signingSecret, sol.Signature) {
-		return false
+		return "", 0, false
 	}
 
 	targetStr := fmt.Sprintf("%s%d", sol.Salt, sol.Number)
@@ -134,7 +140,7 @@ func VerifyPoWSolution(solutionBase64, signingSecret string, spent *PoWSpent) bo
 	actualChallenge := hex.EncodeToString(h[:])
 
 	if actualChallenge != sol.Challenge {
-		return false
+		return "", 0, false
 	}
-	return spent == nil || spent.spend(sol.Salt, sol.ExpiresAt)
+	return sol.Salt, sol.ExpiresAt, true
 }

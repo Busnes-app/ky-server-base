@@ -93,13 +93,14 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 | Oversized requests | Request bodies capped at 1 MiB, smaller on backup routes | `internal/api/server.go`, `internal/api/backup_handlers.go` |
 | Header spoofing | `ClientIP` and the proxy allow-list; fuzzed | `internal/auth`, `internal/config`, `FuzzClientIP`, `FuzzParseTrustedProxies` |
 | Weak randomness | `crypto/rand` only; fresh 12-byte GCM nonce per encryption | `internal/crypto/crypto.go` |
-| Vulnerable dependencies | `govulncheck` and `npm audit --audit-level=high` on every push and non-draft pull request; Dependabot | `.github/workflows/ci.yml` |
+| Vulnerable dependencies | `govulncheck` and `npm run audit` on every push and non-draft pull request; production audit is strict, the full audit has one expiring development-tool exception ([scope](NPM-AUDIT.md)); Dependabot | `.github/workflows/ci.yml` |
 | Supply-chain tampering | Actions pinned by commit; base images pinned by digest; the published image is the tested one, attested and verified before `:latest` moves | `.github/workflows/ci.yml`, `Dockerfile`, [RESTORE.md](RESTORE.md) |
 
 ## Residual risk
 
-- **Rate limits are per process** and per address; a distributed guesser is slowed by Argon2id,
-  not stopped.
+- **SQLite rate limits/replay records are per process**; SQLite is restricted to one local
+  server. PostgreSQL coordinates admission and CAPTCHA spending atomically across replicas;
+  distributed source addresses still need edge admission controls.
 - **Postgres deployments have no sealed backup**; their `pg_dump` is plaintext and their own to
   protect ([Disaster recovery](DISASTER-RECOVERY.md#disaster-recovery)).
 - **Pairing with KyRecovery is trust on first use** unless the operator compares the key ID or
@@ -124,3 +125,21 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 
 This case is updated when a trust boundary or a security requirement changes. A pull request that
 moves one must update this page in the same change.
+
+## Replica coordination and migration
+
+PostgreSQL is a shared security boundary: security windows use its clock and atomic upserts;
+CAPTCHA spending uses a unique salt. Database errors deny admission. All replicas require
+consistent secrets, origin, IdP and proxy policy; the environment is an operator trust boundary.
+SQLite retains its existing local security cost and excludes a concurrent server/migration
+with an OS file lock. Old binaries predate that lock and must be stopped by the operator.
+
+Scheduled-worker ownership uses a reserved PostgreSQL session and is cancelled when a bounded
+probe fails. Session loss is not exactly-once execution of external effects; jobs require
+cancellation and idempotency. SQLite locks are local and cannot coordinate network storage.
+The migration command opens the original SQLite read-only, upgrades a private snapshot,
+refuses unknown schemas/populated targets, and verifies normalized contents inside the target
+transaction. Source data/keys/configuration remain available for rollback before new writes.
+PostgreSQL has no capsule snapshot adapter; database recovery remains an explicit operator duty.
+Tests: `internal/store/coordination_test.go`, `internal/store/migrate_postgres_test.go`,
+`internal/api/replicas_test.go` and `internal/worker/worker_test.go`.

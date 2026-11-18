@@ -39,3 +39,17 @@ func Run(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConfig, s
 	}
 	return res, fmt.Errorf("%w: %w", ErrInterrupted, err)
 }
+
+// RunOwned coordinates manual HTTP/CLI backups with the elected scheduler across hosts.
+func RunOwned(ctx context.Context, cfg *config.Config, rc recoveryclient.RunConfig, st store.Store, client recoveryclient.Depositor) (recoveryclient.Result, error) {
+	var result recoveryclient.Result
+	won, err := st.Coordination().WithLock(ctx, "backup-run", func(owned context.Context) error {
+		var err error
+		result, err = Run(owned, cfg, rc, st.Settings(), client)
+		return err
+	})
+	if err == nil && !won {
+		err = recoveryclient.ErrInProgress
+	}
+	return result, err
+}

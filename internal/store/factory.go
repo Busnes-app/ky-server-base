@@ -29,11 +29,9 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (Store, error) {
 }
 
 func openSQLite(ctx context.Context, dsn string) (Store, error) {
-	filePath, _, _ := strings.Cut(strings.TrimPrefix(dsn, "file:"), "?")
-	// A server URL here (postgres://...) would quietly become a SQLite file named after it,
-	// outside the data volume. The DSN is not echoed: it may carry a password.
-	if strings.Contains(filePath, "://") {
-		return nil, errors.New("KY_DB_DSN is a server URL but the database driver is sqlite: set KY_DB_DRIVER=postgres for PostgreSQL (under compose, in docker-compose.yml or an overlay: it pins sqlite), or give a SQLite file path")
+	filePath, err := SQLitePath(dsn)
+	if err != nil {
+		return nil, err
 	}
 
 	dir := filepath.Dir(filePath)
@@ -64,10 +62,28 @@ func openSQLite(ctx context.Context, dsn string) (Store, error) {
 		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
 	}
 
-	return newSQLStore(ctx, db, "sqlite")
+	s, err := newSQLStore(ctx, db, "sqlite")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	s.lockPath = filePath
+	return s, nil
 }
 
 func openPostgres(ctx context.Context, dsn string, maxOpen, maxIdle int, maxLifetime time.Duration) (Store, error) {
+	db, err := openPostgresDB(ctx, dsn, maxOpen, maxIdle, maxLifetime)
+	if err != nil {
+		return nil, err
+	}
+	s, err := newSQLStore(ctx, db, "postgres")
+	if err != nil {
+		_ = db.Close()
+	}
+	return s, err
+}
+
+func openPostgresDB(ctx context.Context, dsn string, maxOpen, maxIdle int, maxLifetime time.Duration) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open postgres database: %w", err)
@@ -75,6 +91,10 @@ func openPostgres(ctx context.Context, dsn string, maxOpen, maxIdle int, maxLife
 
 	if maxOpen <= 0 {
 		maxOpen = 25
+	}
+	if maxOpen < 3 {
+		_ = db.Close()
+		return nil, errors.New("PostgreSQL needs at least three connections: worker ownership, job ownership and queries")
 	}
 	if maxIdle <= 0 {
 		maxIdle = 5
@@ -92,5 +112,5 @@ func openPostgres(ctx context.Context, dsn string, maxOpen, maxIdle int, maxLife
 		return nil, fmt.Errorf("failed to ping postgres database: %w", err)
 	}
 
-	return newSQLStore(ctx, db, "postgres")
+	return db, nil
 }
