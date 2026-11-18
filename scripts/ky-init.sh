@@ -19,8 +19,8 @@ if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ || "$APP_NAME" == *..* 
 fi
 
 # shellcheck disable=SC2016 # Match Compose interpolation literally, without shell expansion.
-APP_NAME_TEMPLATE='      - KY_APP_NAME=${KY_APP_NAME:-Busnes.app}'
-if ! grep -qxF "$APP_NAME_TEMPLATE" "$BASE_DIR/docker-compose.yml"; then
+APP_NAME_TEMPLATE='      - KY_APP_NAME=${KY_APP_NAME:-[A-Za-z0-9][A-Za-z0-9_.-]*}'
+if ! grep -qx "$APP_NAME_TEMPLATE" "$BASE_DIR/docker-compose.yml"; then
     echo "Error: KY_APP_NAME template changed in docker-compose.yml; update ky-init.sh before scaffolding." >&2
     exit 1
 fi

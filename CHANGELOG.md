@@ -30,7 +30,8 @@ These are human summaries, not a raw version-control log.
 ### Changes
 
 - Product scaffolding gives each generated server its own overridable KyRecovery service
-  label and refuses a changed Compose template before creating files. A scaffold regression
+  label, including when deriving from another generated product, and refuses a changed
+  Compose template before creating files. A scaffold regression
   runs in local and hosted smoke checks.
 - Pairing refresh and unpair commit the recovery URL and sealed bearer credential together.
   Backup operations read one coherent pair across replicas; failed refreshes preserve

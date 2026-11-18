@@ -28,6 +28,14 @@ class ScaffoldIdentityTests(unittest.TestCase):
             self.assertIn("module github.com/Busnes-app/KyScaffold",
                           (target / "go.mod").read_text())
 
+            derived = Path(temp) / "second-product"
+            result = subprocess.run(
+                ["bash", str(target / "scripts/ky-init.sh"), "SecondProduct", str(derived)],
+                env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("KY_APP_NAME=${KY_APP_NAME:-SecondProduct}",
+                          (derived / "docker-compose.yml").read_text())
+
             compose = source / "docker-compose.yml"
             compose.write_text(compose.read_text().replace("KY_APP_NAME=", "KY_RENAMED_APP_NAME="))
             missing_target = Path(temp) / "missing-template"
