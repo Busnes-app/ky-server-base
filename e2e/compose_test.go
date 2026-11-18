@@ -80,6 +80,12 @@ func (p *project) compose(args ...string) string {
 	return p.must(nil, "docker", append([]string{"compose"}, args...)...)
 }
 
+// setVar changes one Compose variable for every later command (the last value wins).
+func (p *project) setVar(k, v string) {
+	p.vars[k] = v
+	p.env = append(p.env, k+"="+v)
+}
+
 func startProject(t *testing.T) *project {
 	t.Helper()
 	image := os.Getenv("KY_IMAGE")
@@ -122,6 +128,7 @@ func startProject(t *testing.T) *project {
 		"KY_SESSION_SECRET":    secret(32),
 		"KY_SCIM_TOKEN":        secret(24),
 		"KY_ENCRYPTION_KEY":    secret(32),
+		"KY_BACKUP_KEEP":       "3",
 	}
 	p.env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+p.name, "PUSH_RELAY_URL=", "APNS_RELAY_URL=")
 	for k, v := range p.vars {
@@ -137,6 +144,10 @@ func startProject(t *testing.T) *project {
 		"APNS_RELAY_URL=",
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(dotenv), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The shared capsule archive, as an operator's checkout has it (Docker would make it root's).
+	if err := os.Mkdir(filepath.Join(dir, "backups"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -218,20 +229,6 @@ func (p *project) do(method, path string, s session, body any) (int, []byte, htt
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, raw, resp.Header
-}
-
-// quickGet is get with a two-second budget: 0 when no answer came in time.
-func (p *project) quickGet(path string, s session) int {
-	req, _ := http.NewRequest("GET", p.url+path, nil)
-	for _, c := range s {
-		req.AddCookie(c)
-	}
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
-	if err != nil {
-		return 0
-	}
-	resp.Body.Close()
-	return resp.StatusCode
 }
 
 func (p *project) get(path string, s session) (int, []byte) {
@@ -358,6 +355,103 @@ func (p *project) deposit(s session) []byte {
 	}
 	p.t.Fatalf("no replica holds %s", res.LocalPath)
 	return nil
+}
+
+// burst sends authenticated requests from the moment the database froze: four at once, then
+// one every half second for five seconds, with a client timeout above the bound and no retry.
+// The returned func waits for them. Every one must be answered 502/503/504 within 10 s (the
+// proxy's 8 s server timeout ends the ones a replica holds), and a 502/503 must arrive by
+// then: a request is never left hanging on the frozen database.
+func (p *project) burst(s session) func() {
+	type answer struct {
+		code       int
+		sent, took time.Duration
+		err        error
+	}
+	start := time.Now()
+	answers := make(chan answer, 16)
+	c := &http.Client{Timeout: 12 * time.Second}
+	send := func() {
+		sent := time.Now()
+		req, _ := http.NewRequest("GET", p.url+"/api/auth/me", nil)
+		for _, ck := range s {
+			req.AddCookie(ck)
+		}
+		resp, err := c.Do(req)
+		a := answer{sent: sent.Sub(start), took: time.Since(sent), err: err}
+		if err == nil {
+			a.code = resp.StatusCode
+			resp.Body.Close()
+		}
+		answers <- a
+	}
+	n := 0
+	for range 4 {
+		n++
+		go send()
+	}
+	go func() {
+		for range 10 {
+			time.Sleep(500 * time.Millisecond)
+			go send()
+		}
+	}()
+	n += 10
+	return func() {
+		p.t.Helper()
+		var quick bool
+		for range n {
+			a := <-answers
+			switch {
+			case a.err != nil:
+				p.t.Errorf("request sent %s after the freeze: no answer in %s: %v", a.sent.Round(time.Millisecond), a.took.Round(time.Millisecond), a.err)
+			case a.code != http.StatusBadGateway && a.code != http.StatusServiceUnavailable && a.code != http.StatusGatewayTimeout:
+				p.t.Errorf("request sent %s after the freeze: %d, want 502/503/504", a.sent.Round(time.Millisecond), a.code)
+			case a.took > 10*time.Second:
+				p.t.Errorf("request sent %s after the freeze took %s", a.sent.Round(time.Millisecond), a.took.Round(time.Millisecond))
+			case a.code != http.StatusGatewayTimeout && a.sent+a.took <= 10*time.Second:
+				quick = true
+			}
+			p.t.Logf("frozen database: sent +%s, %d after %s", a.sent.Round(100*time.Millisecond), a.code, a.took.Round(100*time.Millisecond))
+		}
+		if !quick {
+			p.t.Error("no request got a 502/503 within 10 s of the freeze")
+		}
+	}
+}
+
+// localCopies is the capsule list the Backup page shows, as one replica answered it.
+func (p *project) localCopies(s session) []string {
+	p.t.Helper()
+	code, body := p.get("/api/backup/status", s)
+	var status struct {
+		LocalCopies []struct {
+			Name string `json:"name"`
+		} `json:"local_copies"`
+	}
+	if code != http.StatusOK || json.Unmarshal(body, &status) != nil {
+		p.t.Fatalf("backup status %d %s", code, body)
+	}
+	var names []string
+	for _, c := range status.LocalCopies {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+// sameCopiesEverywhere asks the proxy enough times to reach every replica and requires one list.
+func (p *project) sameCopiesEverywhere(s session, want int) []string {
+	p.t.Helper()
+	first := p.localCopies(s)
+	if len(first) != want {
+		p.t.Fatalf("%d local copies listed, want %d: %v", len(first), want, first)
+	}
+	for range 3 * len(p.appContainers()) {
+		if got := p.localCopies(s); strings.Join(got, ",") != strings.Join(first, ",") {
+			p.t.Fatalf("replicas list different local copies: %v and %v", first, got)
+		}
+	}
+	return first
 }
 
 func TestReplicaFailover(t *testing.T) {
@@ -508,6 +602,41 @@ func TestReplicaFailover(t *testing.T) {
 		p.restoreReplicas()
 	})
 
+	step("local capsules are one archive", func(t *testing.T) {
+		// AC19 left one capsule; four more through round robin keep the newest three.
+		for range 4 {
+			p.deposit(admin)
+		}
+		files, _ := filepath.Glob(filepath.Join(p.dir, "backups", "*.kycap"))
+		if len(files) != 3 {
+			t.Fatalf("%d capsules in ./backups, want KY_BACKUP_KEEP=3: %v", len(files), files)
+		}
+		kept := p.sameCopiesEverywhere(admin, 3)
+
+		// A plain down and up gives every replica a new data volume; the archive stays.
+		p.compose("down", "-t", "30")
+		p.restoreReplicas()
+		if got := p.sameCopiesEverywhere(admin, 3); strings.Join(got, ",") != strings.Join(kept, ",") {
+			t.Fatalf("down/up changed the archive: %v, was %v", got, kept)
+		}
+
+		// Scaling up adds a replica and an HAProxy slot; it lists and prunes the same archive.
+		p.setVar("KY_REPLICAS", "3")
+		p.restoreReplicas()
+		if n := len(p.appContainers()); n != 3 {
+			t.Fatalf("%d replicas after scaling to 3", n)
+		}
+		p.sameCopiesEverywhere(admin, 3)
+		p.deposit(admin)
+		p.sameCopiesEverywhere(admin, 3)
+		p.setVar("KY_REPLICAS", "2")
+		p.restoreReplicas()
+		if n := len(p.appContainers()); n != 2 {
+			t.Fatalf("%d replicas after scaling back to 2", n)
+		}
+		p.sameCopiesEverywhere(admin, 3)
+	})
+
 	step("CLI drill and export on PostgreSQL", func(t *testing.T) {
 		app := p.appContainers()[0]
 		if out := p.must(nil, "docker", "exec", app, "/app/ky_server_base", "backup-drill"); !strings.Contains(out, "PASSED") {
@@ -533,20 +662,26 @@ func TestReplicaFailover(t *testing.T) {
 					t.Errorf("%s: /livez %d on %s", how, code, id[:12])
 				}
 			}
-			// A request already inside a replica waits for the database; new ones must get a
-			// quick 502/503 once the checks have taken every replica out.
-			p.waitFor(how+": the proxy answers 502/503", 10*time.Second-time.Since(start), func() bool {
-				code := p.quickGet("/api/auth/me", admin)
-				return code == http.StatusBadGateway || code == http.StatusServiceUnavailable
-			})
-			t.Logf("%s: every replica unready and the proxy answering 503 %s after the disruption", how, time.Since(start).Round(100*time.Millisecond))
+			// New requests get a 502/503 once the checks have taken every replica out. While
+			// paused, burst proves it without retries: a polling request that reached a replica
+			// still in rotation would spend the budget on its own 8 s timeout. Stopped, nothing
+			// waits, so each attempt answers at once.
+			if how == "stopped" {
+				p.waitFor(how+": the proxy answers 502/503", 10*time.Second-time.Since(start), func() bool {
+					code, _ := p.get("/api/auth/me", admin)
+					return code == http.StatusBadGateway || code == http.StatusServiceUnavailable
+				})
+			}
+			t.Logf("%s: every replica unready %s after the disruption", how, time.Since(start).Round(100*time.Millisecond))
 		}
 		defer func() { // leave a database behind for the next step whatever happened here
 			_, _ = p.run(nil, "docker", "compose", "unpause", "postgres")
 			_, _ = p.run(nil, "docker", "compose", "start", "postgres")
 		}()
 		p.compose("pause", "postgres")
+		inFlight := p.burst(admin)
 		disrupted("paused")
+		inFlight()
 		p.compose("unpause", "postgres")
 		p.compose("stop", "postgres")
 		disrupted("stopped")
@@ -573,36 +708,43 @@ func TestReplicaFailover(t *testing.T) {
 
 	step("AC22 real-binary PostgreSQL restore drill", func(t *testing.T) {
 		raw := p.deposit(admin)
-		vol := p.name + "_restore"
-		p.must(nil, "docker", "volume", "create", vol)
 		restored := p.name + "-restored"
-		t.Cleanup(func() {
-			_, _ = p.run(nil, "docker", "rm", "-f", restored)
-			_, _ = p.run(nil, "docker", "volume", "rm", vol)
-		})
-		mount := vol + ":/restore"
+		t.Cleanup(func() { _, _ = p.run(nil, "docker", "rm", "-f", restored) })
 		relayOff := []string{"-e", "PUSH_RELAY_URL=", "-e", "APNS_RELAY_URL="}
-		runImage := func(stdin io.Reader, args ...string) string {
-			return p.must(stdin, "docker", append(append([]string{"run", "--rm", "-i", "-v", mount}, relayOff...), args...)...)
+		in := filepath.Join(p.dir, "in.kycap")
+		if err := os.WriteFile(in, raw, 0600); err != nil {
+			t.Fatal(err)
 		}
-		runImage(bytes.NewReader(raw), "--entrypoint", "sh", p.image, "-c", "cat > /restore/capsule.kycap")
-		out := runImage(strings.NewReader(shares), p.image, "restore", "-capsule", "/restore/capsule.kycap", "-to", "/restore/out", "-service", "Busnes.app Base")
-		for _, said := range []string{"Scheduled deposits are OFF", "Sessions deleted", "Replica configuration record removed"} {
-			if !strings.Contains(out, said) {
-				t.Fatalf("restore output lacks %q:\n%s", said, out)
+		// docs/RESTORE.md as written: the restore and migrate-postgres commands below are the
+		// runbook's, run from the project directory with the shares on stdin.
+		out := filepath.Join(p.dir, "restored")
+		if err := os.Mkdir(out, 0700); err != nil {
+			t.Fatal(err)
+		}
+		user := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+		said := p.must(strings.NewReader(shares), "docker", "compose", "run", "--rm", "--no-deps", "--user", user,
+			"-v", in+":/in.kycap:ro", "-v", out+":/restored", "app", "restore", "-capsule", "/in.kycap", "-to", "/restored")
+		for _, want := range []string{"Scheduled deposits are OFF", "Sessions deleted", "Replica configuration record removed"} {
+			if !strings.Contains(said, want) {
+				t.Fatalf("restore output lacks %q:\n%s", want, said)
 			}
 		}
-		p.psql("CREATE DATABASE restored")
-		target := "postgres://ky_server:" + p.vars["KY_POSTGRES_PASSWORD"] + "@postgres:5432/restored?sslmode=disable"
-		for _, check := range [][]string{{"--check"}, {}} {
-			args := append([]string{"--network", p.name + "_database", "-e", "KY_MIGRATE_POSTGRES_DSN=" + target, p.image,
-				"migrate-postgres", "--source", "/restore/out/data/ky_server.db"}, check...)
-			runImage(nil, args...)
+		p.compose("exec", "-T", "postgres", "createdb", "-U", "ky_server", "ky_server_restored")
+		target := "postgres://ky_server:" + p.vars["KY_POSTGRES_PASSWORD"] + "@postgres:5432/ky_server_restored?sslmode=disable"
+		if err := os.WriteFile(filepath.Join(p.dir, "migration.env"), []byte("KY_MIGRATE_POSTGRES_DSN="+target+"\n"), 0600); err != nil {
+			t.Fatal(err)
 		}
-		key := runImage(nil, "--entrypoint", "cat", p.image, "/restore/out/data/encryption.key")
+		for _, check := range [][]string{{"--check"}, {}} {
+			p.must(nil, "docker", append([]string{"compose", "run", "--rm", "--no-deps", "--user", user, "--env-from-file", "migration.env",
+				"-v", out + ":/restored", "app", "migrate-postgres", "--source", "/restored/data/ky_server.db"}, check...)...)
+		}
+		key, err := os.ReadFile(filepath.Join(out, "data", "encryption.key"))
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		create := []string{"create", "--name", restored, "--network", p.name + "_replicas", "-p", "127.0.0.1::8080",
-			"-e", "KY_DB_DRIVER=postgres", "-e", "KY_DB_DSN=" + target, "-e", "KY_ENCRYPTION_KEY=" + strings.TrimSpace(key),
+			"-e", "KY_DB_DRIVER=postgres", "-e", "KY_DB_DSN=" + target, "-e", "KY_ENCRYPTION_KEY=" + strings.TrimSpace(string(key)),
 			"-e", "KY_SESSION_SECRET=" + p.vars["KY_SESSION_SECRET"], "-e", "KY_SCIM_TOKEN=" + p.vars["KY_SCIM_TOKEN"],
 			"-e", "KY_CAPTCHA_PROVIDER=none", "-e", "KY_APP_NAME=Busnes.app Base"}
 		p.must(nil, "docker", append(append(create, relayOff...), p.image)...)

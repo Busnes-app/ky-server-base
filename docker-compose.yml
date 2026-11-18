@@ -60,7 +60,9 @@ services:
       - KY_SSO_ENABLED=true
       - KY_SCIM_ENABLED=true
       # Read from .env, so rotating either there and running `docker compose up -d` takes
-      # effect. Left empty, the server mints a fresh one at every start.
+      # effect. Left empty, the server mints a fresh one at every start. PostgreSQL replicas:
+      # follow docs/REPLICAS.md Rotation (accept-replica-config first), or every replica
+      # refuses to start.
       - KY_SESSION_SECRET=${KY_SESSION_SECRET:-}
       - KY_SCIM_TOKEN=${KY_SCIM_TOKEN:-}
     # Every other setting in docs/INTERFACES.md is read from .env: KY_KYSIGNON_*,

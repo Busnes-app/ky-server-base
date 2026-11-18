@@ -43,7 +43,11 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     assert app["deploy"]["replicas"] == 3, "KY_REPLICAS not applied"
     assert "container_name" not in app, "a fixed container name allows one replica"
     assert not app.get("ports"), "an app replica publishes a host port"
-    assert not app.get("volumes"), "replicas share a bind-mounted directory"
+    # Only the backup archive is shared (writes and pruning run under backup-run); each
+    # replica's /app/data stays its own.
+    mounts = [(v["type"], v["target"]) for v in app.get("volumes", [])]
+    assert mounts == [("bind", "/app/backups")], f"app mounts {mounts}, want only the shared backups bind"
+    assert app["volumes"][0]["source"] == str(root / "backups"), app["volumes"][0]["source"]
     env = app["environment"]
     assert env["KY_DB_DRIVER"] == "postgres"
     assert env["KY_TRUSTED_PROXIES"] == required["KY_PROXY_IP"] + "/32", env["KY_TRUSTED_PROXIES"]
@@ -53,6 +57,10 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     assert "profiles" not in db, "PostgreSQL stays behind a profile"
     assert db["environment"]["POSTGRES_PASSWORD"] == required["KY_POSTGRES_PASSWORD"]
     assert set(db["networks"]) == {"database"}
+    db_mounts = [(v["type"], v["source"], v["target"]) for v in db["volumes"]]
+    assert db_mounts == [("volume", "pgdata-replicas", "/var/lib/postgresql/data")], \
+        f"PostgreSQL mounts {db_mounts}; the base pgdata volume carries a public password"
+    assert proxy["environment"]["KY_REPLICAS"] == "3", "HAProxy has a slot count other than KY_REPLICAS"
     for name, svc in [("postgres", db), ("proxy", proxy)]:
         assert "@sha256:" in svc["image"], f"{name} image is not pinned by digest"
     assert [p["host_ip"] for p in proxy["ports"]] == ["127.0.0.1"], "proxy is publicly bound"
@@ -66,3 +74,11 @@ assert edge.returncode == 0, edge.stderr
 trusted = json.loads(edge.stdout)["services"]["app"]["environment"]["KY_TRUSTED_PROXIES"]
 assert trusted == required["KY_PROXY_IP"] + "/32,172.31.250.1/32", trusted
 print("PASS replicas: KY_EDGE_TRUSTED_PROXIES extends only the trusted list")
+
+for bind in ["0.0.0.0", "127.0.0.1"]:
+    both = compose(files, base_env | required | {"KY_EDGE_TRUSTED_PROXIES": "172.31.250.1/32", "KY_PROXY_BIND": bind})
+    assert both.returncode != 0 and "KY_EDGE_TRUSTED_PROXIES is safe only with the default loopback publish" in both.stderr, both.stderr
+public = compose(files, base_env | required | {"KY_PROXY_BIND": "0.0.0.0"})
+assert public.returncode == 0, public.stderr
+assert json.loads(public.stdout)["services"]["app"]["environment"]["KY_TRUSTED_PROXIES"] == required["KY_PROXY_IP"] + "/32"
+print("PASS replicas: an edge gateway is trusted only with the default loopback publish")
