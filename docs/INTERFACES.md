@@ -494,8 +494,10 @@ an elected scheduled worker; no Kubernetes API is required.
 
 `migrate-postgres [--source <SQLite file>] [--check]` requires `KY_MIGRATE_POSTGRES_DSN`
 from the environment and stopped servers. The default source is
-`<KY_DATA_DIR>/ky_server.db`. It verifies a private snapshot's contents against the empty
-target before committing, prints JSON row counts followed by a cutover reminder, and exits
+`<KY_DATA_DIR>/ky_server.db` (`./data/ky_server.db` when unset). Relative source paths resolve
+from the command's working directory before the read-only preflight and copy. It verifies a
+private snapshot's contents against the empty target before committing, prints JSON row
+counts followed by a cutover reminder, and exits
 nonzero on failure. `--check` rolls back copied rows but may initialize empty target tables.
 Unknown product tables/columns require an adapter. Original SQLite, keys and configuration
 stay in place. PostgreSQL capsules snapshot the database from one read-only transaction into

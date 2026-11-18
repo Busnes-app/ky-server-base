@@ -22,7 +22,11 @@ import (
 // recovery.pub and the pin rows, no recovery_public_key row.
 func pinnedSQLite(t *testing.T) (string, recoveryclient.RecoveryKey) {
 	t.Helper()
-	dir := t.TempDir()
+	return pinnedSQLiteIn(t, t.TempDir())
+}
+
+func pinnedSQLiteIn(t *testing.T, dir string) (string, recoveryclient.RecoveryKey) {
+	t.Helper()
 	source := filepath.Join(dir, "ky_server.db")
 	st, err := store.Open(context.Background(), config.DatabaseConfig{Driver: "sqlite", DSN: source})
 	if err != nil {
@@ -35,6 +39,58 @@ func pinnedSQLite(t *testing.T) (string, recoveryclient.RecoveryKey) {
 		t.Fatal(err)
 	}
 	return source, key
+}
+
+func TestSourceKeyRecordAcceptsRelativePath(t *testing.T) {
+	source, key := pinnedSQLite(t)
+	t.Chdir(filepath.Dir(source))
+	got, err := sourceKeyRecord("ky_server.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := &readOnlySettings{}
+	if err := backup.RecordRecoveryKey(expected, key); err != nil {
+		t.Fatal(err)
+	}
+	if got != expected.set[backup.RecoveryKeyRecordSetting] {
+		t.Fatal("relative source did not retain its pinned key and topology")
+	}
+}
+
+func TestMigratePostgresAcceptsDefaultRelativeSource(t *testing.T) {
+	target := postgresTarget(t)
+	root := t.TempDir()
+	data := filepath.Join(root, "data")
+	if err := os.Mkdir(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	source, key := pinnedSQLiteIn(t, data)
+	before, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("KY_DATA_DIR", "")
+	for _, args := range [][]string{{"--check"}, {}} {
+		var out bytes.Buffer
+		if err := migratePostgres(context.Background(), args, &out); err != nil {
+			t.Fatalf("default-source migration %v: %v\n%s", args, err, out.String())
+		}
+	}
+	after, err := os.ReadFile(source)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("migration changed the original SQLite database")
+	}
+	cfg := &config.Config{Database: target}
+	cfg.Database.DataDir = t.TempDir()
+	st := openStore(t, cfg)
+	if err := backup.SyncRecoveryKey(context.Background(), cfg, st); err != nil {
+		t.Fatal(err)
+	}
+	got, err := recoveryclient.LoadRecoveryKey(cfg.Database.DataDir, backup.Settings(context.Background(), st.Settings()))
+	if err != nil || got.Public.ID() != key.Public.ID() || got.Threshold != key.Threshold || got.TotalShares != key.TotalShares {
+		t.Fatalf("default-source migration lost the recovery pin: %v", err)
+	}
 }
 
 func postgresTarget(t *testing.T) config.DatabaseConfig {

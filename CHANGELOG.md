@@ -29,6 +29,8 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Migration resolves relative SQLite sources before opening the recovery-key preflight,
+  so the bare-binary default `./data/ky_server.db` works like an explicit absolute path.
 - Product scaffolding gives each generated server its own overridable KyRecovery service
   label, including when deriving from another generated product, and refuses a changed
   Compose template before creating files. A scaffold regression
@@ -96,6 +98,8 @@ These are human summaries, not a raw version-control log.
 
 ### Upgrade impact
 
+- Bare-binary `migrate-postgres` supports its default relative data path while retaining
+  the original SQLite database and pinned recovery key.
 - `ky-init.sh` requires a wire-valid product name and keeps `KY_APP_NAME` configurable.
   Existing product repositories are unchanged; new products no longer inherit the base label.
 - Keep existing SCIM credentials when moving to replicas; edit existing `.env` lines rather

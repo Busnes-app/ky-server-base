@@ -69,6 +69,10 @@ func migratePostgres(ctx context.Context, args []string, out io.Writer) error {
 // built from the recovery.pub beside the database, which must be the pinned key. "" when the
 // source pins nothing or already has a record.
 func sourceKeyRecord(source string) (string, error) {
+	source, err := filepath.Abs(source)
+	if err != nil {
+		return "", err
+	}
 	if info, err := os.Stat(source); err != nil || !info.Mode().IsRegular() {
 		return "", nil // MigrateToPostgres refuses it with its own message
 	}
