@@ -14,7 +14,7 @@
     "audit": "node --test ../scripts/npm-audit.test.mjs && node ../scripts/npm-audit.mjs"
   },
   "dependencies": {
-    "lucide-react": "^1.72.0",
+    "lucide-react": "^1.77.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
