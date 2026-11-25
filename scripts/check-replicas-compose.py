@@ -84,6 +84,7 @@ for chain, image in [([], "ghcr.io/busnes-app/ky-server-base:latest"), (["docker
     dump = services["postgres-17-dump"]
     assert dump["image"] == PG17 and dump["entrypoint"] == ["bash", "/ky/postgres-17-to-18.sh", "dump"], dump["image"]
     assert dump["network_mode"] == "none" and dump["restart"] == "no" and "profiles" not in dump
+    assert db["stop_grace_period"] == dump["stop_grace_period"] == "2m0s", "a SIGKILLed 17 leaves postmaster.pid, which the dump refuses"
     assert dump["environment"] == {"POSTGRES_USER": "ky_server", "OLD": "/var/lib/postgresql/data", "NEW": "/pg18"}, dump["environment"]
     dump_mounts = [(v["type"], v["source"], v["target"]) + ((v.get("read_only", False),) if v["type"] == "bind" else ()) for v in dump["volumes"]]
     assert dump_mounts == [("volume", "pgdata-replicas", "/var/lib/postgresql/data"), ("volume", "postgres-replicas", "/pg18"), script + (True,)], \
@@ -125,6 +126,7 @@ assert db["image"] == PG18 and dump["image"] == PG17
 assert [(v["source"], v["target"]) for v in db["volumes"]] == [("postgres", "/var/lib/postgresql"), (str(kit), "/ky/postgres-17-to-18.sh")]
 assert [(v["source"], v["target"]) for v in dump["volumes"]] == [("pgdata", "/var/lib/postgresql/data"), ("postgres", "/pg18"), (str(kit), "/ky/postgres-17-to-18.sh")]
 assert db["entrypoint"][-1] == "restore" and dump["entrypoint"][-1] == "dump" and dump["network_mode"] == "none"
+assert db["stop_grace_period"] == dump["stop_grace_period"] == "2m0s", "a SIGKILLed 17 leaves postmaster.pid, which the dump refuses"
 assert db["depends_on"]["postgres-17-dump"]["condition"] == "service_completed_successfully"
 assert dump["profiles"] == db["profiles"] == ["postgres"] and dump["environment"]["POSTGRES_USER"] == db["environment"]["POSTGRES_USER"]
 print("PASS postgres profile: PostgreSQL 18 restores the one-shot's dump of pgdata")

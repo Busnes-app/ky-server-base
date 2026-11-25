@@ -81,8 +81,10 @@ in_vol new 'test ! -e /var/lib/postgresql/upgrade-from-17/dump.sql' || fail "dum
 
 # 2. The current compose files upgrade it on `up`, over the running 17 as an operator would:
 # Compose must stop 17 before the one-shot, which refuses a data directory still in use.
+[ "$(docker inspect -f '{{.State.Running}}' "$(dc old ps -q postgres)")" = true ] || fail "17 is not running before the upgrade"
 dc new up -d postgres >/dev/null 2>&1 || fail "dump one-shot or 18 did not start"
 wait_ready new || fail "18 did not start after the restore"
+grep -q 'postgres-17-to-18: dumped' <<<"$(logs postgres-17-dump)" || fail "the one-shot did not dump the running 17"
 grep -q 'postgres-17-to-18: restored' <<<"$(logs postgres)" || fail "no restore ran"
 [ "$(q18 'show server_version_num' | cut -c1-2)" = 18 ] || fail "not 18"
 q18 'select 1' ky_server wrong-password >/dev/null 2>&1 && fail "a wrong password logged in: the password checks prove nothing"

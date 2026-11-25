@@ -474,7 +474,9 @@ proves this on real 17 data made by the previous compose files; CI runs both.
   is, while a 17 server runs on it (another project, a `docker run`, a `compose run`) or
   after 17 was killed instead of stopped. Stop that server; after a crash, start 17 once
   with the previous compose files and stop it cleanly. Then `up` again. A normal `up`
-  stops the old 17 container before the one-shot starts.
+  stops the old 17 container before the one-shot starts. Both PostgreSQL services allow
+  `stop_grace_period: 2m`, so Compose does not kill a 17 still writing its shutdown
+  checkpoint; stopping it by hand, give it the same (`docker stop -t 120`).
 - **A failed restore** (a damaged dump, a full disk) leaves no cluster: PostgreSQL exits and
   restarts, retrying, and never comes up empty. Its log names the error.
 - **Rollback:** stop the stack, check out the previous commit's compose files

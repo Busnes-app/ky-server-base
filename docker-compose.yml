@@ -91,6 +91,8 @@ services:
     profiles: ["postgres"]
     network_mode: none
     restart: "no"
+    # Room for a clean stop: a SIGKILLed 17 leaves postmaster.pid, which the next dump refuses.
+    stop_grace_period: 2m
     entrypoint: ["bash", "/ky/postgres-17-to-18.sh", "dump"]
     environment:
       POSTGRES_USER: postgres
@@ -109,6 +111,8 @@ services:
     container_name: ky_postgres
     restart: unless-stopped
     profiles: ["postgres"]
+    # A SIGKILLed 17 leaves postmaster.pid, which the dump refuses; let it stop cleanly.
+    stop_grace_period: 2m
     entrypoint: ["bash", "/ky/postgres-17-to-18.sh", "restore"]
     command: ["postgres"]
     depends_on:
