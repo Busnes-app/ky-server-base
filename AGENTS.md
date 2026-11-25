@@ -96,7 +96,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull request (drafts skip until marked ready):
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
-- `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 17
+- `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 18
 - Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
 - `govulncheck` and `npm run audit`: strict production audit plus full high/critical audit,
   with the single dated development-tool exception in `docs/NPM-AUDIT.md`
@@ -109,6 +109,15 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 - On a push to `master` that passes every job (`reuse` included in `publish.needs`), `publish` pushes the exact image the Docker check ran against (handed over as an artifact, no rebuild) to `ghcr.io/busnes-app/ky-server-base:<commit sha>`, attests it and verifies the attestation pinned to this workflow on `master`; `promote` then moves `:latest` to that digest, only at the tip of `master`, and asserts the tag resolves to the attested digest. `docker-compose.yml` names the published image and never builds; source installs add `docker-compose.build.yml` to the `COMPOSE_FILE` chain in `.env` (overlay tags `ky_server_base:local`) so every compose command, recovery docs included, uses the local build.
 
 - `replicas` (`needs: docker`): `scripts/check-replicas-compose.py` renders the replica overlay merges, then `e2e/compose_test.go` (`KY_E2E_COMPOSE=1`) drives `docker-compose.replicas.yml` with the exact image the `docker` job tested (its `tested-image` artifact, no rebuild): replica SIGKILL and graceful stop under load, elected-worker death, the shared capsule archive across retention, `down`/`up` and scaling, PostgreSQL pause (every in-flight request answered within 10 s) and stop, shared lockout/logout and a PostgreSQL restore drill with the runbook's own commands. It is in `publish.needs`.
+
+- `postgres-upgrade`: `scripts/test-postgres-17-to-18.sh base` and `replicas` make real
+  PostgreSQL 17 data with the compose files of the last 17 commit (`PREV`), then prove the
+  current files' automatic upgrade over a running 17: rows, roles, passwords (from a second
+  container, a wrong one refused) and collation kept, a dump beside a live 17 refused, the
+  17 volume untouched and 17 still starting on it, rerun a no-op, a bad dump never yields a cluster, a
+  fresh install initialises. `scripts/postgres-17-to-18.sh` is the shared Ky upgrade kit,
+  vendored byte for byte (`check-replicas-compose.py` pins its checksum); never edit it here.
+  It is in `publish.needs`.
 
 Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available and `make test-replicas` (Docker) for the replica failure tests.
 Release changes require a new Current source summary and upgrade impact in

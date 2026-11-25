@@ -65,6 +65,9 @@ explains database-backed security, automatic scheduled-worker election, the veri
 check and the tested Compose replica overlay (`docker-compose.replicas.yml`, HAProxy).
 Kubernetes is optional. Both drivers seal the same recovery capsules. Application replicas
 do not make PostgreSQL highly available.
+The bundled PostgreSQL is 18; an existing 17 database moves to it automatically on the
+next `docker compose up` and its 17 volume is kept
+([PostgreSQL 18 upgrade](docs/REPLICAS.md#postgresql-18-upgrade)).
 
 ## First sign-in
 

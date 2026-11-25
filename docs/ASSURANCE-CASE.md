@@ -114,7 +114,7 @@ Out of scope: an attacker who runs code on the host or holds both the database a
 
 ## Evidence
 
-- **Tests:** the whole suite under the race detector on SQLite and again on PostgreSQL 17;
+- **Tests:** the whole suite under the race detector on SQLite and again on PostgreSQL 18;
   `authz_test.go` for route exposure; `scripts/smoke-test.sh` against the built binary; vitest
   and Chromium regressions against the production server for the UI.
 - **Static analysis:** CodeQL (`.github/workflows/codeql.yml`: Go, JavaScript/TypeScript, Actions) on every

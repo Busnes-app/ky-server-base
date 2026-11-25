@@ -117,10 +117,12 @@ What it sets up:
   All replicas share `./backups` as `/app/backups`: one archive of local capsules, written
   and pruned to `KY_BACKUP_KEEP` under the database-wide `backup-run` lock, listed the same
   by every replica, and kept across `down`/`up`, scaling and `docker volume prune`.
-- **PostgreSQL** (digest-pinned) keeps its data in its own `pgdata-replicas` volume, never
-  the base file's `pgdata`, which `--profile postgres` initializes with a public password. It
-  runs on an `internal` network with no route out and no host port; replicas wait for its
-  `pg_isready` healthcheck. `docker compose down -v` deletes that volume: the database.
+- **PostgreSQL 18** (digest-pinned) keeps its data in its own `postgres-replicas` volume,
+  never the base file's `postgres`, which `--profile postgres` initializes with a public
+  password. It runs on an `internal` network with no route out and no host port; replicas
+  wait for its `pg_isready` healthcheck. `docker compose down -v` deletes that volume, the
+  database, and the kept 17 volume `pgdata-replicas`. An existing 17 database moves to 18 on
+  the first `up` ([PostgreSQL 18 upgrade](#postgresql-18-upgrade)).
 - **HAProxy** (digest-pinned, `deploy/replicas/haproxy.cfg`) finds replicas through Docker's
   DNS (`server-template` with a resolver) and probes each one's `/readyz` every second; two
   failures take a replica out, two passes bring it back. A request whose connection failed
@@ -439,3 +441,58 @@ SQLite deployment. After PostgreSQL accepts writes, switching back to the old SQ
 file would lose those writes; stop and plan a reverse data migration instead. Stop all
 old-version replicas before upgrading security coordination; mixed old/new versions do
 not share the new rate limits or CAPTCHA replay records.
+
+## PostgreSQL 18 upgrade
+
+The bundled PostgreSQL (the base file's `--profile postgres` and the replica overlay) runs
+18. A 17 data directory never opens under 18, so the next `docker compose up` moves it by
+dump and restore, with nothing to run by hand:
+
+1. `postgres-17-dump`, a one-shot in the 17 image with no network, starts 17 on the old
+   volume (`pgdata`, or `pgdata-replicas` with the overlay) on a private socket, dumps every
+   database and role into `upgrade-from-17/` in the new volume (`postgres`, or
+   `postgres-replicas`) and exits. It reads the 17 data and never deletes or rewrites it;
+   starting 17 may replay its WAL, as any start does.
+2. `postgres` (18) waits for it, restores the dump into `18/docker.part`, renames it to
+   `18/docker` only when the restore finished, then starts normally. Roles and passwords are
+   the 17 ones; `POSTGRES_PASSWORD` is not applied to an upgraded cluster.
+
+Both steps are `scripts/postgres-17-to-18.sh`, which the compose files mount from this
+checkout; run compose from the checkout, as for the replica overlay's HAProxy file. Every later
+`up` is a no-op (`already done`). A fresh install has nothing to dump and initialises 18;
+Compose still creates the empty 17 volume. `scripts/test-postgres-17-to-18.sh base|replicas`
+proves this on real 17 data made by the previous compose files; CI runs both.
+
+- **Space:** the new volume needs about twice the 17 data free (the dump and the new
+  cluster), on the same Docker storage by default. The one-shot checks first and, when it is
+  short, refuses with the sizes and writes nothing; PostgreSQL then does not start. Free space
+  and run `up` again.
+- **Time:** proportional to the data; the test's 50,000 rows take seconds. The overlay's
+  healthcheck allows an hour before it counts failures, so the replicas wait instead of the
+  stack failing. Watch it with `docker compose logs -f postgres-17-dump postgres`.
+- **17 still in use:** the one-shot refuses while `postmaster.pid` is in the 17 data, that
+  is, while a 17 server runs on it (another project, a `docker run`, a `compose run`) or
+  after 17 was killed instead of stopped. Stop that server; after a crash, start 17 once
+  with the previous compose files and stop it cleanly. Then `up` again. A normal `up`
+  stops the old 17 container before the one-shot starts. Both PostgreSQL services allow
+  `stop_grace_period: 2m`, so Compose does not kill a 17 still writing its shutdown
+  checkpoint; stopping it by hand, give it the same (`docker stop -t 120`).
+- **A failed restore** (a damaged dump, a full disk) leaves no cluster: PostgreSQL exits and
+  restarts, retrying, and never comes up empty. Its log names the error.
+- **Rollback:** stop the stack, check out the previous commit's compose files
+  (`git checkout fed0fb34a0e58248f08780ad878ac626f1b906eb -- docker-compose.yml docker-compose.replicas.yml`)
+  and `up` again: 17 starts on the kept volume as it was before the upgrade. Writes made on
+  18 are not in it. If 17 then accepts writes, the 18 volume is out of date: before
+  upgrading again, back it up if you need it and remove it (`docker volume rm
+  <project>_postgres`, or `<project>_postgres-replicas`) so the next `up` dumps 17 afresh.
+- **Clean-up**, once 18 has run well and you have a backup: removing the 17 volume and the
+  dump is your choice, and nothing does it for you. The dump holds every row and password
+  hash, like the database itself.
+
+  ```sh
+  docker compose run --rm --no-deps --entrypoint rm postgres -r /var/lib/postgresql/upgrade-from-17
+  docker volume rm <project>_pgdata   # or <project>_pgdata-replicas
+  ```
+
+  Compose recreates an empty 17 volume on the next `up`; the one-shot then finds 18 in
+  place and exits.

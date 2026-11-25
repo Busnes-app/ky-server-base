@@ -37,8 +37,18 @@ services:
       postgres:
         condition: service_healthy
 
+  # The base file's one-shot, on this file's volumes: dumps pgdata-replicas (PostgreSQL 17)
+  # once into postgres-replicas and keeps it.
+  postgres-17-dump:
+    profiles: !reset []
+    environment:
+      POSTGRES_USER: ky_server
+    volumes: !override
+      - pgdata-replicas:/var/lib/postgresql/data
+      - postgres-replicas:/pg18
+      - ./scripts/postgres-17-to-18.sh:/ky/postgres-17-to-18.sh:ro
+
   postgres:
-    image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
     container_name: !reset null
     profiles: !reset []
     ports: !reset []
@@ -46,15 +56,18 @@ services:
       POSTGRES_USER: ky_server
       POSTGRES_PASSWORD: ${KY_POSTGRES_PASSWORD:?Set KY_POSTGRES_PASSWORD; there is no default}
       POSTGRES_DB: ky_server
-    # Not the base file's pgdata, which the postgres profile initializes with a public password.
+    # Not the base file's volumes, which the postgres profile initializes with a public password.
     volumes: !override
-      - pgdata-replicas:/var/lib/postgresql/data
+      - postgres-replicas:/var/lib/postgresql
+      - ./scripts/postgres-17-to-18.sh:/ky/postgres-17-to-18.sh:ro
     healthcheck:
-      # The entrypoint's temporary initialization server has only a Unix socket.
+      # The entrypoint's temporary initialization server has only a Unix socket, and so has
+      # the first start's restore from 17, which takes time in proportion to the data.
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ky_server", "-d", "ky_server"]
       interval: 2s
       timeout: 2s
       retries: 15
+      start_period: 1h
     networks:
       - database
 
@@ -75,7 +88,9 @@ services:
         ipv4_address: ${KY_PROXY_IP:?Set KY_PROXY_IP to the proxy address inside KY_REPLICA_SUBNET}
 
 volumes:
+  # PostgreSQL 17 data, kept after the upgrade for rollback; removing it is up to you.
   pgdata-replicas:
+  postgres-replicas:
 
 networks:
   replicas:
