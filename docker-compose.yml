@@ -83,12 +83,37 @@ services:
       - ./data:/app/data
       - ./backups:/app/backups
 
-  # Optional PostgreSQL service for enterprise heavy DB mode
+  # One-shot: dumps a PostgreSQL 17 pgdata volume once into the 18 volume, then exits.
+  # Reads pgdata, never deletes or rewrites it; a fresh install has nothing to dump.
+  # See docs/REPLICAS.md "PostgreSQL 18 upgrade".
+  postgres-17-dump:
+    image: postgres:17.12-alpine3.24@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    profiles: ["postgres"]
+    network_mode: none
+    restart: "no"
+    entrypoint: ["bash", "/ky/postgres-17-to-18.sh", "dump"]
+    environment:
+      POSTGRES_USER: postgres
+      OLD: /var/lib/postgresql/data
+      NEW: /pg18
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - postgres:/pg18
+      - ./scripts/postgres-17-to-18.sh:/ky/postgres-17-to-18.sh:ro
+
+  # Optional PostgreSQL service for enterprise heavy DB mode. Its entrypoint restores the
+  # one-shot's dump once (the cluster appears only when the restore finished), then runs
+  # the image's own entrypoint.
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18.7-alpine3.24@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
     container_name: ky_postgres
     restart: unless-stopped
     profiles: ["postgres"]
+    entrypoint: ["bash", "/ky/postgres-17-to-18.sh", "restore"]
+    command: ["postgres"]
+    depends_on:
+      postgres-17-dump:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
@@ -97,8 +122,13 @@ services:
     # host firewall. The app reaches it over the compose network.
     ports:
       - "127.0.0.1:5432:5432"
+    # 18 keeps its cluster in /var/lib/postgresql/18/docker and refuses any mount at
+    # /var/lib/postgresql/data.
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres:/var/lib/postgresql
+      - ./scripts/postgres-17-to-18.sh:/ky/postgres-17-to-18.sh:ro
 
 volumes:
+  # PostgreSQL 17 data, kept after the upgrade for rollback; removing it is up to you.
   pgdata:
+  postgres:

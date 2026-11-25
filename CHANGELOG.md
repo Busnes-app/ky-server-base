@@ -29,6 +29,33 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- The bundled PostgreSQL (base `--profile postgres` and `docker-compose.replicas.yml`) is
+  18.7, pinned by digest (the base file's was an unpinned `17-alpine`). Its data moves to a
+  new version-free volume mounted at `/var/lib/postgresql` (`postgres`, `postgres-replicas`).
+- An existing 17 database upgrades on the next `docker compose up`: a networkless one-shot in
+  the 17 image (`postgres-17-dump`) dumps the old volume once, and 18 restores it before its
+  first start, appearing only once the restore finished. The 17 volume is never deleted or
+  rewritten. The steps are the shared Ky kit, vendored as `scripts/postgres-17-to-18.sh`.
+- CI runs the Go suite against PostgreSQL 18 and gains `postgres-upgrade`
+  (`scripts/test-postgres-17-to-18.sh`): 17 data made by the previous compose files keeps
+  rows, roles, passwords and collation; rollback to 17, rerun, a bad dump and a fresh install
+  are covered. Dependabot ignores PostgreSQL major bumps.
+
+### Upgrade impact
+
+- Compose installs with PostgreSQL: the first `up` after this release dumps and restores the
+  17 database before the app can connect; it takes time in proportion to the data and needs
+  about twice the data size in free space (refused, with nothing written, when short). Run compose
+  from the checkout: the compose files mount `scripts/postgres-17-to-18.sh`.
+- Rollback is the previous compose files on the kept 17 volume. Removing the 17 volume and
+  the dump afterwards is manual ([PostgreSQL 18 upgrade](docs/REPLICAS.md#postgresql-18-upgrade)).
+- SQLite deployments, the app image and the schema are unchanged; no migration is needed.
+  External PostgreSQL servers are not touched; the app works with 17 and 18.
+
+## Archived source 2340ac81972eac80da2372aadb68f8ac8211fa23
+
+### Changes
+
 - Migration resolves relative SQLite sources before opening the recovery-key preflight,
   so the bare-binary default `./data/ky_server.db` works like an explicit absolute path.
 - Product scaffolding gives each generated server its own overridable KyRecovery service

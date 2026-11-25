@@ -93,7 +93,7 @@ func startProject(t *testing.T) *project {
 		image = "ky_server_base:local"
 	}
 	dir := t.TempDir()
-	for _, f := range []string{"docker-compose.yml", "docker-compose.replicas.yml", "deploy/replicas/haproxy.cfg"} {
+	for _, f := range []string{"docker-compose.yml", "docker-compose.replicas.yml", "deploy/replicas/haproxy.cfg", "scripts/postgres-17-to-18.sh"} {
 		raw, err := os.ReadFile(filepath.Join("..", f))
 		if err != nil {
 			t.Fatal(err)
@@ -107,6 +107,9 @@ func startProject(t *testing.T) *project {
 	}
 	// The haproxy user in its image must read the config.
 	if err := os.Chmod(filepath.Join(dir, "deploy/replicas/haproxy.cfg"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "scripts/postgres-17-to-18.sh"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	octet := 200 + int(secret(1)[0]%50)
