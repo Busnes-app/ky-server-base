@@ -1,3 +1,0 @@
-# scripts/postgres-17-to-18.sh sources the postgres image's entrypoint, which exists only
-# inside the container; that script is vendored byte for byte and is not edited here.
-disable=SC1091

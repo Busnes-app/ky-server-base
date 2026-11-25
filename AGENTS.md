@@ -112,8 +112,9 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
 
 - `postgres-upgrade`: `scripts/test-postgres-17-to-18.sh base` and `replicas` make real
   PostgreSQL 17 data with the compose files of the last 17 commit (`PREV`), then prove the
-  current files' automatic upgrade: rows, roles, passwords and collation kept, the 17 volume
-  untouched and 17 still starting on it, rerun a no-op, a bad dump never yields a cluster, a
+  current files' automatic upgrade over a running 17: rows, roles, passwords (from a second
+  container, a wrong one refused) and collation kept, a dump beside a live 17 refused, the
+  17 volume untouched and 17 still starting on it, rerun a no-op, a bad dump never yields a cluster, a
   fresh install initialises. `scripts/postgres-17-to-18.sh` is the shared Ky upgrade kit,
   vendored byte for byte (`check-replicas-compose.py` pins its checksum); never edit it here.
   It is in `publish.needs`.

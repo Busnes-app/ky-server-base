@@ -35,11 +35,13 @@ These are human summaries, not a raw version-control log.
 - An existing 17 database upgrades on the next `docker compose up`: a networkless one-shot in
   the 17 image (`postgres-17-dump`) dumps the old volume once, and 18 restores it before its
   first start, appearing only once the restore finished. The 17 volume is never deleted or
-  rewritten. The steps are the shared Ky kit, vendored as `scripts/postgres-17-to-18.sh`.
+  rewritten, and the one-shot refuses while a 17 server still runs on it. The steps are the
+  shared Ky kit, vendored as `scripts/postgres-17-to-18.sh`.
 - CI runs the Go suite against PostgreSQL 18 and gains `postgres-upgrade`
   (`scripts/test-postgres-17-to-18.sh`): 17 data made by the previous compose files keeps
-  rows, roles, passwords and collation; rollback to 17, rerun, a bad dump and a fresh install
-  are covered. Dependabot ignores PostgreSQL major bumps.
+  rows, roles, passwords (checked from another container, a wrong one refused) and
+  collation when upgraded over the running 17; a dump beside a live 17, rollback to 17,
+  rerun, a bad dump and a fresh install are covered. Dependabot ignores PostgreSQL major bumps.
 
 ### Upgrade impact
 

@@ -470,6 +470,11 @@ proves this on real 17 data made by the previous compose files; CI runs both.
 - **Time:** proportional to the data; the test's 50,000 rows take seconds. The overlay's
   healthcheck allows an hour before it counts failures, so the replicas wait instead of the
   stack failing. Watch it with `docker compose logs -f postgres-17-dump postgres`.
+- **17 still in use:** the one-shot refuses while `postmaster.pid` is in the 17 data, that
+  is, while a 17 server runs on it (another project, a `docker run`, a `compose run`) or
+  after 17 was killed instead of stopped. Stop that server; after a crash, start 17 once
+  with the previous compose files and stop it cleanly. Then `up` again. A normal `up`
+  stops the old 17 container before the one-shot starts.
 - **A failed restore** (a damaged dump, a full disk) leaves no cluster: PostgreSQL exits and
   restarts, retrying, and never comes up empty. Its log names the error.
 - **Rollback:** stop the stack, check out the previous commit's compose files
