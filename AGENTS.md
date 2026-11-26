@@ -96,6 +96,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull request (drafts skip until marked ready):
 - `make lint` equivalent: gofmt, `go vet`, `go mod tidy`/`verify`
+- `scripts/check-pqc-tls.sh`: refuses `CurvePreferences` in non-test Go code and `tlsmlkem` overrides across non-test code, `go.mod`, workflows, Dockerfiles, Compose files and scripts, and runs `TestOIDCOutboundPQTLS` under both default and `GODEBUG=fips140=on`
 - `go test -race` with coverage on SQLite, and the same suite against PostgreSQL 18
 - Frontend vitest suite, then typecheck/build plus a check that committed `web/dist` matches source (it is embedded in the binary)
 - `govulncheck` and `npm run audit`: strict production audit plus full high/critical audit,
@@ -120,7 +121,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
   the shared Ky upgrade kit, vendored byte for byte (`check-replicas-compose.py` pins its checksum); never edit it here.
   It is in `publish.needs`.
 
-Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available and `make test-replicas` (Docker) for the replica failure tests.
+Run the same checks locally with `make ci` (`notes-check tidy-check lint pqc-tls-check test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available and `make test-replicas` (Docker) for the replica failure tests.
 Release changes require a new Current source summary and upgrade impact in
 `CHANGELOG.md`, including dependency, CI and documentation-only publications.
 Archive the previous shipped summary under its known commit. `make notes-check`
