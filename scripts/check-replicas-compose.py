@@ -21,7 +21,7 @@ required = {
 # vendored byte for byte from the shared upgrade kit).
 PG18 = "postgres:18.7-alpine3.24@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71"
 PG17 = "postgres:17.12-alpine3.24@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73"
-KIT_SHA256 = "2992644109716cd34297fbcb76eba8907f4a5e3031a12c05aade010e5ea2b571"
+KIT_SHA256 = "195ae8684e34dd515158a88b1f76b918cf6e3f3c854ce83fe4fb190a5178cf06"
 kit = root / "scripts" / "postgres-17-to-18.sh"
 assert hashlib.sha256(kit.read_bytes()).hexdigest() == KIT_SHA256, f"{kit} differs from the upgrade kit"
 assert kit.stat().st_mode & 0o777 == 0o755, f"{kit} is not mode 755"

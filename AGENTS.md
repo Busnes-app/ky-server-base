@@ -114,9 +114,10 @@ CI (`.github/workflows/ci.yml`) runs on every push and every non-draft pull requ
   PostgreSQL 17 data with the compose files of the last 17 commit (`PREV`), then prove the
   current files' automatic upgrade over a running 17: rows, roles, passwords (from a second
   container, a wrong one refused) and collation kept, a dump beside a live 17 refused, the
-  17 volume untouched and 17 still starting on it, rerun a no-op, a bad dump never yields a cluster, a
-  fresh install initialises. `scripts/postgres-17-to-18.sh` is the shared Ky upgrade kit,
-  vendored byte for byte (`check-replicas-compose.py` pins its checksum); never edit it here.
+  17 volume untouched and 17 still starting on it; after a rollback that wrote on 17, 18 refused
+  until the "move again" or "keep 18" step, also after the dump's clean-up; rerun a no-op, a bad
+  dump never yields a cluster, a fresh install initialises. `scripts/postgres-17-to-18.sh` is
+  the shared Ky upgrade kit, vendored byte for byte (`check-replicas-compose.py` pins its checksum); never edit it here.
   It is in `publish.needs`.
 
 Run the same checks locally with `make ci` (`notes-check tidy-check lint test-race test-web audit-web smoke`); add `make test-postgres` when a Postgres instance is available and `make test-replicas` (Docker) for the replica failure tests.
