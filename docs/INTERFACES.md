@@ -1,5 +1,7 @@
 # External interface reference
 
+[Overview](../README.md) · [Backups and disaster recovery](DISASTER-RECOVERY.md) · [Restore runbook](RESTORE.md) · [Replicas](REPLICAS.md)
+
 This describes the HTTP, command-line and environment interfaces of this scaffold.
 Derived products can add routes and settings; consult their own references as well.
 HTTP routing lives in [server.go](../internal/api/server.go), with handlers linked

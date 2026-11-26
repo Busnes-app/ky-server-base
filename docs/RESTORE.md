@@ -1,5 +1,7 @@
 # Restoring a Busnes.app server from a capsule
 
+[Overview](../README.md) · [Backups and disaster recovery](DISASTER-RECOVERY.md) · [Replicas](REPLICAS.md)
+
 This is the procedure for bringing a server built on this scaffold back from a `.kycap`
 backup after the original is gone. It needs three things, held by three different parties by
 design:
