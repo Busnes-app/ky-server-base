@@ -482,12 +482,26 @@ proves this on real 17 data made by the previous compose files; CI runs both.
 - **Rollback:** stop the stack, check out the previous commit's compose files
   (`git checkout fed0fb34a0e58248f08780ad878ac626f1b906eb -- docker-compose.yml docker-compose.replicas.yml`)
   and `up` again: 17 starts on the kept volume as it was before the upgrade. Writes made on
-  18 are not in it. If 17 then accepts writes, the 18 volume is out of date: before
-  upgrading again, back it up if you need it and remove it (`docker volume rm
-  <project>_postgres`, or `<project>_postgres-replicas`) so the next `up` dumps 17 afresh.
-- **Clean-up**, once 18 has run well and you have a backup: removing the 17 volume and the
-  dump is your choice, and nothing does it for you. The dump holds every row and password
-  hash, like the database itself.
+  18 are not in it.
+- **Back to 18 after a rollback:** check out the current compose files and `up`. If 17 ran
+  since the move (any start writes a new checkpoint), the one-shot exits with an error saying
+  `PostgreSQL 17 has run on ... since it was moved to 18`, and PostgreSQL does not start, so
+  18 never comes up silently without what 17 wrote. Choose one, then `up` again; nothing is
+  deleted either way:
+  - **Move 17 again** (keeps what 17 wrote): stop the stack and rename the 18 cluster and the
+    dump with a suffix. The next `up` dumps 17 afresh; the old 18 stays as `18.replaced`.
+
+    ```sh
+    docker compose run --rm --no-deps --entrypoint sh postgres -c \
+      'cd /var/lib/postgresql && mv 18 18.replaced && { [ ! -e upgrade-from-17 ] || mv upgrade-from-17 upgrade-from-17.replaced; }'
+    ```
+
+  - **Keep 18 as it is** (drops what 17 wrote since the move):
+    `docker compose run --rm --no-deps --entrypoint rm postgres /var/lib/postgresql/18/moved-from-17.checkpoint`.
+- **Clean-up**, once 18 has run well and you have a backup: removing the dump and the 17
+  volume is your choice, and nothing does it for you. The dump holds every row and password
+  hash, like the database itself. Removing the dump is safe on its own: 18 keeps starting,
+  and a later rollback to 17 is still caught. Removing the 17 volume ends the rollback.
 
   ```sh
   docker compose run --rm --no-deps --entrypoint rm postgres -r /var/lib/postgresql/upgrade-from-17
