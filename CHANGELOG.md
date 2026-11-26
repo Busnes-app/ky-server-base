@@ -29,6 +29,7 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Documentation cleanup: normalized `README.md` heading and quick-start sections, added missing documentation links and breadcrumbs, and removed stale UI verification logs, captures, and interop spike notes.
 - The PostgreSQL 17 to 18 upgrade catches a rollback: if 17 ran after the move, the next
   `up` with these compose files refuses (the `postgres-17-dump` one-shot exits with an error
   and PostgreSQL does not start) instead of starting the older 18 without what 17 wrote. The
