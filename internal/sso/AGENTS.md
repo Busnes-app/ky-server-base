@@ -39,6 +39,10 @@ Owns the application adapters around OAuth/OIDC login, verified back-channel log
   metadata policy and refusal of a trusted RSA-1024 TLS peer.
 - `TestOIDCJWKMemberParsingMatchesVerifier` uses real RSA signatures in both
   adapters to check case variants, member order, and strong-key acceptance.
+- `TestOIDCOutboundPQTLS` drives both OIDC adapters (discovery, token exchange
+  and JWKS fetch) against a loopback TLS 1.3 server and asserts `X25519MLKEM768`
+  via `ky-primitives/pqtls.RequireHybrid` in both ordinary and
+  `GODEBUG=fips140=on` modes (`scripts/check-pqc-tls.sh`).
 
 ## Child DOX Index
 None.

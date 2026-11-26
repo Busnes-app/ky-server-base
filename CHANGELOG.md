@@ -29,6 +29,25 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Adopt `github.com/Busnes-app/ky-primitives` `v0.11.0` (`pqtls.RequireHybrid`).
+- Add `TestOIDCOutboundPQTLS` in `internal/sso` to verify that outbound OIDC discovery, token
+  exchange, and JWKS fetches negotiate hybrid post-quantum TLS 1.3 (`X25519MLKEM768`) against
+  a loopback TLS 1.3 server in both default and `GODEBUG=fips140=on` modes.
+- Add `scripts/check-pqc-tls.sh` and wire it into CI (`go` job) and `make ci` to refuse
+  `CurvePreferences` in non-test Go code, refuse `tlsmlkem` overrides in non-test code,
+  `go.mod`, workflows, Dockerfiles, Compose files and scripts, and run the PQ TLS test in
+  both default and `GODEBUG=fips140=on` modes.
+
+### Upgrade impact
+
+- No operator configuration or data migration is required; runtime behavior is unchanged and
+  Go's default hybrid post-quantum TLS 1.3 key exchange (`X25519MLKEM768`) is now guarded by
+  CI tests and static checks.
+
+## Archived source efd0633c46994680d0fc1ff01c9813ee9a4465d7
+
+### Changes
+
 - Documentation cleanup: normalized `README.md` heading and quick-start sections, added missing documentation links and breadcrumbs, and removed stale UI verification logs, captures, and interop spike notes.
 - The PostgreSQL 17 to 18 upgrade catches a rollback: if 17 ran after the move, the next
   `up` with these compose files refuses (the `postgres-17-dump` one-shot exits with an error

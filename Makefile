@@ -1,4 +1,4 @@
-.PHONY: all build build-web test test-race test-postgres test-replicas test-web tidy-check lint smoke ci run clean docker-build notes-check audit-web
+.PHONY: all build build-web test test-race test-postgres test-replicas test-web tidy-check lint pqc-tls-check smoke ci run clean docker-build notes-check audit-web
 
 all: build-web build
 
@@ -49,6 +49,10 @@ lint:
 	@test -z "$$(gofmt -l $$(git ls-files '*.go'))" || { echo "gofmt needed:"; gofmt -l $$(git ls-files '*.go'); exit 1; }
 	@go vet ./...
 
+pqc-tls-check:
+	@echo "==> Checking post-quantum hybrid TLS guard..."
+	@./scripts/check-pqc-tls.sh
+
 smoke: build
 	@python3 -B -m unittest discover -s scripts -p test_ky_init.py
 	@./scripts/smoke-test.sh
@@ -57,7 +61,7 @@ notes-check:
 	@python3 -B -m unittest discover -s scripts -p test_release_notes.py
 	@python3 scripts/check-release-notes.py
 
-ci: notes-check tidy-check lint test-race test-web audit-web smoke
+ci: notes-check tidy-check lint pqc-tls-check test-race test-web audit-web smoke
 	@echo "==> Local CI checks passed"
 
 run: build
