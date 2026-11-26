@@ -2,8 +2,9 @@
 # Proves this repo's compose files move real PostgreSQL 17 data to 18 on `up`: 17 data made
 # by the previous compose files keeps its rows, roles, passwords and collation, upgrading over
 # the running 17; a dump beside a live 17 is refused; the 17 volume is untouched and 17 still
-# starts on it; a rerun is a no-op; a bad dump never yields an empty cluster; a fresh install
-# initialises. Needs Docker and git.
+# starts on it; after a rollback that wrote on 17, 18 is refused until the operator moves 17
+# again or keeps 18, also after the dump was cleaned up; a rerun is a no-op; a bad dump never
+# yields an empty cluster; a fresh install initialises. Needs Docker and git.
 # usage: test-postgres-17-to-18.sh base|replicas
 set -Eeuo pipefail
 mode=${1:?base|replicas}
@@ -59,6 +60,16 @@ q18() {
 logs() { dc new logs --no-color "$1" 2>&1; }
 # A shell on one volume, through the service that mounts it, without starting PostgreSQL.
 in_vol() { dc "$1" run --rm --no-deps -T --entrypoint sh postgres -c "$2"; }
+start17() { { dc old up -d postgres >/dev/null 2>&1 && wait_ready old; } || fail "$1"; }
+up18() { { dc new up -d postgres >/dev/null 2>&1 && wait_ready new; } || fail "$1"; }
+# The one-shot refuses a 17 that ran after the move, with the operator's two choices, and 18
+# does not start.
+refused() {
+  dc new up -d postgres >/dev/null 2>&1 && fail "$1"
+  grep -q 'has run on .* since it was moved to 18' <<<"$(logs postgres-17-dump)" || fail "no rollback message: $(logs postgres-17-dump)"
+  [ -z "$(dc new ps -q postgres)" ] || fail "$1 (postgres is running)"
+  dc new down -t 30 >/dev/null 2>&1
+}
 
 # 1. Real 17 data, made by the previous compose files.
 dc old up -d postgres >/dev/null 2>&1 || fail "previous compose did not start"
@@ -97,20 +108,45 @@ q18 'select 1' ky_server wrong-password >/dev/null 2>&1 && fail "a wrong passwor
 [ "$(q18 "select datcollate from pg_database where datname = 'cdb'")" = C ] || fail "database locale"
 [ "$(in_vol old 'cat /var/lib/postgresql/data/PG_VERSION')" = 17 ] || fail "17 data changed"
 
-# 3. Rollback: the previous compose files still start 17 on the kept volume.
+# 3. Rollback: the previous compose files still start 17 on the kept volume, and it takes writes.
 dc new down -t 30 >/dev/null 2>&1
-dc old up -d postgres >/dev/null 2>&1 || fail "previous compose did not start again"
-wait_ready old || fail "17 no longer starts on its data"
+start17 "previous compose did not start again"
 [ "$(dc old exec -T postgres psql -U "$U" -d ky_server -XAtc 'select count(*) from t')" = 50000 ] || fail "17 rows after rollback"
+dc old exec -T postgres psql -U "$U" -d ky_server -XAtqc "insert into t(s) values ('written on 17 after the move')" || fail "write on 17"
 dc old down -t 30 >/dev/null 2>&1
+# 3b. Back to the current files: 17 ran after the move, so 18 must not start on the older copy.
+refused "18 started without the row written on 17 during the rollback"
+# 3c. The documented "move again": rename 18/ and the dump, then up; 18 gets the new row.
+in_vol new 'cd /var/lib/postgresql && mv 18 18.replaced && mv upgrade-from-17 upgrade-from-17.replaced'
+up18 "18 did not start after moving again"
+grep -q 'postgres-17-to-18: dumped' <<<"$(logs postgres-17-dump)" || fail "moving again did not dump"
+[ "$(q18 'select count(*) from t')" = 50001 ] || fail "moving again lost the row written on 17"
+in_vol new 'test -s /var/lib/postgresql/18.replaced/docker/PG_VERSION' || fail "the replaced 18 cluster is gone"
+dc new down -t 30 >/dev/null 2>&1
 
 # 4. Rerun is a no-op.
-dc new up -d postgres >/dev/null 2>&1 || fail "18 did not start again"
-wait_ready new || fail "18 did not restart"
+up18 "18 did not start again"
 grep -q 'already done' <<<"$(logs postgres-17-dump)" || fail "rerun dumped again"
 grep -q 'restored' <<<"$(logs postgres)" && fail "rerun restored again"
-[ "$(q18 'select count(*) from t')" = 50000 ] || fail "rows after rerun"
+[ "$(q18 'select count(*) from t')" = 50001 ] || fail "rows after rerun"
 dc new down -t 30 >/dev/null 2>&1
+
+# 4b. "Keep 18" after a rollback: delete the checkpoint marker, then up.
+start17 "17 did not start for the keep-18 check"; dc old down -t 30 >/dev/null 2>&1
+refused "18 started after a rollback (keep-18 check)"
+in_vol new 'rm /var/lib/postgresql/18/moved-from-17.checkpoint'
+up18 "keep 18 was not accepted"
+[ "$(q18 'select count(*) from t')" = 50001 ] || fail "rows after keep 18"
+dc new down -t 30 >/dev/null 2>&1
+
+# 4c. The documented clean-up removes the dump and keeps 17: 18 still starts, and a rollback
+# after it is still refused. The dump is moved aside, not removed, for step 5.
+in_vol new 'mv /var/lib/postgresql/upgrade-from-17 /var/lib/postgresql/upgrade-from-17.kept'
+up18 "18 did not start after the documented clean-up"
+dc new down -t 30 >/dev/null 2>&1
+start17 "17 did not start for the clean-up check"; dc old down -t 30 >/dev/null 2>&1
+refused "after the clean-up, 18 started without what 17 wrote since"
+in_vol new 'cd /var/lib/postgresql && rm 18/moved-from-17.checkpoint && mv upgrade-from-17.kept upgrade-from-17'
 
 # 5. A dump that fails to restore never yields an empty cluster, however often it restarts.
 in_vol new 'mv /var/lib/postgresql/18/docker /var/lib/postgresql/18/docker.saved && echo "THIS IS NOT SQL;" >> /var/lib/postgresql/upgrade-from-17/dump.sql'
@@ -130,4 +166,4 @@ wait_ready new || fail "fresh 18 did not start"
 grep -q 'nothing to move' <<<"$(logs postgres-17-dump)" || fail "fresh install did not skip the dump"
 grep -q 'restored' <<<"$(logs postgres)" && fail "fresh install restored something"
 [ "$(q18 'show data_directory')" = /var/lib/postgresql/18/docker ] || fail "fresh data directory"
-echo "PASS ($mode): live 17 refused, upgrade over a running 17, rollback to 17, rerun, bad dump, fresh install"
+echo "PASS ($mode): live 17 refused, upgrade over a running 17, rollback to 17, refused re-upgrade, move again, rerun, keep 18, clean-up, bad dump, fresh install"

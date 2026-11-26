@@ -1,18 +1,26 @@
-# ky_server_base
+# ky-server-base
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15937/badge)](https://www.bestpractices.dev/projects/15937)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Busnes-app/ky-server-base/badge)](https://scorecard.dev/viewer/?uri=github.com/Busnes-app/ky-server-base)
 
 The scaffold every Busnes.app server is built from: Go backend, embedded React PWA, SQLite or
 PostgreSQL, local and federated sign-in (KySignOn, OIDC, SAML), SCIM provisioning, and
-disaster recovery through the suite's KyRecovery.
+disaster recovery through the suite's KyRecovery. (The Go binary and local container tag use
+the legacy `ky_server_base` identifier.)
+
+## Quick start
 
 Published image (Docker Compose 2.24.0 or later):
 
 ```bash
-make ci        # gofmt, vet, race tests, smoke test
-make run       # build and start on :8080; first start prints the bootstrap admin password
 docker compose up -d
+```
+
+Local development (build, test, and run on `:8080`; first start prints the bootstrap admin password):
+
+```bash
+make ci        # gofmt, vet, race tests, smoke test
+make run       # build and start on :8080
 ```
 
 Source install (never paste this into a published-image install: the build overlay wins over a
@@ -22,8 +30,6 @@ this block once and confirm with `docker compose config --images`, which must pr
 `ky_server_base:local` rather than the `ghcr.io` name):
 
 ```bash
-make ci        # gofmt, vet, race tests, smoke test
-make run       # build and start on :8080; first start prints the bootstrap admin password
 (umask 077; t=$(mktemp ./.env.XXXXXX) && touch .env \
   && cf=$({ grep '^COMPOSE_FILE=' .env || [ $? -eq 1 ]; } | tail -n1 | cut -d= -f2-) && cf=${cf:-docker-compose.yml} \
   && case ":$cf:" in *:docker-compose.build.yml:*) ;; *) cf="$cf:docker-compose.build.yml";; esac \
@@ -85,17 +91,19 @@ The GitHub organisation was renamed on 2026-09-16 and the image now lives at `gh
 
 ## License
 
-ky_server_base is released under the [MIT License](LICENSE.txt).
+ky-server-base is released under the [MIT License](LICENSE.txt).
 
 [![OctoCounts](https://api.octocounts.com/badge/Busnes-app/ky-server-base/branch/master)](https://octocounts.com/github/Busnes-app/ky-server-base/tree/master)
 
 ## Documentation
 
 - [Container networking](docs/CONTAINER-IP.md) — give the app a static IP on the Docker network. <a id="container-ip-address"></a>
+- [SQLite, PostgreSQL and replicas](docs/REPLICAS.md) — replica topology, failover, and SQLite-to-PostgreSQL migration.
 - [Backups and disaster recovery](docs/DISASTER-RECOVERY.md) — sealed backup capsules, KyRecovery pairing, every `KY_BACKUP_*` variable and the LAN DNS override. <a id="disaster-recovery"></a><a id="two-ways-to-get-a-key"></a><a id="why-tls-matters-here"></a><a id="one-run-every-destination"></a><a id="environment"></a><a id="upgrading-from-plaintext-local-backups"></a><a id="restoring"></a>
 - [Interfaces](docs/INTERFACES.md) — the HTTP, command-line and environment reference.
 - [Restore](docs/RESTORE.md) — bring a server back from a recovery capsule.
 - [Strong keys](docs/STRONG-CRYPTO.md) — the supported strong-key configuration.
+- [Frontend dependency audit](docs/NPM-AUDIT.md) — npm audit gate scope and temporary advisory exception.
 - [Assurance case](docs/ASSURANCE-CASE.md) — threat model, trust boundaries, and why the security requirements are met.
 - [Contributing](CONTRIBUTING.md) — how to propose a change and what it must pass.
 - [Security policy](SECURITY.md) — how to report a vulnerability privately.

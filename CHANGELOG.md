@@ -29,6 +29,28 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
+- Documentation cleanup: normalized `README.md` heading and quick-start sections, added missing documentation links and breadcrumbs, and removed stale UI verification logs, captures, and interop spike notes.
+- The PostgreSQL 17 to 18 upgrade catches a rollback: if 17 ran after the move, the next
+  `up` with these compose files refuses (the `postgres-17-dump` one-shot exits with an error
+  and PostgreSQL does not start) instead of starting the older 18 without what 17 wrote. The
+  error names two operator choices: rename `18/` to move 17 again, or delete
+  `18/moved-from-17.checkpoint` to keep 18. Removing the dump (`upgrade-from-17/`) keeps 18
+  starting and the rollback check armed. Vendored kit v4 (`scripts/postgres-17-to-18.sh`).
+- `scripts/test-postgres-17-to-18.sh` covers the refused re-upgrade, both choices and the
+  clean-up, on the repo's compose files.
+
+### Upgrade impact
+
+- Installs that already run 18: the first `up` records 17's current checkpoint (no data is
+  written to 17). A rollback that wrote on 17 before this release is not detected; check
+  that 18 holds what you expect if you rolled back.
+- A rollback followed by `up` now stops at the one-shot until you choose
+  ([PostgreSQL 18 upgrade](docs/REPLICAS.md#postgresql-18-upgrade)). Nothing else changes.
+
+## Archived source eceb24ebfaf6a8ed543754659fb975331c5bb6b3
+
+### Changes
+
 - The bundled PostgreSQL (base `--profile postgres` and `docker-compose.replicas.yml`) is
   18.7, pinned by digest (the base file's was an unpinned `17-alpine`). Its data moves to a
   new version-free volume mounted at `/var/lib/postgresql` (`postgres`, `postgres-replicas`).

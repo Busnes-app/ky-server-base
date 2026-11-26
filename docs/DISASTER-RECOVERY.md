@@ -114,7 +114,7 @@ directory in the clear.
 
 ### Restoring
 
-`docs/RESTORE.md` is the runbook: opening a capsule with the custodians' cards, putting the
+[docs/RESTORE.md](RESTORE.md) is the runbook: opening a capsule with the custodians' cards, putting the
 result in service, and what to distrust afterwards. Drill it once a quarter with real cards.
 A restored copy starts with scheduled deposits off; turn them on once it is the server in
 service.
