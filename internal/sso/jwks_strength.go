@@ -110,8 +110,13 @@ type remoteJWKSKeySet struct {
 	cachedKeys  []jose.JSONWebKey
 	lastRefresh time.Time
 	expiresAt   time.Time
+	inflight    *jwksRefreshCall
+}
 
-	fetchMu sync.Mutex
+type jwksRefreshCall struct {
+	done chan struct{}
+	keys []jose.JSONWebKey
+	err  error
 }
 
 func newRemoteJWKSKeySet(jwksURL string, client *http.Client, algs []string) *remoteJWKSKeySet {
@@ -186,18 +191,57 @@ func (r *remoteJWKSKeySet) snapshot() ([]jose.JSONWebKey, time.Time, bool) {
 }
 
 func (r *remoteJWKSKeySet) refresh(ctx context.Context, prevFetchedAt time.Time) ([]jose.JSONWebKey, error) {
-	r.fetchMu.Lock()
-	defer r.fetchMu.Unlock()
-
-	// Reuse a refresh that another goroutine just completed while we waited.
-	r.mu.RLock()
+	r.mu.Lock()
 	if !r.lastRefresh.IsZero() && r.lastRefresh.After(prevFetchedAt) && time.Now().Before(r.expiresAt) {
 		keys := r.cachedKeys
-		r.mu.RUnlock()
+		r.mu.Unlock()
 		return keys, nil
 	}
-	r.mu.RUnlock()
+	if call := r.inflight; call != nil {
+		r.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.keys, call.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	call := &jwksRefreshCall{done: make(chan struct{})}
+	r.inflight = call
+	r.mu.Unlock()
 
+	go func() {
+		timeout := r.client.Timeout
+		if timeout <= 0 {
+			timeout = 15 * time.Second
+		}
+		fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		keys, err := r.fetchKeys(fetchCtx)
+
+		r.mu.Lock()
+		if err == nil {
+			now := time.Now()
+			r.cachedKeys = keys
+			r.lastRefresh = now
+			r.expiresAt = now.Add(maxJWKSCacheTTL)
+		}
+		r.inflight = nil
+		call.keys = keys
+		call.err = err
+		close(call.done)
+		r.mu.Unlock()
+	}()
+
+	select {
+	case <-call.done:
+		return call.keys, call.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *remoteJWKSKeySet) fetchKeys(ctx context.Context) ([]jose.JSONWebKey, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.jwksURL, nil)
 	if err != nil {
 		return nil, err
@@ -246,12 +290,5 @@ func (r *remoteJWKSKeySet) refresh(ctx context.Context, prevFetchedAt time.Time)
 		}
 		keys = append(keys, jwk)
 	}
-
-	now := time.Now()
-	r.mu.Lock()
-	r.cachedKeys = keys
-	r.lastRefresh = now
-	r.expiresAt = now.Add(maxJWKSCacheTTL)
-	r.mu.Unlock()
 	return keys, nil
 }
