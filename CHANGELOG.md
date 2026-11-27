@@ -29,20 +29,20 @@ These are human summaries, not a raw version-control log.
 
 ### Changes
 
-- Adopt `github.com/Busnes-app/ky-primitives` `v0.11.0` (`pqtls.RequireHybrid`).
-- Add `TestOIDCOutboundPQTLS` in `internal/sso` to verify that outbound OIDC discovery, token
-  exchange, and JWKS fetches negotiate hybrid post-quantum TLS 1.3 (`X25519MLKEM768`) against
-  a loopback TLS 1.3 server in both default and `GODEBUG=fips140=on` modes.
-- Add `scripts/check-pqc-tls.sh` and wire it into CI (`go` job) and `make ci` to refuse
-  `CurvePreferences` in non-test Go code, refuse `tlsmlkem` overrides in non-test code,
-  `go.mod`, workflows, Dockerfiles, Compose files and scripts, and run the PQ TLS test in
-  both default and `GODEBUG=fips140=on` modes.
+- Upgrade Go toolchain to `1.27.0` and `github.com/go-jose/go-jose/v4` to `v4.1.9` to support
+  RFC 9964 `ML-DSA-65` (`kty:"AKP"`) OIDC ID token and back-channel logout token verification
+  alongside classical RSA, ECDSA, and EdDSA algorithms.
+- Add `remoteJWKSKeySet` in `internal/sso` with context-aware singleflight refresh, 5-minute
+  cache TTL, `use:"sig"` filtering, and `ML-DSA-65` `kid` and public-key length validation on
+  top of `strongJWKSTransport` and `spacedTransport`.
+- Add `internal/sso/mldsa_test.go` covering `ML-DSA-65` ID tokens, back-channel logout tokens,
+  mixed RSA + AKP JWKS validation, tampered signatures, and cross-algorithm `kid` confusion.
 
 ### Upgrade impact
 
-- No operator configuration or data migration is required; runtime behavior is unchanged and
-  Go's default hybrid post-quantum TLS 1.3 key exchange (`X25519MLKEM768`) is now guarded by
-  CI tests and static checks.
+- No operator configuration or data migration is required; existing RS256 OIDC providers
+  continue working unchanged, and relying parties now accept `ML-DSA-65` tokens once enabled
+  on KyIdentity.
 
 ## Archived source efd0633c46994680d0fc1ff01c9813ee9a4465d7
 
